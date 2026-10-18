@@ -16,6 +16,10 @@ interface DeepZoomViewerProps {
   fullHeight?: boolean;
   height?: string | number;
   disableZoom?: boolean;
+  /** Keep the current pan/zoom when `imageUrl` changes instead of re-fitting, for live-updating previews. */
+  preserveViewport?: boolean;
+  onLoad?: () => void;
+  onError?: () => void;
 }
 
 if (typeof window !== 'undefined') {
@@ -32,12 +36,14 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(style);
 }
 
-export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false }: DeepZoomViewerProps) {
+export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError }: DeepZoomViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdViewer = useRef<OpenSeadragon.Viewer | null>(null);
   const overlayElements = useRef<HTMLDivElement[]>([]);
   const [viewerReady, setViewerReady] = useState(false);
   const [currentZoom, setCurrentZoom] = useState(1);
+  const pendingViewportRef = useRef<{ zoom: number; center: OpenSeadragon.Point } | null>(null);
+  const viewerOpenRef = useRef(false);
   
   // Store the home position and zoom for full height mode
   const homePositionRef = useRef<{ center: any; zoom: number } | null>(null);
@@ -52,6 +58,8 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     setViewerReady(false);
     if (!viewerRef.current) return;
     if (osdViewer.current) {
+      // The previous effect's cleanup (below) already captured the viewport and destroyed
+      // this instance before this body ran; this is just a defensive fallback.
       osdViewer.current.destroy();
       osdViewer.current = null;
     }
@@ -97,14 +105,28 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
       setCurrentZoom(event.zoom);
     });
     
+    osdViewer.current.addHandler("open-failed", () => {
+      onError?.();
+    });
+
     osdViewer.current.addHandler("open", () => {
       setViewerReady(true);
+      viewerOpenRef.current = true;
+      onLoad?.();
+      if (preserveViewport && pendingViewportRef.current) {
+        const { zoom, center } = pendingViewportRef.current;
+        osdViewer.current!.viewport.zoomTo(zoom, undefined, true);
+        osdViewer.current!.viewport.panTo(center, true);
+        pendingViewportRef.current = null;
+        setTimeout(() => addOverlays(), 500);
+        return;
+      }
       // Log image content size
       const tiledImage = osdViewer.current!.world.getItemAt(0);
       if (tiledImage) {
         const size = tiledImage.getContentSize();
         console.log('OpenSeadragon image content size:', size);
-        
+
         // If in full height mode, fit the image to the viewport
         if (fullHeight) {
           setTimeout(() => {
@@ -169,11 +191,18 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     });
     return () => {
       if (osdViewer.current) {
+        if (preserveViewport && viewerOpenRef.current) {
+          pendingViewportRef.current = {
+            zoom: osdViewer.current.viewport.getZoom(),
+            center: osdViewer.current.viewport.getCenter(),
+          };
+        }
+        viewerOpenRef.current = false;
         osdViewer.current.destroy();
         osdViewer.current = null;
       }
     };
-  }, [imageUrl, onZoom, fullHeight, disableZoom]);
+  }, [imageUrl, onZoom, fullHeight, disableZoom, preserveViewport, onLoad, onError]);
 
   // Function to add overlays
   const addOverlays = useCallback(() => {

@@ -131,6 +131,13 @@ app.patch('/:id', async (c) => {
       const currentType = existing.objectType?.toLocaleLowerCase();
       if ((hasSolarSystem && currentType === 'deep sky') || (hasDeepSky && currentType && SOLAR_SYSTEM_TAG_SET.has(currentType))) updates.objectType = null;
     }
+    if (updates.captureDate !== undefined) {
+      const parsed = updates.captureDate ? new Date(updates.captureDate) : null;
+      if (updates.captureDate && Number.isNaN(parsed?.getTime())) return c.json({ message: 'Invalid captureDate' }, 400);
+      updates.captureDate = parsed;
+      // A manual edit always overrides whatever source the time previously came from.
+      updates.captureDateSource = parsed ? 'manual' : null;
+    }
 
     const updatedImage = await storage.updateAstroImage(id, updates);
     if (!updatedImage) {

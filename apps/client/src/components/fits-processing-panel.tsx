@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Maximize2, Minimize2, RotateCcw, Save, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
+import { useDebounce } from '@/hooks/use-debounce';
+import { DeepZoomViewer } from './deep-zoom-viewer';
 import type { AstroImage } from '@shared/schema';
 
 interface FitsMetadata {
@@ -49,11 +51,10 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
   const [colorMap, setColorMap] = useState('grey');
   const [fullscreen, setFullscreen] = useState(false);
   const [outputName, setOutputName] = useState(() => image.filename.replace(/\.(fit|fits|fts)$/i, '') + '-processed');
-  const [previewSource, setPreviewSource] = useState<string | null>(null);
+  const [previewReady, setPreviewReady] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const previewObjectUrl = useRef<string | null>(null);
   const { toast } = useToast();
   const { data: metadata } = useQuery<FitsMetadata>({
     queryKey: ['/api/fits', image.id, 'metadata'],
@@ -79,29 +80,24 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
     setOutputName(image.filename.replace(/\.(fit|fits|fts)$/i, '') + '-processed');
   }, [image.id, image.filename]);
 
+  const debouncedPreviewUrl = useDebounce(previewUrl, 90);
+
   useEffect(() => {
     if (!fitsImage) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setPreviewLoading(true);
-      setPreviewError(null);
-      try {
-        const response = await fetch(previewUrl, { cache: 'no-store', signal: controller.signal });
-        if (!response.ok) throw new Error(`Preview failed (${response.status})`);
-        const nextUrl = URL.createObjectURL(await response.blob());
-        if (previewObjectUrl.current) URL.revokeObjectURL(previewObjectUrl.current);
-        previewObjectUrl.current = nextUrl;
-        setPreviewSource(nextUrl);
-      } catch (error) {
-        if ((error as DOMException).name !== 'AbortError') setPreviewError(error instanceof Error ? error.message : 'Preview failed');
-      } finally {
-        if (!controller.signal.aborted) setPreviewLoading(false);
-      }
-    }, 90);
-    return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [fitsImage, previewUrl]);
+    setPreviewLoading(true);
+    setPreviewError(null);
+  }, [fitsImage, debouncedPreviewUrl]);
 
-  useEffect(() => () => { if (previewObjectUrl.current) URL.revokeObjectURL(previewObjectUrl.current); }, []);
+  const handlePreviewLoad = useCallback(() => {
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreviewReady(true);
+  }, []);
+
+  const handlePreviewError = useCallback(() => {
+    setPreviewLoading(false);
+    setPreviewError('Preview failed');
+  }, []);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -155,12 +151,18 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         <Badge className="bg-red-700 text-white border-red-500">FITS</Badge>
       </div>
       {metadata && <p className="text-xs text-muted-foreground font-mono">{metadata.width}×{metadata.height} · {metadata.channels === 3 ? 'RGB' : 'Mono'} · BITPIX {metadata.bitpix}</p>}
-      <div className="relative min-h-32 rounded-md bg-black">
-        {previewSource && <img src={previewSource} alt={`Interactive processed preview of ${image.title}`} className="w-full rounded-md max-h-64 object-contain" />}
-        {!previewSource && !previewError && <div className="min-h-32 grid place-items-center text-sm text-muted-foreground">Rendering preview…</div>}
-        {previewLoading && <span className="absolute right-2 top-2 rounded bg-black/70 px-2 py-1 text-xs text-white">Updating preview…</span>}
-        {previewError && <div className="min-h-32 grid place-items-center px-3 text-sm text-red-300">{previewError}</div>}
-        {previewSource && <button
+      <div className="relative h-64 rounded-md bg-black overflow-hidden">
+        {!fullscreen && <DeepZoomViewer
+          imageUrl={debouncedPreviewUrl}
+          height="100%"
+          preserveViewport
+          onLoad={handlePreviewLoad}
+          onError={handlePreviewError}
+        />}
+        {!previewReady && !previewError && <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground pointer-events-none">Rendering preview…</div>}
+        {previewReady && previewLoading && <span className="absolute right-2 top-2 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
+        {previewError && <div className="absolute inset-0 grid place-items-center px-3 text-sm text-red-300 bg-black/80">{previewError}</div>}
+        {previewReady && <button
           type="button"
           onClick={() => setFullscreen(true)}
           aria-label="View preview full screen"
@@ -169,6 +171,7 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         >
           <Maximize2 className="h-4 w-4" />
         </button>}
+        <p className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/70 pointer-events-none">Scroll or pinch to zoom · drag to pan</p>
       </div>
       {fullscreen && <div className="fixed inset-0 z-50 flex flex-col bg-black" role="dialog" aria-modal="true" aria-label={`Full screen preview of ${image.title}`}>
         <div className="flex items-center justify-between gap-2 p-3">
@@ -178,8 +181,14 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
           </button>
         </div>
         <div className="relative flex-1 overflow-hidden">
-          {previewSource && <img src={previewSource} alt={`Full screen processed preview of ${image.title}`} className="h-full w-full object-contain" />}
-          {previewLoading && <span className="absolute right-3 top-3 rounded bg-black/70 px-2 py-1 text-xs text-white">Updating preview…</span>}
+          <DeepZoomViewer
+            imageUrl={debouncedPreviewUrl}
+            height="100%"
+            preserveViewport
+            onLoad={handlePreviewLoad}
+            onError={handlePreviewError}
+          />
+          {previewLoading && <span className="absolute right-3 top-3 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
         </div>
       </div>}
       <details open className="rounded-md border border-border p-3">

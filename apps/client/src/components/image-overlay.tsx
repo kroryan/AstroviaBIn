@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Upload, Target, Download } from "lucide-react";
+import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Upload, Target, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
+import { formatCaptureMoment } from "@/lib/fits";
 import { EquipmentManager } from "./equipment-manager";
 import { AcquisitionEditor } from "./acquisition-editor";
 import { LocationEditorModal } from "./location-editor-modal";
@@ -202,9 +203,18 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   <Edit3 className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-sm text-muted-foreground mb-2">
-                Captured on {currentImage.captureDate ? new Date(currentImage.captureDate).toLocaleDateString() : "Unknown date"}
-              </p>
+              {(() => {
+                const moment = formatCaptureMoment(currentImage.captureDate, currentImage.originalPath, currentImage.captureDateSource);
+                return (
+                  <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5">
+                    Captured on {moment.text}
+                    {moment.status === 'unverified' && (
+                      <span title="The time may not be exact — it comes from file metadata, not a verified exposure timestamp."><AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-label="Time not verified" /></span>
+                    )}
+                    {moment.status === 'edited' && <span className="text-xs italic">(edited)</span>}
+                  </p>
+                );
+              })()}
             </div>
             {/* Equipment Section */}
             <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
@@ -473,9 +483,18 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   <Edit3 className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-sm text-gray-300 mb-2">
-                Captured on {image.captureDate ? new Date(image.captureDate).toLocaleDateString() : "Unknown date"}
-              </p>
+              {(() => {
+                const moment = formatCaptureMoment(image.captureDate, image.originalPath, image.captureDateSource);
+                return (
+                  <p className="text-sm text-gray-300 mb-2 flex items-center gap-1.5">
+                    Captured on {moment.text}
+                    {moment.status === 'unverified' && (
+                      <span title="The time may not be exact — it comes from file metadata, not a verified exposure timestamp."><AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-label="Time not verified" /></span>
+                    )}
+                    {moment.status === 'edited' && <span className="text-xs italic">(edited)</span>}
+                  </p>
+                );
+              })()}
             </div>
 
             {/* Plate Solution - First */}

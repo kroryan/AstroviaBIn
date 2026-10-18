@@ -116,6 +116,12 @@ export default function Home() {
     if (searchString.includes("image=")) {
       const params = new URLSearchParams(searchString);
       params.delete("image");
+      const from = params.get("from");
+      params.delete("from");
+      if (from === "targets") {
+        setLocation("/targets", { replace: true });
+        return;
+      }
       const newSearch = params.toString();
       // Ensure we navigate back cleanly
       setLocation(newSearch ? `/?${newSearch}` : "/", { replace: true });

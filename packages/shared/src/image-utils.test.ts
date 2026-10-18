@@ -128,6 +128,7 @@ describe('groupAndEnrichTargets', () => {
       constellation: null,
       captureDate: null,
       totalIntegration: null,
+      originalPath: null,
       ...overrides,
     };
   }
@@ -161,6 +162,35 @@ describe('groupAndEnrichTargets', () => {
     assert.ok(ngc224);
     assert.equal(ngc224.imageCount, 2);
     assert.deepEqual(ngc224.imageIds, [1, 2]);
+  });
+
+  it('includes a thumbnail summary per image, regardless of source (FITS included)', () => {
+    const images = [
+      makeImage({ id: 1, targetName: 'NGC 253', title: 'NGC253 light', thumbnailUrl: '/api/fits/1/preview', originalPath: 'fits-upload://ngc253.fits', captureDate: '2026-10-18T03:12:00Z' }),
+      makeImage({ id: 2, targetName: 'NGC 253', title: 'NGC253 final.jpg', thumbnailUrl: '/thumb.jpg', originalPath: null }),
+    ];
+    const result = groupAndEnrichTargets(images, []);
+    const ngc253 = result.find(t => t.targetName === 'NGC 253');
+    assert.ok(ngc253);
+    assert.deepEqual(ngc253.images, [
+      { id: 1, title: 'NGC253 light', thumbnailUrl: '/api/fits/1/preview', isFits: true, captureDate: '2026-10-18T03:12:00.000Z' },
+      { id: 2, title: 'NGC253 final.jpg', thumbnailUrl: '/thumb.jpg', isFits: false, captureDate: null },
+    ]);
+  });
+
+  it('flags fits://, fits-derived://, and fits-upload:// paths as FITS, but not a regular path', () => {
+    const images = [
+      makeImage({ id: 1, targetName: 'X', originalPath: 'fits://a.fits' }),
+      makeImage({ id: 2, targetName: 'X', originalPath: 'fits-derived://b.fits' }),
+      makeImage({ id: 3, targetName: 'X', originalPath: 'fits-upload://c.fits' }),
+      makeImage({ id: 4, targetName: 'X', originalPath: '/data/library/photo.jpg' }),
+    ];
+    const result = groupAndEnrichTargets(images, []);
+    const isFitsById = new Map(result[0].images.map(img => [img.id, img.isFits]));
+    assert.equal(isFitsById.get(1), true);
+    assert.equal(isFitsById.get(2), true);
+    assert.equal(isFitsById.get(3), true);
+    assert.equal(isFitsById.get(4), false);
   });
 
   it('falls back to title when targetName is null', () => {

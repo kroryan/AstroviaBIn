@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { X, Crosshair, Loader, Eye } from "lucide-react";
+import { X, Crosshair, Loader, Eye, AlertTriangle } from "lucide-react";
 import type { AstroImage } from "@shared/schema";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
 import { ImageTagsEditor } from "./image-tags-editor";
+import { formatCaptureMoment } from "@/lib/fits";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ImageModalProps {
@@ -114,12 +115,18 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               <DialogTitle className="text-xl font-bold text-foreground">
                 {image.title}
               </DialogTitle>
-              <p className="text-muted-foreground">
-                Captured on {image.captureDate 
-                  ? new Date(image.captureDate).toLocaleDateString()
-                  : "Unknown date"
-                }
-              </p>
+              {(() => {
+                const moment = formatCaptureMoment(image.captureDate, image.originalPath, image.captureDateSource);
+                return (
+                  <p className="text-muted-foreground flex items-center gap-1.5">
+                    Captured on {moment.text}
+                    {moment.status === 'unverified' && (
+                      <span title="The time may not be exact — it comes from file metadata, not a verified exposure timestamp."><AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-label="Time not verified" /></span>
+                    )}
+                    {moment.status === 'edited' && <span className="text-xs italic">(edited)</span>}
+                  </p>
+                );
+              })()}
             </div>
           </div>
         </DialogHeader>

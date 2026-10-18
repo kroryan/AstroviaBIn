@@ -20,6 +20,14 @@ import { TargetDetailDialog } from "@/components/target-detail-dialog";
 import { computeVisibility } from "../../../../packages/shared/src/visibility";
 import type { CatalogObject, Location } from "../../../../packages/shared/src/types";
 
+interface TargetImageSummary {
+  id: number;
+  title: string;
+  thumbnailUrl: string | null;
+  isFits: boolean;
+  captureDate: string | null;
+}
+
 interface TargetSummary {
   targetName: string;
   imageCount: number;
@@ -31,6 +39,7 @@ interface TargetSummary {
   commonNames: string | null;
   latestCaptureDate: string | null;
   imageIds: number[];
+  images: TargetImageSummary[];
 }
 
 interface UserTargetData {

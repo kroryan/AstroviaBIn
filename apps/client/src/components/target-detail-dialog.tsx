@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +16,14 @@ import { apiRequest } from "@/lib/queryClient";
 import type { CatalogObject } from "../../../../packages/shared/src/types";
 import { computeVisibility } from "../../../../packages/shared/src/visibility";
 
+interface TargetImageSummary {
+  id: number;
+  title: string;
+  thumbnailUrl: string | null;
+  isFits: boolean;
+  captureDate: string | null;
+}
+
 interface TargetSummary {
   targetName: string;
   imageCount: number;
@@ -22,6 +31,7 @@ interface TargetSummary {
   thumbnailUrl: string | null;
   latestCaptureDate: string | null;
   imageIds: number[];
+  images: TargetImageSummary[];
 }
 
 interface UserTargetData {
@@ -60,6 +70,7 @@ export function TargetDetailDialog({
   location,
 }: TargetDetailDialogProps) {
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   const [notes, setNotes] = useState(userTarget?.notes || "");
   const [tags, setTags] = useState<string[]>(userTarget?.tags || []);
   const [newTag, setNewTag] = useState("");
@@ -229,6 +240,73 @@ export function TargetDetailDialog({
               )}
             </div>
           )}
+
+          {/* Images of this target, images and FITS frames shown separately */}
+          {imagedTarget && imagedTarget.images.length > 0 && (() => {
+            const photos = imagedTarget.images.filter(img => !img.isFits);
+            const fitsFrames = imagedTarget.images.filter(img => img.isFits);
+            const openImage = (id: number) => { onOpenChange(false); setLocation(`/?image=${id}&from=targets`); };
+            const shortDate = (iso: string | null) => iso ? `${MONTH_NAMES[new Date(iso).getMonth()]} ${new Date(iso).getDate()}` : null;
+            return (
+              <>
+                {photos.length > 0 && (
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Images ({photos.length})</label>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {photos.map(img => (
+                        <button
+                          key={img.id}
+                          type="button"
+                          onClick={() => openImage(img.id)}
+                          title={img.captureDate ? `${img.title} — captured ${new Date(img.captureDate).toLocaleDateString()}` : img.title}
+                          className="relative shrink-0 h-16 w-16 rounded-md overflow-hidden border border-border hover:ring-2 hover:ring-primary transition-all bg-muted"
+                        >
+                          {img.thumbnailUrl ? (
+                            <img src={img.thumbnailUrl} alt={img.title} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="h-full w-full grid place-items-center">
+                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          )}
+                          {img.captureDate && (
+                            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[9px] leading-tight text-center">{shortDate(img.captureDate)}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {fitsFrames.length > 0 && (
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">FITS frames ({fitsFrames.length})</label>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {fitsFrames.map(img => (
+                        <button
+                          key={img.id}
+                          type="button"
+                          onClick={() => openImage(img.id)}
+                          title={img.captureDate ? `${img.title} — captured ${new Date(img.captureDate).toLocaleDateString()}` : img.title}
+                          className="relative shrink-0 h-16 w-16 rounded-md overflow-hidden border border-red-500/40 hover:ring-2 hover:ring-primary transition-all bg-muted"
+                        >
+                          {img.thumbnailUrl ? (
+                            <img src={img.thumbnailUrl} alt={img.title} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="h-full w-full grid place-items-center">
+                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          )}
+                          <Badge className="absolute top-0 right-0 rounded-none rounded-bl-md bg-red-700 text-white border-red-500 px-1 py-0 text-[9px] leading-tight">FITS</Badge>
+                          {img.captureDate && (
+                            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-white text-[9px] leading-tight text-center">{shortDate(img.captureDate)}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
 
           {/* Notes */}
           <div>

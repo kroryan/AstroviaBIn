@@ -11,6 +11,8 @@ export const astrophotographyImages = sqliteTable('astrophotography_images', {
     fullUrl: text('full_url'),
     originalPath: text('original_path'),
     captureDate: integer('capture_date', { mode: 'timestamp' }),
+    /** Where captureDate's time component came from: 'exif' | 'file' | 'manual'. Null for FITS rows (verified via DATE-OBS) and legacy rows. */
+    captureDateSource: text('capture_date_source'),
     focalLength: real('focal_length'),
     aperture: text('aperture'),
     iso: integer('iso'),

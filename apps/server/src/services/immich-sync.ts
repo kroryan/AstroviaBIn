@@ -316,7 +316,12 @@ class ImmichSyncService {
         thumbnailUrl: `/api/assets/${asset.id}/thumbnail`,
         fullUrl: `/api/assets/${asset.id}/thumbnail?size=preview`,
         originalPath: String(asset.originalPath || ''),
-        captureDate: asset.fileCreatedAt ? new Date(asset.fileCreatedAt as string) : null,
+        // Prefer the real shutter timestamp (EXIF DateTimeOriginal) over fileCreatedAt, which only
+        // reflects when Immich or the filesystem saw the file and can disagree with when it was taken.
+        captureDate: exifInfo?.dateTimeOriginal
+          ? new Date(exifInfo.dateTimeOriginal as string)
+          : asset.fileCreatedAt ? new Date(asset.fileCreatedAt as string) : null,
+        captureDateSource: exifInfo?.dateTimeOriginal ? 'exif' : asset.fileCreatedAt ? 'file' : null,
         focalLength: exifInfo?.focalLength ? Number(exifInfo.focalLength) : null,
         aperture: exifInfo?.fNumber ? `f/${exifInfo.fNumber}` : null,
         iso: exifInfo?.iso ? Number(exifInfo.iso) : null,

@@ -73,6 +73,13 @@ export interface ImageInput {
   constellation: string | null;
   captureDate: Date | string | null;
   totalIntegration: number | null;
+  originalPath: string | null;
+}
+
+const FITS_PATH_PREFIXES = ['fits://', 'fits-derived://', 'fits-upload://'];
+
+function isFitsOriginalPath(originalPath: string | null): boolean {
+  return originalPath !== null && FITS_PATH_PREFIXES.some(prefix => originalPath.startsWith(prefix));
 }
 
 export interface CatalogInput {
@@ -82,6 +89,15 @@ export interface CatalogInput {
   constellation: string | null;
   vMag: number | null;
   commonNames: string | null;
+}
+
+export interface TargetImageSummary {
+  id: number;
+  title: string;
+  thumbnailUrl: string | null;
+  isFits: boolean;
+  /** When the image was actually captured (from its metadata), not when it was ingested. */
+  captureDate: string | null;
 }
 
 export interface TargetSummary {
@@ -95,6 +111,7 @@ export interface TargetSummary {
   commonNames: string | null;
   latestCaptureDate: string | null;
   imageIds: number[];
+  images: TargetImageSummary[];
 }
 
 /**
@@ -145,6 +162,13 @@ export function groupAndEnrichTargets(
       commonNames: catalogObj?.commonNames || null,
       latestCaptureDate: mostRecent.captureDate ? new Date(mostRecent.captureDate).toISOString() : null,
       imageIds: groupImages.map(img => img.id),
+      images: groupImages.map(img => ({
+        id: img.id,
+        title: img.title,
+        thumbnailUrl: img.thumbnailUrl,
+        isFits: isFitsOriginalPath(img.originalPath),
+        captureDate: img.captureDate ? new Date(img.captureDate).toISOString() : null,
+      })),
     });
   }
 
