@@ -14,4 +14,7 @@ test('requires the editable Deep Sky tag for plate solving', () => {
   assert.equal(isPlateSolvingEligible(['Deep Sky', 'M 42']), true);
   assert.equal(isPlateSolvingEligible(['M 42']), false);
   assert.equal(isPlateSolvingEligible(['Deep Sky', 'Mars']), false);
+  // An existing stellar solution keeps the frame re-solvable without a Deep Sky tag.
+  assert.equal(isPlateSolvingEligible(['M 42'], true), true);
+  assert.equal(isPlateSolvingEligible(['Saturn'], true), false);
 });

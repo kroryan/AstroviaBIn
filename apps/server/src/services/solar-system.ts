@@ -15,7 +15,11 @@ export function isDeepSkyTagged(tags: string[] | null | undefined): boolean {
   return Boolean(tags?.some(tag => tag.trim().toLowerCase() === DEEP_SKY_TAG));
 }
 
-/** Only explicitly classified Deep Sky frames are eligible for Astrometry.net. */
-export function isPlateSolvingEligible(tags: string[] | null | undefined): boolean {
-  return isDeepSkyTagged(tags) && !isSolarSystemTagged(tags);
+/**
+ * Deep Sky frames are eligible for Astrometry.net, and so is any frame that already has a stellar
+ * plate solution (e.g. imported before tagging existed) so it can be re-solved for a full WCS.
+ * Solar System frames never are.
+ */
+export function isPlateSolvingEligible(tags: string[] | null | undefined, alreadySolved = false): boolean {
+  return (isDeepSkyTagged(tags) || alreadySolved) && !isSolarSystemTagged(tags);
 }

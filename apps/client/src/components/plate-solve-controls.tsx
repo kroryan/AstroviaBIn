@@ -26,7 +26,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
   const [scaleLow, setScaleLow] = useState("");
   const [scaleHigh, setScaleHigh] = useState("");
   const tags = image.tags?.map(tag => tag.trim().toLowerCase()) || [];
-  const eligible = tags.includes('deep sky') && !tags.some(tag => SOLAR_SYSTEM_TAGS.has(tag));
+  const eligible = (tags.includes('deep sky') || Boolean(image.plateSolved)) && !tags.some(tag => SOLAR_SYSTEM_TAGS.has(tag));
   const processing = job?.status === 'processing';
 
   const solve = useMutation({

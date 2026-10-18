@@ -160,7 +160,7 @@ class PlateSolvingWorker {
     for (const job of processingJobs) {
       try {
         const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
-        if (!isPlateSolvingEligible(image?.tags)) {
+        if (!isPlateSolvingEligible(image?.tags, Boolean(image?.plateSolved))) {
           await storage.updatePlateSolvingJob(job.id, {
             status: 'failed',
             result: { error: 'Skipped because the image no longer has the Deep Sky tag or is marked Solar System' },

@@ -52,7 +52,7 @@ export default (wsManager?: WsManager) => {
       if (!image) {
         return c.json({ message: 'Image not found' }, 404);
       }
-      if (!isPlateSolvingEligible(image.tags)) {
+      if (!isPlateSolvingEligible(image.tags, Boolean(image.plateSolved))) {
         return c.json({ message: 'Plate solving requires the Deep Sky tag. Add it for stellar fields; Solar System and planet tags are excluded.' }, 400);
       }
 
@@ -133,7 +133,7 @@ export default (wsManager?: WsManager) => {
             results.push({ imageId, success: false, error: 'Image already plate solved' });
             continue;
           }
-          if (!isPlateSolvingEligible(image.tags)) {
+          if (!isPlateSolvingEligible(image.tags, Boolean(image.plateSolved))) {
             results.push({ imageId, success: false, error: 'Plate solving requires the Deep Sky tag; Solar System and planet tags are excluded' });
             continue;
           }
