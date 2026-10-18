@@ -36,8 +36,9 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 - **Deep Zoom Viewer**: High-resolution exploration of your deep-sky images with OpenSeaDragon
 - **Metadata Preservation**: Automatic EXIF handling for astrophotography workflows
   > **Note**: XMP sidecar generation is experimental. Keep backups of originals and metadata.
-- **Expansion-friendly storage**: Mount library, FITS originals, derivatives, cache, and analysis directories independently
+- **External-disk friendly storage**: Mount library, FITS originals, derivatives, cache, and analysis directories independently
 - **Location Editing**: Save and reuse observing sites with a map picker
+- **Gallery catalogs**: Group photos and FITS into named catalogs (e.g. "Messier marathon", "M42 raw frames"), filter the gallery by catalog, and add the currently shown images in one click
 
 ### **DSO Catalog & Target Tracking**
 - **Built-in OpenNGC Catalog**: Browse, search, and filter thousands of deep-sky objects by type, constellation, magnitude, and angular size
@@ -54,7 +55,9 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 - **Background Processing**: Non-blocking worker processes with job queuing
 - **Real-time Updates**: Live progress tracking via WebSocket connections
 - **Batch Processing**: Handle multiple images simultaneously
-- **Results Storage**: Persistent RA/Dec coordinates and field information
+- **Results Storage**: Persistent RA/Dec coordinates, field information, and the full WCS (TAN + SIP distortion)
+- **Exact annotations**: Every OpenNGC object in the field is projected through the stored WCS at native resolution, so overlays line up with the real objects at any zoom
+- **Hard fields**: A noise-robust star extractor, automatic hints (previous solution, FITS pointing, M/NGC/IC names in the title) and an optional manual RA/Dec hint rescue sparse or noisy frames; add narrow-field index files with `download-astrometry-indexes`
 - **FITS difference analysis**: HOTPANTS subtraction followed by Photutils point-source checks, saved evidence, and optional second-exposure verification
 
 ### **Astrophotography Equipment Tracking**
@@ -74,6 +77,8 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 - **Notification Badge**: Unacknowledged notification count displayed in the navigation
 
 ### **Security & Deployment**
+- **Login required**: Every page, API route, and WebSocket needs a signed session cookie (single admin account from environment variables, brute-force throttled)
+- **Automatic maintenance**: Daily consistent SQLite backups (14 kept) and bounded preview/tile caches
 - **Docker Ready**: Multi-stage containerization with health checks
 - **UnRAID Support**: Ready-to-use container templates
 - **Database Options**: Built-in SQLite (default), optional PostgreSQL support
@@ -89,12 +94,17 @@ This branch is not the upstream GHCR image. Build it from source so the local-on
 ```bash
 git clone --branch v0.x https://github.com/kroryan/sidereal.git
 cd sidereal
-mkdir -p /mnt/Expansion/Sidereal/AppData /mnt/Expansion/Sidereal/Media
-mkdir -p /mnt/Expansion/Sidereal/FITS/{library,derivatives,uploads,analysis}
+cat > .env <<'ENV'
+SIDEREAL_ADMIN_USER=choose-a-user
+SIDEREAL_ADMIN_PASSWORD=choose-a-strong-password
+# Optional: put the library on another disk (defaults to ./data/...)
+# SIDEREAL_HOST_DATA=/srv/sidereal/AppData
+# SIDEREAL_HOST_LIBRARY=/srv/sidereal/Media
+ENV
 docker compose up -d --build
 ```
 
-Open `http://localhost:5000`. The default Compose file uses `/mnt/Expansion/Sidereal`; set `SIDEREAL_HOST_DATA`, `SIDEREAL_HOST_LIBRARY`, and `FITS_HOST_*` before starting if your disk is mounted elsewhere. The SQLite database lives in `AppData`; original media lives under `Media` and `FITS`, not inside the container. Back up both the database and those directories together.
+Open `http://localhost:5000` and sign in. Without `SIDEREAL_ADMIN_USER`/`SIDEREAL_ADMIN_PASSWORD` the login is **admin / admin** — change it before exposing the port. The default Compose file stores everything under `./data`; set `SIDEREAL_HOST_DATA`, `SIDEREAL_HOST_LIBRARY`, and `FITS_HOST_*` to use another disk. The SQLite database lives in `AppData`; original media lives under `Media` and `FITS`, not inside the container. Back up both the database and those directories together.
 
 > **PostgreSQL option**: If you prefer PostgreSQL, download [`docker-compose.postgres.yml`](docker-compose.postgres.yml) and layer it on:
 > ```bash
@@ -113,12 +123,12 @@ docker run -d \
   -p 5000:5000 \
   -e NODE_ENV=production \
   -e FITS_ANALYSIS_DIR=/app/fits-analysis \
-  -v /mnt/Expansion/Sidereal/AppData:/app/config \
-  -v /mnt/Expansion/Sidereal/Media:/app/library \
-  -v /mnt/Expansion/Sidereal/FITS/library:/app/fits:ro \
-  -v /mnt/Expansion/Sidereal/FITS/uploads:/app/fits-upload \
-  -v /mnt/Expansion/Sidereal/FITS/derivatives:/app/fits-derived \
-  -v /mnt/Expansion/Sidereal/FITS/analysis:/app/fits-analysis \
+  -v /srv/sidereal/AppData:/app/config \
+  -v /srv/sidereal/Media:/app/library \
+  -v /srv/sidereal/FITS/library:/app/fits:ro \
+  -v /srv/sidereal/FITS/uploads:/app/fits-upload \
+  -v /srv/sidereal/FITS/derivatives:/app/fits-derived \
+  -v /srv/sidereal/FITS/analysis:/app/fits-analysis \
   sidereal:local
 ```
 
@@ -190,6 +200,14 @@ npm run dev:worker:standalone
 | `FITS_ANALYSIS_DIR` | `data/fits-analysis` | Private HOTPANTS runs, evidence, and follow-up checks; put this on spacious persistent storage |
 | `SIDEREAL_MAX_UPLOAD_BYTES` | `21474836480` | Maximum direct upload size (20 GiB) |
 | `FITS_MAX_PROCESS_BYTES` | `1073741824` | Maximum uncompressed primary FITS image size processed in memory |
+| `FITS_FULL_PREVIEW_MAX` | `4096` | Longest side of the non-tiled FITS fallback preview (the zoom viewer uses native-resolution tiles) |
+| `SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD` | `admin` / `admin` | Login credentials. **Change them.** |
+| `SIDEREAL_SESSION_SECRET` | _(generated)_ | Cookie signing key; generated once and stored as `.session-secret` next to the database when unset |
+| `SIDEREAL_AUTH_DISABLED` | `false` | Turn the login off only when another authenticating proxy sits in front |
+| `ASTROMETRY_EXTRA_INDEX_DIRS` | `/app/config/astrometry-index` | Colon-separated extra index directories (narrow fields) |
+| `ASTROMETRY_TIMEOUT_MS` | `900000` | Total time budget per local solve (hinted attempts, then blind) |
+| `SIDEREAL_BACKUP_DIR` / `SIDEREAL_BACKUP_KEEP` | `<db dir>/backups` / `14` | Daily SQLite backups |
+| `SIDEREAL_CACHE_MAX_BYTES` / `SIDEREAL_CACHE_MAX_AGE_DAYS` | `10 GiB` / `60` | Preview and tile cache bounds per cache directory |
 
 ### FITS in the main gallery
 
@@ -204,13 +222,23 @@ Open a FITS and expand **HOTPANTS** above **FITS processing** to save a differen
 With Docker Compose, configure host folders in a Compose `.env` file or your shell before starting:
 
 ```bash
-FITS_HOST_LIBRARY=/mnt/Expansion/Sidereal/FITS/library
-FITS_HOST_DERIVATIVES=/mnt/Expansion/Sidereal/FITS/derivatives
-FITS_HOST_UPLOADS=/mnt/Expansion/Sidereal/FITS/uploads
-FITS_HOST_ANALYSIS=/mnt/Expansion/Sidereal/FITS/analysis
+FITS_HOST_LIBRARY=/srv/sidereal/FITS/library
+FITS_HOST_DERIVATIVES=/srv/sidereal/FITS/derivatives
+FITS_HOST_UPLOADS=/srv/sidereal/FITS/uploads
+FITS_HOST_ANALYSIS=/srv/sidereal/FITS/analysis
 # Optional; default is 1 GiB
 FITS_MAX_PROCESS_BYTES=1073741824
 ```
+
+### Narrow fields of view
+
+The image bundles the 2MASS index files for fields of roughly 30′ and wider. For longer focal lengths, download smaller scales once into the persistent AppData folder (about 5 GB for 4203–4207, fields down to ~8′):
+
+```bash
+docker exec -u "$(id -u)" sidereal download-astrometry-indexes
+```
+
+New index files are picked up by the next solve; no restart is needed.
 
 ### Admin Configuration
 
@@ -423,6 +451,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Third-party components keep their own licenses. In particular, the Docker image builds and ships the unmodified [HOTPANTS](vendor/hotpants) programs, which are distributed under the GNU GPL v2 (`vendor/hotpants/COPYING`); their complete source is included in this repository and in the image at `/usr/share/doc/hotpants/source`. Astrometry.net and its index files are installed from Debian under their respective licenses.
 
 ## Acknowledgments
 

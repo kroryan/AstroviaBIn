@@ -61,9 +61,12 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     assert.equal(scan.status, 200);
     assert.deepEqual(await scan.json(), { imported: 1, updated: 0, errors: [] });
 
-    const uploadForm = new FormData();
-    uploadForm.set('file', new File([testFits()], 'M42 final.FITS', { type: 'application/fits' }));
-    const upload = await app.request('/api/fits/upload', { method: 'POST', body: uploadForm });
+    // Uploads stream the raw request body to disk; the original name travels in the query string.
+    const upload = await app.request(`/api/fits/upload?filename=${encodeURIComponent('M42 final.FITS')}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/fits' },
+      body: new Uint8Array(testFits()),
+    });
     assert.equal(upload.status, 201);
     const uploaded = await upload.json() as { image: { originalPath: string } };
     assert.match(uploaded.image.originalPath, /^fits-upload:\/\/M42_final-\d+\.fits$/);
@@ -78,7 +81,7 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     const preview = await app.request(`/api/fits/${image.id}/preview?stretch=asinh`);
     assert.equal(preview.status, 200);
     assert.equal(preview.headers.get('content-type'), 'image/png');
-    assert.equal(preview.headers.get('cache-control'), 'no-store');
+    assert.equal(preview.headers.get('cache-control'), 'private, no-store');
     assert.deepEqual(new Uint8Array(await preview.arrayBuffer()).slice(1, 4), new Uint8Array([80, 78, 71]));
 
     const processed = await app.request(`/api/fits/${image.id}/process`, {
@@ -153,7 +156,13 @@ test('preview=full renders at native resolution instead of the capped preview si
     const full = await app.request(`/api/fits/${image.id}/preview?preview=full`);
     const fullMeta = await sharp(await full.arrayBuffer()).metadata();
     assert.equal(fullMeta.width, width);
+
+    process.env.FITS_FULL_PREVIEW_MAX = '1000';
+    const bounded = await app.request(`/api/fits/${image.id}/preview?preview=full`);
+    const boundedMeta = await sharp(await bounded.arrayBuffer()).metadata();
+    assert.equal(boundedMeta.width, 1000, 'full previews stay within FITS_FULL_PREVIEW_MAX');
   } finally {
+    delete process.env.FITS_FULL_PREVIEW_MAX;
     if (oldLibraryDir === undefined) delete process.env.FITS_LIBRARY_DIR;
     else process.env.FITS_LIBRARY_DIR = oldLibraryDir;
     if (oldCacheDir === undefined) delete process.env.FITS_CACHE_DIR;

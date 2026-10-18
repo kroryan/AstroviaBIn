@@ -1,6 +1,9 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
 async function throwIfResNotOk(res: Response) {
+  if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+    window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+  }
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
@@ -31,6 +34,7 @@ export interface QueryFilters {
   plateSolved?: boolean;
   constellation?: string;
   equipmentId?: number;
+  galleryCatalogId?: number;
 }
 
 export const getQueryFn: <T>(options: {
@@ -51,6 +55,7 @@ export const getQueryFn: <T>(options: {
       if (filters.plateSolved !== undefined) params.append('plateSolved', filters.plateSolved.toString());
       if (filters.constellation) params.append('constellation', filters.constellation);
       if (filters.equipmentId) params.append('equipmentId', filters.equipmentId.toString());
+      if (filters.galleryCatalogId) params.append('galleryCatalogId', filters.galleryCatalogId.toString());
     }
 
     const fullUrl = params.toString() ? `${url}?${params.toString()}` : url;

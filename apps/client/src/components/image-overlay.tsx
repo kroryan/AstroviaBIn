@@ -13,6 +13,8 @@ import { TargetPickerModal } from "./target-picker-modal";
 import { FitsProcessingPanel } from "./fits-processing-panel";
 import { HotpantsAnalysis } from "./hotpants-analysis";
 import { ImageTagsEditor } from "./image-tags-editor";
+import { PlateSolveControls } from "./plate-solve-controls";
+import { GalleryCatalogPicker } from "./gallery-catalog-picker";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage, Equipment, ImageAcquisitionRow } from "@shared/schema";
@@ -180,6 +182,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 tileInfoUrl={`/api/images/${currentImage.id}/tile-info`}
                 tileUrlBase={`/api/images/${currentImage.id}/tile`}
                 annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                annotationSize={annotationsData?.imageDimensions}
                 fullHeight={isExpanded}
                 height={isExpanded ? '100vh' : '100%'}
                 disableZoom={!isExpanded}
@@ -363,7 +366,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   <p>No plate solving data available.</p>
                 </div>
               )}
+              <PlateSolveControls image={currentImage} job={plateSolvingJob} annotationsSource={annotationsData?.source} annotationsMessage={annotationsData?.message} />
             </section>
+            <GalleryCatalogPicker image={currentImage} />
             <ImageTagsEditor image={currentImage} />
             {/* Description */}
             {image.description && (
@@ -400,6 +405,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               tileInfoUrl={`/api/images/${image.id}/tile-info`}
               tileUrlBase={`/api/images/${image.id}/tile`}
               annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                annotationSize={annotationsData?.imageDimensions}
               fullHeight={true}
               height="100vh"
               disableZoom={false}
@@ -531,6 +537,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                       <p>No plate solving data available.</p>
                     </div>
                   )}
+                  <PlateSolveControls image={currentImage} job={plateSolvingJob} annotationsSource={annotationsData?.source} annotationsMessage={annotationsData?.message} dark />
                 </div>
               )}
             </section>
@@ -792,6 +799,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               )}
             </section>
 
+            <GalleryCatalogPicker image={currentImage} dark />
             <ImageTagsEditor image={currentImage} dark />
 
             {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
@@ -807,6 +815,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               tileInfoUrl={`/api/images/${image.id}/tile-info`}
               tileUrlBase={`/api/images/${image.id}/tile`}
               annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                annotationSize={annotationsData?.imageDimensions}
               fullHeight={false}
               height="100%"
               disableZoom={true}

@@ -66,7 +66,7 @@ echo "Updating sidereal user to PUID=$PUID and GID=$PGID..."
 groupmod -o -g "$PGID" nodejs || true
 usermod -o -u "$PUID" sidereal || true
 
-# These are bind mounts on Expansion in the test deployment. Only transfer the
+# These are host bind mounts in a typical deployment. Only transfer the
 # mount roots; recursively walking a multi-GB photo/FITS library on every restart
 # would make startup painfully slow.
 echo "Setting directory permissions..."

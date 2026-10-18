@@ -30,21 +30,27 @@ services:
       - FITS_ANALYSIS_DIR=/app/fits-analysis
       - FITS_CACHE_DIR=/app/cache/fits
       - SIDEREAL_MAX_UPLOAD_BYTES=${SIDEREAL_MAX_UPLOAD_BYTES:-21474836480}
+      # Login. Change these before exposing Sidereal on a network.
+      - SIDEREAL_ADMIN_USER=${SIDEREAL_ADMIN_USER:-admin}
+      - SIDEREAL_ADMIN_PASSWORD=${SIDEREAL_ADMIN_PASSWORD:-admin}
+      - SIDEREAL_SESSION_SECRET=${SIDEREAL_SESSION_SECRET:-}
+      # Extra narrow-field index files (see download-astrometry-indexes) live in AppData.
+      - ASTROMETRY_EXTRA_INDEX_DIRS=/app/config/astrometry-index
       - AUTO_DB_MIGRATE_FROM=${AUTO_DB_MIGRATE_FROM:-}
       - AUTO_DB_MIGRATE_TO=${AUTO_DB_MIGRATE_TO:-}
       - AUTO_DB_MIGRATE_ONCE=${AUTO_DB_MIGRATE_ONCE:-true}
       - AUTO_DB_MIGRATE_MARKER=${AUTO_DB_MIGRATE_MARKER:-/app/config/.auto-db-migrated}
       - AUTO_DB_MIGRATE_RESET_SQLITE=${AUTO_DB_MIGRATE_RESET_SQLITE:-true}
     volumes:
-      - ${SIDEREAL_HOST_DATA:-/mnt/Expansion/Sidereal/AppData}:/app/config
-      - ${SIDEREAL_HOST_DATA:-/mnt/Expansion/Sidereal/AppData}/logs:/app/logs
-      - ${SIDEREAL_HOST_DATA:-/mnt/Expansion/Sidereal/AppData}/sidecars:/app/sidecars
-      - ${SIDEREAL_HOST_DATA:-/mnt/Expansion/Sidereal/AppData}/cache:/app/cache
-      - ${SIDEREAL_HOST_LIBRARY:-/mnt/Expansion/Sidereal/Media}:/app/library
-      - ${FITS_HOST_LIBRARY:-/mnt/Expansion/Sidereal/FITS/library}:/app/fits:ro
-      - ${FITS_HOST_DERIVATIVES:-/mnt/Expansion/Sidereal/FITS/derivatives}:/app/fits-derived
-      - ${FITS_HOST_UPLOADS:-/mnt/Expansion/Sidereal/FITS/uploads}:/app/fits-upload
-      - ${FITS_HOST_ANALYSIS:-/mnt/Expansion/Sidereal/FITS/analysis}:/app/fits-analysis
+      - ${SIDEREAL_HOST_DATA:-./data/appdata}:/app/config
+      - ${SIDEREAL_HOST_DATA:-./data/appdata}/logs:/app/logs
+      - ${SIDEREAL_HOST_DATA:-./data/appdata}/sidecars:/app/sidecars
+      - ${SIDEREAL_HOST_DATA:-./data/appdata}/cache:/app/cache
+      - ${SIDEREAL_HOST_LIBRARY:-./data/media}:/app/library
+      - ${FITS_HOST_LIBRARY:-./data/fits/library}:/app/fits:ro
+      - ${FITS_HOST_DERIVATIVES:-./data/fits/derivatives}:/app/fits-derived
+      - ${FITS_HOST_UPLOADS:-./data/fits/uploads}:/app/fits-upload
+      - ${FITS_HOST_ANALYSIS:-./data/fits/analysis}:/app/fits-analysis
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/api/health"]
       interval: 30s

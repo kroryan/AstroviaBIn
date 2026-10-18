@@ -11,6 +11,9 @@ import { handleRouteError } from './route-utils';
 import { SOLAR_SYSTEM_TAGS } from '../services/solar-system';
 import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
 import { resolveLibraryAssetPath } from '../services/library';
+import { readFitsMetadata, resolveFitsFile } from '../services/fits';
+import { computeSkyAnnotations } from '../services/sky-annotations';
+import { wcsFromStored } from '../services/wcs';
 
 const app = new Hono();
 const SOLAR_SYSTEM_TAG_SET = new Set(SOLAR_SYSTEM_TAGS.map(tag => tag.toLocaleLowerCase()));
@@ -27,6 +30,16 @@ async function imageTileSource(image: { id: number; libraryAssetId?: number | nu
   const metadata = await sharp(sourcePath, { limitInputPixels: false }).metadata();
   if (!metadata.width || !metadata.height) throw new Error('Could not read source image dimensions');
   return { sourcePath, cacheKey, width: metadata.width, height: metadata.height };
+}
+
+async function nativeImageDimensions(image: { id: number; originalPath?: string | null; libraryAssetId?: number | null; updatedAt?: Date | string | null }) {
+  const fitsPath = resolveFitsFile(image.originalPath || null);
+  if (fitsPath) {
+    const metadata = await readFitsMetadata(fitsPath);
+    return { width: metadata.width, height: metadata.height };
+  }
+  const source = await imageTileSource(image);
+  return { width: source.width, height: source.height };
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -56,13 +69,15 @@ app.get('/', async (c) => {
     const plateSolved = c.req.query('plateSolved');
     const constellation = c.req.query('constellation');
     const equipmentId = c.req.query('equipmentId');
-    const filters: { objectType?: string; tags?: string[]; plateSolved?: boolean; constellation?: string; equipmentId?: number } = {};
+    const galleryCatalogId = c.req.query('galleryCatalogId');
+    const filters: { objectType?: string; tags?: string[]; plateSolved?: boolean; constellation?: string; equipmentId?: number; galleryCatalogId?: number } = {};
 
     if (objectType) filters.objectType = objectType;
     if (tags && tags.length > 0) filters.tags = tags;
     if (plateSolved !== undefined) filters.plateSolved = plateSolved === 'true';
     if (constellation) filters.constellation = constellation;
     if (equipmentId) filters.equipmentId = parseInt(equipmentId);
+    if (galleryCatalogId) filters.galleryCatalogId = parseInt(galleryCatalogId);
 
     const images = await storage.getAstroImages(filters);
     return c.json(images);
@@ -247,13 +262,19 @@ app.get('/:id/plate-solving-job', async (c) => {
       status: job.status,
       submittedAt: job.submittedAt,
       completedAt: job.completedAt,
+      error: job.status === 'failed' && job.result && typeof job.result === 'object'
+        ? (job.result as { error?: string }).error ?? null
+        : null,
     });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to fetch plate solving job data');
   }
 });
 
-// Get image annotations from stored plate solving data
+// Annotations for the latest successful solve. Local solves store the full WCS (TAN + SIP), so the
+// overlay is projected live from the OpenNGC catalogue in native image pixels. Older solves imported
+// from nova.astrometry.net only kept pixel positions measured on a resized upload; those are scaled
+// to native pixels and flagged as legacy until the image is solved again locally.
 app.get('/:id/annotations', async (c) => {
   try {
     const imageId = parseInt(c.req.param('id'));
@@ -263,7 +284,6 @@ app.get('/:id/annotations', async (c) => {
       return c.json({ message: 'Image not found' }, 404);
     }
 
-    // Find the successful plate solving job for this image directly
     const job = await storage.getLatestPlateSolvingJob(imageId, 'success');
 
     if (!image.plateSolved || !job) {
@@ -275,25 +295,64 @@ app.get('/:id/annotations', async (c) => {
     }
 
     const result = job.result as Record<string, unknown>;
-    const annotations = (result.annotations as unknown[]) || [];
     const calibration = {
       ra: result.ra,
       dec: result.dec,
       pixscale: result.pixscale,
       radius: result.radius,
       orientation: result.orientation,
+      parity: result.parity,
     };
+    c.header('cache-control', 'private, no-store');
+
+    const wcs = wcsFromStored(result.wcs);
+    if (wcs) {
+      return c.json({
+        annotations: await computeSkyAnnotations(wcs),
+        calibration,
+        imageDimensions: { width: wcs.imageWidth, height: wcs.imageHeight },
+        source: 'wcs',
+      });
+    }
+
+    const native = await nativeImageDimensions(image).catch(() => null);
+    const pixscale = Number(result.pixscale);
+    const widthArcsec = Number(result.width_arcsec);
+    const heightArcsec = Number(result.height_arcsec);
+    const solvedWidth = pixscale > 0 && widthArcsec > 0 ? widthArcsec / pixscale : null;
+    const solvedHeight = pixscale > 0 && heightArcsec > 0 ? heightArcsec / pixscale : null;
+    const factor = native && solvedWidth ? native.width / solvedWidth : 1;
+    const consistent = !native || !solvedWidth || !solvedHeight ||
+      Math.abs(native.height / solvedHeight - factor) / factor < 0.02;
+    const annotations = consistent
+      ? ((result.annotations as Array<Record<string, unknown>>) || []).map(annotation => ({
+        ...annotation,
+        pixelx: Number(annotation.pixelx) * factor,
+        pixely: Number(annotation.pixely) * factor,
+        radius: typeof annotation.radius === 'number' ? annotation.radius * factor : annotation.radius,
+      }))
+      : [];
 
     return c.json({
-      annotations: annotations,
-      calibration: calibration,
-      imageDimensions: {
-        width: result.width || null,
-        height: result.height || null,
-      },
+      annotations,
+      calibration,
+      imageDimensions: native || { width: null, height: null },
+      source: 'legacy',
+      message: consistent
+        ? 'Imported solution without a stored WCS; positions were scaled to native pixels. Solve again locally for exact catalogue annotations.'
+        : 'Imported solution does not match this image; solve again locally to annotate it.',
     });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to fetch image annotations');
+  }
+});
+
+// Gallery catalogs this image belongs to
+app.get('/:id/gallery-catalogs', async (c) => {
+  try {
+    return c.json(await storage.getGalleryCatalogIdsForImage(parseInt(c.req.param('id'))));
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to fetch image catalogs');
   }
 });
 

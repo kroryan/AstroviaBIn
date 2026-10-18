@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import path from 'path';
@@ -11,11 +10,20 @@ import { setWsManager } from './services/astrometry';
 import { workerManager } from './services/worker-manager';
 import { catalogService } from './services/catalog';
 import { storage } from './services/storage';
+import { registerAuth } from './routes/auth';
+import { authDisabled, internalToken, usingDefaultCredentials } from './services/auth';
 
 const app = new Hono();
 
-// Middleware
-app.use('*', cors());
+// Authentication guards every page, API route and asset except the login page and health check.
+// The UI is served from the same origin, so no CORS headers are emitted.
+internalToken();
+registerAuth(app);
+if (authDisabled()) {
+  console.warn('Authentication is DISABLED (SIDEREAL_AUTH_DISABLED=true). Only use this behind another authenticating proxy.');
+} else if (usingDefaultCredentials()) {
+  console.warn('Using the default admin / admin login. Set SIDEREAL_ADMIN_USER and SIDEREAL_ADMIN_PASSWORD.');
+}
 
 // Setup routes (wsManager set after server starts)
 // We'll register routes after creating wsManager

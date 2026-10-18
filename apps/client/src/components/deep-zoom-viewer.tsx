@@ -33,6 +33,11 @@ interface DeepZoomViewerProps {
    */
   tileInfoUrl?: string;
   tileUrlBase?: string;
+  /**
+   * Native pixel size the annotation coordinates refer to. Overlays are placed relative to it, so
+   * they stay correct whether the viewer shows full-resolution tiles or a resized fallback preview.
+   */
+  annotationSize?: { width: number | null; height: number | null } | null;
 }
 
 if (typeof window !== 'undefined') {
@@ -49,7 +54,7 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(style);
 }
 
-export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase }: DeepZoomViewerProps) {
+export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase, annotationSize }: DeepZoomViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdViewer = useRef<OpenSeadragon.Viewer | null>(null);
   const overlayElements = useRef<HTMLDivElement[]>([]);
@@ -260,6 +265,9 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     const tiledImage = osdViewer.current.world.getItemAt(0);
     if (!tiledImage) return;
     const imageRect = tiledImage.getBounds();
+    const contentSize = tiledImage.getContentSize();
+    const spaceX = annotationSize?.width || contentSize.x;
+    const spaceY = annotationSize?.height || contentSize.y;
 
     // Create a container div for overlays
     const overlayContainer = document.createElement('div');
@@ -276,14 +284,16 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     annotations.forEach((annotation, idx) => {
       if (annotation.pixelx == null || annotation.pixely == null) return;
       let overlayDiv;
-      if (annotation.radius && annotation.radius > 0) {
+      // Markers scale with the image so they stay visible on large frames.
+      const dotSize = Math.max(8, Math.min(spaceX, spaceY) / 250);
+      if (annotation.radius && annotation.radius > dotSize / 2) {
         // Render circle overlay
         overlayDiv = document.createElement('div');
         overlayDiv.style.position = 'absolute';
-        overlayDiv.style.left = `${((annotation.pixelx - annotation.radius) / tiledImage.getContentSize().x) * 100}%`;
-        overlayDiv.style.top = `${((annotation.pixely - annotation.radius) / tiledImage.getContentSize().y) * 100}%`;
-        overlayDiv.style.width = `${(annotation.radius * 2 / tiledImage.getContentSize().x) * 100}%`;
-        overlayDiv.style.height = `${(annotation.radius * 2 / tiledImage.getContentSize().y) * 100}%`;
+        overlayDiv.style.left = `${((annotation.pixelx - annotation.radius) / spaceX) * 100}%`;
+        overlayDiv.style.top = `${((annotation.pixely - annotation.radius) / spaceY) * 100}%`;
+        overlayDiv.style.width = `${(annotation.radius * 2 / spaceX) * 100}%`;
+        overlayDiv.style.height = `${(annotation.radius * 2 / spaceY) * 100}%`;
         overlayDiv.style.border = '2px solid #00FF00';
         overlayDiv.style.borderRadius = '50%';
         overlayDiv.style.boxSizing = 'border-box';
@@ -305,14 +315,13 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
           overlayDiv.appendChild(labelDiv);
         }
       } else {
-        // Render dot overlay (8px diameter)
-        const dotSize = 8;
+        // Render dot overlay for point-like objects
         overlayDiv = document.createElement('div');
         overlayDiv.style.position = 'absolute';
-        overlayDiv.style.left = `${((annotation.pixelx - dotSize / 2) / tiledImage.getContentSize().x) * 100}%`;
-        overlayDiv.style.top = `${((annotation.pixely - dotSize / 2) / tiledImage.getContentSize().y) * 100}%`;
-        overlayDiv.style.width = `${(dotSize / tiledImage.getContentSize().x) * 100}%`;
-        overlayDiv.style.height = `${(dotSize / tiledImage.getContentSize().y) * 100}%`;
+        overlayDiv.style.left = `${((annotation.pixelx - dotSize / 2) / spaceX) * 100}%`;
+        overlayDiv.style.top = `${((annotation.pixely - dotSize / 2) / spaceY) * 100}%`;
+        overlayDiv.style.width = `${(dotSize / spaceX) * 100}%`;
+        overlayDiv.style.height = `${(dotSize / spaceY) * 100}%`;
         overlayDiv.style.background = '#00FF00';
         overlayDiv.style.borderRadius = '50%';
         overlayDiv.style.boxSizing = 'border-box';
@@ -343,7 +352,7 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     });
     overlayElements.current.push(overlayContainer);
     osdViewer.current.forceRedraw();
-  }, [annotations, disableZoom]);
+  }, [annotations, disableZoom, annotationSize?.width, annotationSize?.height]);
 
   // Add/remove overlays when annotations change
   useEffect(() => {

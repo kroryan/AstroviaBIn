@@ -229,6 +229,28 @@ async function runMigrations() {
       );
     `;
 
+    await connection`
+      CREATE TABLE IF NOT EXISTS gallery_catalogs (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `;
+
+    await connection`
+      CREATE TABLE IF NOT EXISTS gallery_catalog_images (
+        id SERIAL PRIMARY KEY,
+        catalog_id INTEGER NOT NULL REFERENCES gallery_catalogs(id) ON DELETE CASCADE,
+        image_id INTEGER NOT NULL REFERENCES astrophotography_images(id) ON DELETE CASCADE,
+        added_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (catalog_id, image_id)
+      );
+    `;
+
+    await connection`CREATE INDEX IF NOT EXISTS gallery_catalog_images_image_idx ON gallery_catalog_images (image_id);`;
+
     // Add target_name column to astrophotography_images if not exists
     await connection`
       DO $$ BEGIN

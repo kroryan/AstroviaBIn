@@ -3,11 +3,15 @@ import { access, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { catalogService } from './catalog';
+import { or, eq } from 'drizzle-orm';
+import { db, schema } from '../db';
+import { normalizeObjectName } from '@shared/catalog-utils';
 import { storage } from './storage';
 import { resolveLibraryAssetPath } from './library';
 import { readFitsMetadata, readFitsHeader, resolveFitsFile } from './fits';
-import type { AstrometryAnnotation, AstrometryCalibration, PlateSolvingResult } from './astrometry';
+import { computeSkyAnnotations } from './sky-annotations';
+import { parseWcsHeaders, pixelScaleArcsec, pixelToSky, type WcsSolution } from './wcs';
+import type { AstrometryCalibration, PlateSolvingResult } from './astrometry';
 
 interface LocalImage {
   id: number;
@@ -19,84 +23,28 @@ interface LocalImage {
   ra?: string | number | null;
   dec?: string | number | null;
   pixelScale?: number | null;
+  targetName?: string | null;
 }
 
-interface WcsTransform {
+/** Optional position (and scale) supplied by the user to speed up or rescue a solve. */
+export interface SolveHint {
   ra: number;
   dec: number;
-  crpix1: number;
-  crpix2: number;
-  cd11: number;
-  cd12: number;
-  cd21: number;
-  cd22: number;
+  radiusDeg?: number;
+  scaleLowArcsec?: number;
+  scaleHighArcsec?: number;
 }
 
-function numberHeader(headers: Record<string, string | number | boolean>, key: string): number | undefined {
-  const value = headers[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+interface HintAttempt extends SolveHint {
+  label: string;
 }
 
-function radians(degrees: number): number {
-  return degrees * Math.PI / 180;
-}
-
-function degrees(radiansValue: number): number {
-  return radiansValue * 180 / Math.PI;
-}
-
-function getWcsTransform(headers: Record<string, string | number | boolean>): WcsTransform {
-  const ra = numberHeader(headers, 'CRVAL1');
-  const dec = numberHeader(headers, 'CRVAL2');
-  const crpix1 = numberHeader(headers, 'CRPIX1');
-  const crpix2 = numberHeader(headers, 'CRPIX2');
-  const cdelt1 = numberHeader(headers, 'CDELT1');
-  const cdelt2 = numberHeader(headers, 'CDELT2');
-  const cd11 = numberHeader(headers, 'CD1_1') ?? (cdelt1 === undefined ? undefined : cdelt1 * (numberHeader(headers, 'PC1_1') ?? 1));
-  const cd12 = numberHeader(headers, 'CD1_2') ?? (cdelt1 === undefined ? undefined : cdelt1 * (numberHeader(headers, 'PC1_2') ?? 0));
-  const cd21 = numberHeader(headers, 'CD2_1') ?? (cdelt2 === undefined ? undefined : cdelt2 * (numberHeader(headers, 'PC2_1') ?? 0));
-  const cd22 = numberHeader(headers, 'CD2_2') ?? (cdelt2 === undefined ? undefined : cdelt2 * (numberHeader(headers, 'PC2_2') ?? 1));
-  if ([ra, dec, crpix1, crpix2, cd11, cd12, cd21, cd22].some(value => value === undefined)) {
-    throw new Error('Local solver returned an incomplete WCS calibration');
-  }
-  if (Math.abs((cd11! * cd22!) - (cd12! * cd21!)) < Number.EPSILON) {
-    throw new Error('Local solver returned a singular WCS calibration');
-  }
-  return { ra: ra!, dec: dec!, crpix1: crpix1!, crpix2: crpix2!, cd11: cd11!, cd12: cd12!, cd21: cd21!, cd22: cd22! };
-}
-
-function pixelToSky(wcs: WcsTransform, x: number, y: number): { ra: number; dec: number } {
-  const dx = x + 1 - wcs.crpix1;
-  const dy = y + 1 - wcs.crpix2;
-  const xi = radians(wcs.cd11 * dx + wcs.cd12 * dy);
-  const eta = radians(wcs.cd21 * dx + wcs.cd22 * dy);
-  const ra0 = radians(wcs.ra);
-  const dec0 = radians(wcs.dec);
-  const denominator = Math.cos(dec0) - eta * Math.sin(dec0);
-  const ra = (degrees(ra0 + Math.atan2(xi, denominator)) + 360) % 360;
-  const dec = degrees(Math.atan2(
-    Math.sin(dec0) + eta * Math.cos(dec0),
-    Math.sqrt(denominator * denominator + xi * xi),
-  ));
-  return { ra, dec };
-}
-
-function skyToPixel(wcs: WcsTransform, ra: number, dec: number): { x: number; y: number } | null {
-  const ra0 = radians(wcs.ra);
-  const dec0 = radians(wcs.dec);
-  const targetRa = radians(ra);
-  const targetDec = radians(dec);
-  const deltaRa = Math.atan2(Math.sin(targetRa - ra0), Math.cos(targetRa - ra0));
-  const cosineDistance = Math.sin(dec0) * Math.sin(targetDec) + Math.cos(dec0) * Math.cos(targetDec) * Math.cos(deltaRa);
-  if (cosineDistance <= 0) return null;
-  const xi = Math.cos(targetDec) * Math.sin(deltaRa) / cosineDistance;
-  const eta = (Math.cos(dec0) * Math.sin(targetDec) - Math.sin(dec0) * Math.cos(targetDec) * Math.cos(deltaRa)) / cosineDistance;
-  const det = wcs.cd11 * wcs.cd22 - wcs.cd12 * wcs.cd21;
-  const xiDegrees = degrees(xi);
-  const etaDegrees = degrees(eta);
-  const dx = (wcs.cd22 * xiDegrees - wcs.cd12 * etaDegrees) / det;
-  const dy = (-wcs.cd21 * xiDegrees + wcs.cd11 * etaDegrees) / det;
-  return { x: dx + wcs.crpix1 - 1, y: dy + wcs.crpix2 - 1 };
+interface SolveSource {
+  path: string;
+  width: number;
+  height: number;
+  kind: 'fits' | 'image';
+  headers?: Record<string, string | number | boolean>;
 }
 
 function appendOutput(current: string, chunk: Buffer): string {
@@ -136,56 +84,109 @@ function run(command: string, args: string[], timeoutMs: number): Promise<string
   });
 }
 
-function coordinateHint(image: LocalImage): { ra: number; dec: number; pixelScale: number } | null {
+function validPosition(ra: number, dec: number): boolean {
+  return Number.isFinite(ra) && ra >= 0 && ra < 360 && Number.isFinite(dec) && dec >= -90 && dec <= 90;
+}
+
+/** Parses decimal degrees or sexagesimal ("12 05 15.1", "12:05:15", "12h05m15s"); RA sexagesimal is in hours. */
+export function parseCoordinate(value: unknown, kind: 'ra' | 'dec'): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const text = value.trim();
+  if (/^[+-]?\d+(\.\d+)?$/.test(text)) return Number(text);
+  const sign = text.startsWith('-') ? -1 : 1;
+  const parts = text.replace(/^[+-]/, '').split(/[\s:hdms°'"]+/i).filter(Boolean).map(Number);
+  if (parts.length < 2 || parts.length > 3 || parts.some(part => !Number.isFinite(part))) return undefined;
+  const magnitude = parts[0] + (parts[1] || 0) / 60 + (parts[2] || 0) / 3600;
+  return kind === 'ra' ? magnitude * 15 : sign * magnitude;
+}
+
+function headerNumber(headers: Record<string, string | number | boolean> | undefined, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = headers?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function fitsHeaderHint(headers: Record<string, string | number | boolean> | undefined): HintAttempt | null {
+  if (!headers) return null;
+  // Numeric RA values are degrees; sexagesimal strings (RA/OBJCTRA) are hours.
+  const ra = parseCoordinate(headers.RA ?? headers.OBJCTRA ?? headers.CRVAL1, 'ra');
+  const dec = parseCoordinate(headers.DEC ?? headers.OBJCTDEC ?? headers.CRVAL2, 'dec');
+  if (ra === undefined || dec === undefined || !validPosition(ra, dec)) return null;
+  let scale = headerNumber(headers, 'PIXSCALE', 'SECPIX', 'SCALE');
+  const focal = headerNumber(headers, 'FOCALLEN');
+  const pixel = headerNumber(headers, 'XPIXSZ', 'PIXSIZE1');
+  const binning = headerNumber(headers, 'XBINNING') ?? 1;
+  if (!scale && focal && pixel) scale = 206.265 * pixel * binning / focal;
+  return {
+    label: 'FITS header pointing',
+    ra, dec, radiusDeg: 3,
+    ...(scale ? { scaleLowArcsec: scale * 0.8, scaleHighArcsec: scale * 1.25 } : {}),
+  };
+}
+
+/** Finds M/NGC/IC designations in the title, filename, target and tags and resolves them in OpenNGC. */
+async function catalogHint(image: LocalImage): Promise<HintAttempt | null> {
+  const labels = [image.targetName, image.title, image.filename, ...(image.tags || [])].filter(Boolean) as string[];
+  const designations = new Set<string>();
+  for (const label of labels) {
+    for (const match of label.matchAll(/\b(NGC|IC|M)\s*0*(\d+)([A-Z]?)\b/gi)) {
+      designations.add(normalizeObjectName(`${match[1]} ${match[2]}${match[3]}`).toUpperCase());
+    }
+  }
+  for (const designation of designations) {
+    const messier = designation.replace(/^M\s*/, 'M ');
+    const rows = await db.select().from(schema.catalogObjects)
+      .where(or(eq(schema.catalogObjects.name, designation), eq(schema.catalogObjects.messier, messier)))
+      .execute();
+    const row = (rows as Array<{ raDeg: number | null; decDeg: number | null }>).find(item => item.raDeg !== null && item.decDeg !== null);
+    if (row) return { label: `catalog target ${designation}`, ra: row.raDeg!, dec: row.decDeg!, radiusDeg: 3 };
+  }
+  return null;
+}
+
+async function hintAttempts(image: LocalImage, source: SolveSource, userHint?: SolveHint): Promise<HintAttempt[]> {
+  const attempts: HintAttempt[] = [];
+  if (userHint && validPosition(userHint.ra, userHint.dec)) {
+    attempts.push({ label: 'user hint', radiusDeg: 3, ...userHint });
+  }
   const ra = Number(image.ra);
   const dec = Number(image.dec);
-  const pixelScale = Number(image.pixelScale);
-  if (!Number.isFinite(ra) || ra < 0 || ra >= 360 || !Number.isFinite(dec) || dec < -90 || dec > 90 || !Number.isFinite(pixelScale) || pixelScale <= 0) {
-    return null;
+  if (image.ra && image.dec && validPosition(ra, dec)) {
+    // A previous solution's scale may come from a resized upload, so only trust the position.
+    attempts.push({ label: 'previous solution', ra, dec, radiusDeg: 2 });
   }
-  return { ra, dec, pixelScale };
+  const header = fitsHeaderHint(source.headers);
+  if (header) attempts.push(header);
+  const catalog = await catalogHint(image).catch(() => null);
+  if (catalog) attempts.push(catalog);
+  const unique: HintAttempt[] = [];
+  for (const attempt of attempts) {
+    if (!unique.some(item => Math.abs(item.ra - attempt.ra) < 0.05 && Math.abs(item.dec - attempt.dec) < 0.05)) unique.push(attempt);
+  }
+  return unique.slice(0, 3);
 }
 
-async function solveFieldAttempt(
-  sourcePath: string,
-  workDirectory: string,
-  backendConfig: string,
-  options: { cpuLimitSeconds: number; timeoutMs: number; hint?: { ra: number; dec: number; pixelScale: number } },
-): Promise<string> {
-  await mkdir(workDirectory, { recursive: true, mode: 0o700 });
-  const wcsPath = path.join(workDirectory, 'solution.wcs');
-  const args = [
-    '--overwrite', '--no-plots', '--downsample', '2',
-    '--backend-config', backendConfig,
-    '--dir', workDirectory,
-    '--wcs', wcsPath,
-  ];
-  if (options.hint) {
-    const low = Math.max(0.01, options.hint.pixelScale * 0.7);
-    const high = options.hint.pixelScale * 1.3;
-    args.push(
-      '--ra', String(options.hint.ra),
-      '--dec', String(options.hint.dec),
-      '--radius', '5',
-      '--scale-units', 'arcsecperpix',
-      '--scale-low', String(low),
-      '--scale-high', String(high),
-    );
-  } else {
-    args.push(
-      '--scale-units', 'arcminwidth',
-      '--scale-low', process.env.ASTROMETRY_SCALE_LOW_ARCMIN || '15',
-      '--scale-high', process.env.ASTROMETRY_SCALE_HIGH_ARCMIN || '2000',
-    );
-  }
-  args.push('--cpulimit', String(options.cpuLimitSeconds), sourcePath);
-  await run(process.env.ASTROMETRY_SOLVE_FIELD || 'solve-field', args, options.timeoutMs);
-  await access(wcsPath);
-  return wcsPath;
+function indexDirectories(): string[] {
+  const extra = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(':').filter(Boolean);
+  return [path.resolve(process.env.ASTROMETRY_INDEX_DIR || '/usr/share/astrometry'), ...extra.map(dir => path.resolve(dir))];
 }
 
-function indexDirectory(): string {
-  return path.resolve(process.env.ASTROMETRY_INDEX_DIR || '/usr/share/astrometry');
+async function availableIndexDirectories(): Promise<{ directories: string[]; indexCount: number }> {
+  const directories: string[] = [];
+  let indexCount = 0;
+  for (const directory of indexDirectories()) {
+    try {
+      const count = (await readdir(directory)).filter(name => /^index-.*\.fits$/i.test(name)).length;
+      if (count > 0) {
+        directories.push(directory);
+        indexCount += count;
+      }
+    } catch { /* optional directory */ }
+  }
+  return { directories, indexCount };
 }
 
 export async function localAstrometryStatus(): Promise<{ available: boolean; solver: string; indexCount: number }> {
@@ -197,31 +198,120 @@ export async function localAstrometryStatus(): Promise<{ available: boolean; sol
   } catch {
     solverAvailable = false;
   }
-  let indexCount = 0;
-  try {
-    const names = await readdir(indexDirectory());
-    indexCount = names.filter(name => /^index-\d+.*\.fits$/i.test(name)).length;
-  } catch {
-    indexCount = 0;
-  }
+  const { indexCount } = await availableIndexDirectories();
   return { available: solverAvailable && indexCount > 0, solver, indexCount };
 }
 
-async function sourceFor(image: LocalImage): Promise<{ path: string; width: number; height: number }> {
+async function sourceFor(image: LocalImage): Promise<SolveSource> {
   const fitsPath = resolveFitsFile(image.originalPath || null);
   if (fitsPath) {
     const metadata = await readFitsMetadata(fitsPath);
-    return { path: fitsPath, width: metadata.width, height: metadata.height };
+    return { path: fitsPath, width: metadata.width, height: metadata.height, kind: 'fits', headers: metadata.headers };
   }
   const asset = await storage.getLibraryAssetForAstroImage(image.id);
   if (!asset) throw new Error('This image has no private local original in the Sidereal library');
   const imagePath = resolveLibraryAssetPath(asset);
   const metadata = await sharp(imagePath, { limitInputPixels: false }).metadata();
   if (!metadata.width || !metadata.height) throw new Error('Could not read image dimensions for plate solving');
-  return { path: imagePath, width: metadata.width, height: metadata.height };
+  // Pixel coordinates are in the stored orientation (EXIF rotation is not applied), which is how the
+  // tiled viewer renders the original as well.
+  return { path: imagePath, width: metadata.width, height: metadata.height, kind: 'image' };
 }
 
-export async function solveImageLocally(image: LocalImage): Promise<PlateSolvingResult> {
+/**
+ * Runs the noise-robust star extractor and returns an astrometry.net xylist, or null when the
+ * Python stack is unavailable or finds too few stars (solve-field then extracts on its own).
+ */
+async function extractStars(source: SolveSource, workDirectory: string): Promise<string | null> {
+  const python = process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python';
+  const script = process.env.STAR_EXTRACT_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/star_extract.py');
+  const output = path.join(workDirectory, 'stars.xyls');
+  try {
+    await access(script);
+    let summary: string;
+    if (source.kind === 'fits') {
+      summary = await run(python, [script, 'fits', source.path, output, '300'], 180_000);
+    } else {
+      const rawPath = path.join(workDirectory, 'luminance.u16');
+      const { data, info } = await sharp(source.path, { limitInputPixels: false })
+        .greyscale().toColourspace('grey16').raw({ depth: 'ushort' })
+        .toBuffer({ resolveWithObject: true });
+      if (info.width !== source.width || info.height !== source.height) throw new Error('Unexpected decoded size');
+      await writeFile(rawPath, data);
+      summary = await run(python, [script, 'raw', rawPath, String(info.width), String(info.height), output, '300'], 180_000);
+      await rm(rawPath, { force: true });
+    }
+    const sources = Number(JSON.parse(summary.trim().split('\n').pop() || '{}').sources);
+    return sources >= 8 ? output : null;
+  } catch (error) {
+    console.warn('Star extraction unavailable, falling back to solve-field source extraction:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+async function solveFieldAttempt(
+  source: SolveSource,
+  input: { xylist: string | null },
+  workDirectory: string,
+  backendConfig: string,
+  options: { cpuLimitSeconds: number; timeoutMs: number; hint?: HintAttempt },
+): Promise<string> {
+  await mkdir(workDirectory, { recursive: true, mode: 0o700 });
+  const wcsPath = path.join(workDirectory, 'solution.wcs');
+  const args = [
+    '--overwrite', '--no-plots',
+    '--backend-config', backendConfig,
+    '--dir', workDirectory,
+    '--wcs', wcsPath,
+    '--new-fits', 'none', '--rdls', 'none', '--corr', 'none', '--index-xyls', 'none', '--match', 'none',
+  ];
+  if (input.xylist) {
+    args.push('--width', String(source.width), '--height', String(source.height),
+      '--x-column', 'X', '--y-column', 'Y', '--sort-column', 'FLUX');
+  } else {
+    args.push('--downsample', String(Math.max(source.width, source.height) > 4000 ? 4 : 2));
+  }
+  const hint = options.hint;
+  if (hint) args.push('--ra', String(hint.ra), '--dec', String(hint.dec), '--radius', String(hint.radiusDeg ?? 3));
+  if (hint?.scaleLowArcsec && hint.scaleHighArcsec) {
+    args.push('--scale-units', 'arcsecperpix', '--scale-low', String(hint.scaleLowArcsec), '--scale-high', String(hint.scaleHighArcsec));
+  } else {
+    args.push(
+      '--scale-units', 'arcminwidth',
+      '--scale-low', process.env.ASTROMETRY_SCALE_LOW_ARCMIN || '5',
+      '--scale-high', process.env.ASTROMETRY_SCALE_HIGH_ARCMIN || '2000',
+    );
+  }
+  args.push('--cpulimit', String(options.cpuLimitSeconds), input.xylist || source.path);
+  await run(process.env.ASTROMETRY_SOLVE_FIELD || 'solve-field', args, options.timeoutMs);
+  await access(wcsPath);
+  return wcsPath;
+}
+
+export interface LocalSolveResult extends PlateSolvingResult {
+  wcs: WcsSolution;
+}
+
+export function calibrationFromWcs(wcs: WcsSolution): AstrometryCalibration {
+  const center = pixelToSky(wcs, (wcs.imageWidth + 1) / 2, (wcs.imageHeight + 1) / 2);
+  const scaleX = Math.hypot(wcs.cd11, wcs.cd21) * 3600;
+  const scaleY = Math.hypot(wcs.cd12, wcs.cd22) * 3600;
+  const widthArcsec = wcs.imageWidth * scaleX;
+  const heightArcsec = wcs.imageHeight * scaleY;
+  const determinant = wcs.cd11 * wcs.cd22 - wcs.cd12 * wcs.cd21;
+  return {
+    ra: center.ra,
+    dec: center.dec,
+    pixscale: pixelScaleArcsec(wcs),
+    radius: Math.hypot(widthArcsec, heightArcsec) / 7200,
+    orientation: (Math.atan2(-wcs.cd12, wcs.cd22) * 180 / Math.PI + 360) % 360,
+    width_arcsec: widthArcsec,
+    height_arcsec: heightArcsec,
+    parity: determinant < 0 ? -1 : 1,
+  };
+}
+
+export async function solveImageLocally(image: LocalImage, options: { hint?: SolveHint } = {}): Promise<LocalSolveResult> {
   const status = await localAstrometryStatus();
   if (!status.available) {
     throw new Error(`Local Astrometry.net is not ready (solver: ${status.solver}, index files: ${status.indexCount})`);
@@ -229,75 +319,50 @@ export async function solveImageLocally(image: LocalImage): Promise<PlateSolving
   const source = await sourceFor(image);
   const workDirectory = await mkdtemp(path.join(os.tmpdir(), 'sidereal-solve-'));
   const backendConfig = path.join(workDirectory, 'backend.cfg');
-  const timeoutMs = Number(process.env.ASTROMETRY_TIMEOUT_MS || 300_000);
-  const cpuLimitSeconds = Number(process.env.ASTROMETRY_CPU_LIMIT_SECONDS || 240);
-  await writeFile(backendConfig, `add_path ${indexDirectory()}\nautoindex\n`, { mode: 0o600 });
+  const totalBudgetMs = Number(process.env.ASTROMETRY_TIMEOUT_MS || 900_000);
+  const startedAt = Date.now();
+  const { directories } = await availableIndexDirectories();
+  await writeFile(backendConfig, `${directories.map(directory => `add_path ${directory}`).join('\n')}\nautoindex\n`, { mode: 0o600 });
   try {
+    const xylist = await extractStars(source, workDirectory);
+    const hints = await hintAttempts(image, source, options.hint);
+    const attempts: Array<{ label: string; xylist: string | null; hint?: HintAttempt; budgetMs: number }> = [];
+    const hintBudget = Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 120_000);
+    for (const hint of hints) {
+      attempts.push({ label: `${hint.label} (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist, hint, budgetMs: hintBudget });
+    }
+    attempts.push({ label: `blind (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist, budgetMs: Infinity });
+    if (xylist) attempts.push({ label: 'blind (solve-field extraction)', xylist: null, budgetMs: Infinity });
+
+    const failures: string[] = [];
     let wcsPath: string | undefined;
-    const hint = coordinateHint(image);
-    if (hint) {
+    for (const [index, attempt] of attempts.entries()) {
+      const remaining = totalBudgetMs - (Date.now() - startedAt);
+      if (remaining < 20_000) break;
+      // The last two blind attempts share what is left; hinted ones are capped.
+      const blindShare = attempt.hint ? attempt.budgetMs : index === attempts.length - 1 ? remaining : remaining * 0.6;
+      const timeoutMs = Math.max(20_000, Math.min(remaining, blindShare));
       try {
-        const hintTimeoutMs = Math.min(timeoutMs, Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 90_000));
-        const hintCpuLimitSeconds = Math.max(1, Math.floor(hintTimeoutMs / 1000) - 10);
-        wcsPath = await solveFieldAttempt(source.path, path.join(workDirectory, 'hinted'), backendConfig, {
-          cpuLimitSeconds: hintCpuLimitSeconds,
-          timeoutMs: hintTimeoutMs,
-          hint,
+        wcsPath = await solveFieldAttempt(source, attempt, path.join(workDirectory, `attempt-${index}`), backendConfig, {
+          cpuLimitSeconds: Math.max(10, Math.floor(timeoutMs / 1000) - 10),
+          timeoutMs,
+          hint: attempt.hint,
         });
+        console.log(`Local solve for image ${image.id} succeeded with ${attempt.label}`);
+        break;
       } catch (error) {
-        console.warn(`Coordinate-guided local solve failed for image ${image.id}; retrying blind against local indexes:`, error);
+        failures.push(`${attempt.label}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
       }
     }
     if (!wcsPath) {
-      const hintBudgetMs = hint ? Math.min(timeoutMs, Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 90_000)) : 0;
-      const fallbackTimeoutMs = Math.max(30_000, timeoutMs - hintBudgetMs);
-      const fallbackCpuLimitSeconds = Math.max(1, Math.min(cpuLimitSeconds, Math.floor(fallbackTimeoutMs / 1000) - 10));
-      wcsPath = await solveFieldAttempt(source.path, path.join(workDirectory, 'blind'), backendConfig, {
-        cpuLimitSeconds: fallbackCpuLimitSeconds,
-        timeoutMs: fallbackTimeoutMs,
-      });
+      throw new Error(`Local Astrometry.net could not solve this image. Attempts: ${failures.join(' | ') || 'none (time budget exhausted)'}. ` +
+        'Very sparse or noisy frames solve best with a coordinate hint (RA/Dec of the target).');
     }
-    const headers = await readFitsHeader(wcsPath);
-    const wcs = getWcsTransform(headers);
-    const center = pixelToSky(wcs, (source.width - 1) / 2, (source.height - 1) / 2);
-    const scaleX = Math.hypot(wcs.cd11, wcs.cd21) * 3600;
-    const scaleY = Math.hypot(wcs.cd12, wcs.cd22) * 3600;
-    const widthArcsec = source.width * scaleX;
-    const heightArcsec = source.height * scaleY;
-    const radius = Math.hypot(widthArcsec, heightArcsec) / 7200;
-    const determinant = wcs.cd11 * wcs.cd22 - wcs.cd12 * wcs.cd21;
-    const calibration: AstrometryCalibration = {
-      ra: center.ra,
-      dec: center.dec,
-      pixscale: Math.sqrt(Math.abs(determinant)) * 3600,
-      radius,
-      orientation: (Math.atan2(-wcs.cd12, wcs.cd22) * 180 / Math.PI + 360) % 360,
-      width_arcsec: widthArcsec,
-      height_arcsec: heightArcsec,
-      parity: determinant < 0 ? -1 : 1,
-    };
 
-    const target = await catalogService.matchTargetAtCoordinates(center.ra, center.dec, radius, [
-      image.title || '',
-      image.filename || '',
-      ...(image.tags || []),
-    ]);
-    const annotations: AstrometryAnnotation[] = [];
-    if (target?.raDeg != null && target.decDeg != null) {
-      const pixel = skyToPixel(wcs, target.raDeg, target.decDeg);
-      if (pixel && pixel.x >= 0 && pixel.x < source.width && pixel.y >= 0 && pixel.y < source.height) {
-        annotations.push({
-          type: 'ngc',
-          names: [target.name],
-          pixelx: pixel.x,
-          pixely: pixel.y,
-          ra: target.raDeg,
-          dec: target.decDeg,
-          radius: Math.max(target.majorAxis || 0, target.minorAxis || 0) * 30 / Math.max(calibration.pixscale, 0.001),
-        });
-      }
-    }
-    return { calibration, annotations, machineTags: [] };
+    const wcs = parseWcsHeaders(await readFitsHeader(wcsPath), source.width, source.height);
+    const calibration = calibrationFromWcs(wcs);
+    const annotations = await computeSkyAnnotations(wcs);
+    return { calibration, annotations, machineTags: [], wcs };
   } finally {
     await rm(workDirectory, { recursive: true, force: true });
   }

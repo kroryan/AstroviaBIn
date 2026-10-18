@@ -97,6 +97,8 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /build/dist ./dist
 COPY tools/scripts/hotpants_pipeline.py ./tools/scripts/hotpants_pipeline.py
 COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
+COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
+COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes
 
 # Create directories for runtime
 RUN mkdir -p /app/config /app/logs /app/sidecars /app/cache/thumbnails /app/cache/deep-zoom /app/library /app/fits-analysis

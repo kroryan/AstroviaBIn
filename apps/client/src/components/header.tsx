@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Settings, FileUp, FileImage, Loader2, Menu, ScanLine, Upload } from "lucide-react";
+import { Settings, FileUp, FileImage, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Link, useLocation } from "wouter";
 import { useState, useEffect, useRef } from "react";
@@ -23,6 +23,10 @@ const NAV_LINKS = [
 export function Header() {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    window.location.assign("/login");
+  };
   const [fitsScanning, setFitsScanning] = useState(false);
   const [uploadType, setUploadType] = useState<'image' | 'fits' | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -201,6 +205,9 @@ export function Header() {
                 </span>
               </Button>
             </Link>
+            <Button variant="ghost" size="icon" className="hidden md:inline-flex h-9 w-9" title="Sign out" onClick={signOut}>
+              <LogOut className="h-5 w-5" />
+            </Button>
 
             {/* Mobile hamburger menu */}
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -272,6 +279,12 @@ export function Header() {
                       </span>
                     )}
                   </Link>
+                  <button
+                    onClick={signOut}
+                    className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
+                  >
+                    <LogOut className="h-4 w-4" /> Sign out
+                  </button>
                 </nav>
               </SheetContent>
             </Sheet>

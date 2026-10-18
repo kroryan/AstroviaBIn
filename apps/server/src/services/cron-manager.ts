@@ -1,5 +1,6 @@
 import cron, { ScheduledTask } from 'node-cron';
 import { storage } from './storage';
+import { backupDatabase, pruneCaches } from './maintenance';
 
 import type { WsManager } from './ws-manager';
 
@@ -30,6 +31,7 @@ class CronManager {
 
     // Clean up old notifications daily
     this.setupNotificationCleanup();
+    this.setupMaintenance();
 
     this.isInitialized = true;
     console.log('[CRON] Cron manager initialized');
@@ -43,6 +45,17 @@ class CronManager {
       } catch (error: unknown) {
         console.error('[CRON] Failed to clean up notifications:', (error as Error).message);
       }
+    });
+  }
+
+  private setupMaintenance() {
+    this.scheduleJob('database-backup', 'Database Backup', '30 3 * * *', async () => {
+      const output = await backupDatabase();
+      if (output) console.log(`[CRON] Database backed up to ${output}`);
+    });
+    this.scheduleJob('cache-prune', 'Preview Cache Cleanup', '0 4 * * *', async () => {
+      const { removed, freedBytes } = await pruneCaches();
+      if (removed > 0) console.log(`[CRON] Removed ${removed} cached previews/tiles (${(freedBytes / 1024 ** 2).toFixed(1)} MB)`);
     });
   }
 

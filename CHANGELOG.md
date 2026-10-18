@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Login page and signed session cookies protecting every page, API route and the WebSocket (`SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD`, default admin / admin), with login throttling and sign-out.
+- Gallery catalogs: named groups of photos and FITS, gallery filter, per-image picker, bulk "add shown images".
+- Local plate solving stores the full WCS (TAN + SIP); annotations for every OpenNGC object in the field are projected from it at native resolution.
+- Noise-robust star extraction, automatic solve hints (previous solution, FITS pointing, M/NGC/IC names) and a manual RA/Dec hint; "Re-solve locally" from the image sheet.
+- Support for extra narrow-field Astrometry.net index directories and a `download-astrometry-indexes` helper.
+- Daily consistent SQLite backups and bounded preview/tile caches.
+
+### Fixed
+- Annotations from solves imported from nova.astrometry.net were drawn in the coordinate space of the resized upload; they are now scaled to native pixels and flagged until re-solved.
+- Sparse or noisy frames failing to solve because the built-in extractor found too few stars.
+- `preview=full` FITS renders are bounded (`FITS_FULL_PREVIEW_MAX`) instead of allocating the whole frame.
+- `/api/health` reports the real version; the worker no longer logs the auto-solve-disabled message every cycle.
+- Stale route tests after the move away from Immich and multipart uploads.
+
 ## [0.10.5] - 2026-10-06
 
 ### Fixed

@@ -7,9 +7,25 @@ import { localAstrometryStatus } from '../services/astrometry-local';
 import { filterRelevantTags } from '../services/tags-utils';
 import { handleRouteError } from './route-utils';
 import { isPostgres, sqliteDbPath } from '../db';
-import { stat, readFile } from 'node:fs/promises';
+import { stat, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { snapshotDatabase } from '../services/maintenance';
 import type { WsManager } from '../services/ws-manager';
+import { readFileSync } from 'node:fs';
+
+let cachedVersion: string | undefined;
+/** `npm_package_version` is only set under `npm run`; the container starts node directly. */
+function appVersion(): string {
+  if (cachedVersion) return cachedVersion;
+  try {
+    cachedVersion = String(JSON.parse(readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8')).version || 'unknown');
+  } catch {
+    cachedVersion = process.env.npm_package_version || 'unknown';
+  }
+  return cachedVersion;
+}
 
 export default function systemRoutes(wsManager?: WsManager) {
   const app = new Hono();
@@ -32,6 +48,22 @@ export default function systemRoutes(wsManager?: WsManager) {
       const contents = await readFile(source, 'utf8');
       return c.text(contents, 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
     } catch { return c.text('License file unavailable', 404); }
+  });
+
+  // Astrometry.net software and index-data notices as installed in the image (Debian copyright
+  // files) plus the 4200-series index license kept next to any extra downloaded index files.
+  app.get('/licenses/astrometry/:document', async c => {
+    const extraIndexDir = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(':').filter(Boolean)[0];
+    const documents: Record<string, string> = {
+      software: '/usr/share/doc/astrometry.net/copyright',
+      'index-2mass': '/usr/share/doc/astrometry-data-2mass-08-19/copyright',
+      ...(extraIndexDir ? { 'index-4200': path.join(path.resolve(extraIndexDir), 'LICENSE-4200.txt') } : {}),
+    };
+    const source = documents[c.req.param('document')];
+    if (!source) return c.text('Not found', 404);
+    try {
+      return c.text(await readFile(source, 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+    } catch { return c.text('License file unavailable on this installation', 404); }
   });
 
   // Save admin settings
@@ -198,7 +230,11 @@ export default function systemRoutes(wsManager?: WsManager) {
         return c.json({ message: 'SQLite database path not configured' }, 500);
       }
 
-      const dbBuffer = await readFile(sqliteDbPath);
+      // A VACUUM INTO snapshot is consistent even while the app is writing (unlike copying the file).
+      const snapshot = path.join(os.tmpdir(), `sidereal-backup-${randomUUID()}.db`);
+      await snapshotDatabase(snapshot);
+      const dbBuffer = await readFile(snapshot);
+      await rm(snapshot, { force: true });
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `sidereal-backup-${timestamp}.db`;
 
@@ -240,7 +276,7 @@ export default function systemRoutes(wsManager?: WsManager) {
           pid: workerStatus.pid,
           restartAttempts: workerStatus.restartAttempts,
         },
-        version: process.env.npm_package_version || 'unknown',
+        version: appVersion(),
         nodeVersion: process.version,
       };
 

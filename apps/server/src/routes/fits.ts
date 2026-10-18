@@ -255,7 +255,10 @@ app.get('/:imageId/preview', async (c) => {
       hotPixelThreshold: query.hotPixelThreshold ? Number(query.hotPixelThreshold) : undefined,
       colorMap: query.colorMap,
     });
-    const maximumDimension = query.preview === 'interactive' ? 1024 : query.preview === 'full' ? Infinity : 2048;
+    // `full` is the non-tiled fallback; native-resolution viewing goes through /tile. Cap it so a single
+    // request cannot allocate gigabytes for a very large frame.
+    const fullMaximum = Number(process.env.FITS_FULL_PREVIEW_MAX) > 0 ? Number(process.env.FITS_FULL_PREVIEW_MAX) : 4096;
+    const maximumDimension = query.preview === 'interactive' ? 1024 : query.preview === 'full' ? fullMaximum : 2048;
     const preview = await cachedFitsPreview(filePath, settings, maximumDimension);
     const body = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer;
     return new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });

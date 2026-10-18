@@ -12,6 +12,7 @@ class PlateSolvingWorker {
   private ws: WebSocket | null = null;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
+  private loggedAutoDisabled = false;
 
   constructor() {
     this.astrometryService = new AstrometryService(true);
@@ -20,7 +21,9 @@ class PlateSolvingWorker {
 
   private connectToServer() {
     try {
-      this.ws = new WebSocket('ws://localhost:5000/ws');
+      const port = process.env.PORT || '5000';
+      const token = process.env.SIDEREAL_INTERNAL_TOKEN;
+      this.ws = new WebSocket(`ws://localhost:${port}/ws`, token ? { headers: { 'x-sidereal-internal': token } } : undefined);
 
       this.ws.on('open', () => {
         console.log('Worker connected to server via WebSocket');
@@ -102,9 +105,11 @@ class PlateSolvingWorker {
     const astrometryConfig = await this.getWorkerConfig();
 
     if (!astrometryConfig.enabled || !astrometryConfig.autoEnabled) {
-      console.log('Automatic local plate solving is disabled, skipping job creation');
+      if (!this.loggedAutoDisabled) console.log('Automatic local plate solving is disabled, skipping job creation');
+      this.loggedAutoDisabled = true;
       return;
     }
+    this.loggedAutoDisabled = false;
 
     const images = await storage.getAstroImages();
     const jobs = await storage.getPlateSolvingJobs();

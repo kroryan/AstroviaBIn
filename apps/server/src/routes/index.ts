@@ -12,6 +12,7 @@ import userTargetRoutes from './user-targets';
 import fitsRoutes from './fits';
 import libraryRoutes from './library';
 import hotpantsRoutes from './hotpants';
+import galleryCatalogRoutes from './gallery-catalogs';
 import type { WsManager } from '../services/ws-manager';
 
 export function registerRoutes(app: Hono, wsManager?: WsManager) {
@@ -27,5 +28,6 @@ export function registerRoutes(app: Hono, wsManager?: WsManager) {
   app.route('/api/fits', fitsRoutes);
   app.route('/api/fits', hotpantsRoutes);
   app.route('/api/library', libraryRoutes);
+  app.route('/api/gallery-catalogs', galleryCatalogRoutes);
   app.route('/api', systemRoutes(wsManager));
 }

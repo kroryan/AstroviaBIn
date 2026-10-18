@@ -12,25 +12,25 @@ From the repository root:
 ```bash
 git clone --branch v0.x https://github.com/kroryan/sidereal.git
 cd sidereal
-mkdir -p /mnt/Expansion/Sidereal/AppData /mnt/Expansion/Sidereal/Media
-mkdir -p /mnt/Expansion/Sidereal/FITS/{library,derivatives,uploads,analysis}
+mkdir -p /srv/sidereal/AppData /srv/sidereal/Media
+mkdir -p /srv/sidereal/FITS/{library,derivatives,uploads,analysis}
 docker compose up -d --build
 docker compose ps
 ```
 
 Open `http://localhost:5000`. Both `docker-compose.yml` and
 `docker-compose.prod.yml` build this fork's image locally. The default
-paths use `/mnt/Expansion/Sidereal`; put the following in a Compose
+paths use `/srv/sidereal`; put the following in a Compose
 `.env` file to use another disk:
 
 ```dotenv
 SIDEREAL_PORT=5000
-SIDEREAL_HOST_DATA=/mnt/Expansion/Sidereal/AppData
-SIDEREAL_HOST_LIBRARY=/mnt/Expansion/Sidereal/Media
-FITS_HOST_LIBRARY=/mnt/Expansion/Sidereal/FITS/library
-FITS_HOST_DERIVATIVES=/mnt/Expansion/Sidereal/FITS/derivatives
-FITS_HOST_UPLOADS=/mnt/Expansion/Sidereal/FITS/uploads
-FITS_HOST_ANALYSIS=/mnt/Expansion/Sidereal/FITS/analysis
+SIDEREAL_HOST_DATA=/srv/sidereal/AppData
+SIDEREAL_HOST_LIBRARY=/srv/sidereal/Media
+FITS_HOST_LIBRARY=/srv/sidereal/FITS/library
+FITS_HOST_DERIVATIVES=/srv/sidereal/FITS/derivatives
+FITS_HOST_UPLOADS=/srv/sidereal/FITS/uploads
+FITS_HOST_ANALYSIS=/srv/sidereal/FITS/analysis
 ```
 
 The mounted FITS library is read-only to the container. Direct uploads

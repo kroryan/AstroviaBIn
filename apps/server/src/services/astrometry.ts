@@ -5,7 +5,8 @@ import { configService } from './config';
 import { getConstellationFromCoordinates } from './constellation-utils';
 import { filterRelevantTags } from './tags-utils';
 import { catalogService } from './catalog';
-import { solveImageLocally } from './astrometry-local';
+import { solveImageLocally, type SolveHint } from './astrometry-local';
+import type { WcsSolution } from './wcs';
 
 import type { WsManager } from './ws-manager';
 
@@ -35,6 +36,8 @@ export interface AstrometryAnnotation {
   ra?: number;
   dec?: number;
   vmag?: number;
+  /** OpenNGC object class (G, PN, OCl, ...). */
+  objectType?: string;
   pixelX?: number;
   pixelY?: number;
 }
@@ -43,6 +46,16 @@ export interface PlateSolvingResult {
   calibration: AstrometryCalibration;
   annotations: AstrometryAnnotation[];
   machineTags: string[];
+  /** Full solution (TAN + SIP) for local solves; annotations are recomputed from it on demand. */
+  wcs?: WcsSolution;
+}
+
+/** Stored job payload while a job is queued: carries the optional user hint to the worker. */
+function hintFromStoredJob(result: unknown): SolveHint | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const hint = (result as { hint?: SolveHint }).hint;
+  if (!hint || !Number.isFinite(hint.ra) || !Number.isFinite(hint.dec)) return undefined;
+  return hint;
 }
 
 export type PlateSolvingPollOutcome =
@@ -83,15 +96,17 @@ function resultFromStoredJob(result: unknown): PlateSolvingResult | undefined {
     calibration,
     annotations: Array.isArray(value.annotations) ? value.annotations as AstrometryAnnotation[] : [],
     machineTags: [],
+    ...(value.wcs && typeof value.wcs === 'object' ? { wcs: value.wcs as WcsSolution } : {}),
   };
 }
 
 export class AstrometryService {
   private readonly localSubmissionJobs = new Map<string, number>();
+  private readonly activeSolves = new Set<number>();
 
   constructor(_useConfigService: boolean = true) {}
 
-  async submitImageForPlateSolving(image: SolvableImage): Promise<{ submissionId: string; jobId: number }> {
+  async submitImageForPlateSolving(image: SolvableImage, hint?: SolveHint): Promise<{ submissionId: string; jobId: number }> {
     if (!image.libraryAssetId && !image.originalPath?.startsWith('fits://') &&
         !image.originalPath?.startsWith('fits-derived://') && !image.originalPath?.startsWith('fits-upload://')) {
       throw new Error('This image has no private local source available for plate solving');
@@ -103,7 +118,7 @@ export class AstrometryService {
       astrometrySubmissionId: submissionId,
       astrometryJobId: null,
       status: 'processing',
-      result: null,
+      result: hint ? { hint } : null,
     });
     this.localSubmissionJobs.set(submissionId, job.id);
     if (wsManager) wsManager.broadcast('plate-solving-update', {
@@ -150,7 +165,7 @@ export class AstrometryService {
       status: 'success',
       astrometrySubmissionId: job.astrometrySubmissionId?.startsWith('local-') ? job.astrometrySubmissionId : localJobId,
       astrometryJobId: localJobId,
-      result: { ...result.calibration, annotations: result.annotations } as any,
+      result: { ...result.calibration, annotations: result.annotations, ...(result.wcs ? { wcs: result.wcs } : {}) } as any,
     });
 
     if (job.imageId === null) return;
@@ -205,8 +220,8 @@ export class AstrometryService {
     });
   }
 
-  async completePlateSolvingWorkflow(image: SolvableImage): Promise<PlateSolvingWorkflowOutcome> {
-    const { jobId, submissionId } = await this.submitImageForPlateSolving(image);
+  async completePlateSolvingWorkflow(image: SolvableImage, hint?: SolveHint): Promise<PlateSolvingWorkflowOutcome> {
+    const { jobId, submissionId } = await this.submitImageForPlateSolving(image, hint);
     return {
       status: 'processing',
       jobId,
@@ -225,8 +240,11 @@ export class AstrometryService {
     const image = await storage.getAstroImage(job.imageId);
     if (!image) throw new Error('Image not found for local plate solving');
 
+    // The worker polls every few seconds; never run two solves of the same job in this process.
+    if (this.activeSolves.has(job.id)) return { status: 'processing' };
+    this.activeSolves.add(job.id);
     try {
-      const result = await solveImageLocally(image);
+      const result = await solveImageLocally(image, { hint: hintFromStoredJob(job.result) });
       await this.updateJobAndImage(job.id, result);
       return { status: 'success', result };
     } catch (error) {
@@ -245,6 +263,8 @@ export class AstrometryService {
         result: { error: message },
       });
       return { status: 'failed', result: { error: message } as unknown as PlateSolvingResult };
+    } finally {
+      this.activeSolves.delete(job.id);
     }
   }
 }

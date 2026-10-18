@@ -5,6 +5,7 @@ import { SearchFilters } from "@/components/search-filters";
 import { ImageGallery } from "@/components/image-gallery";
 import { Sidebar } from "@/components/sidebar";
 import { ImageOverlay } from "@/components/image-overlay";
+import { GalleryCatalogBar } from "@/components/gallery-catalog-bar";
 import { usePlateSolvingUpdates } from "@/hooks/use-socket";
 import { useSearch, useLocation } from "wouter";
 import type { AstroImage, Equipment } from "@shared/schema";
@@ -22,6 +23,7 @@ export default function Home() {
     search: "",
     equipmentId: undefined as number | undefined,
     equipmentName: undefined as string | undefined,
+    galleryCatalogId: undefined as number | undefined,
   });
   const [visibleCount, setVisibleCount] = useState(12); // Show 12 images initially
 
@@ -29,7 +31,7 @@ export default function Home() {
   type Tag = { tag: string; count: number };
 
   const { data: images = [], isLoading: imagesLoading, refetch: refetchImages } = useQuery<AstroImage[]>({
-    queryKey: ["/api/images", { objectType: filters.objectType, tags: filters.tags, plateSolved: filters.plateSolved, constellation: filters.constellation, equipmentId: filters.equipmentId }],
+    queryKey: ["/api/images", { objectType: filters.objectType, tags: filters.tags, plateSolved: filters.plateSolved, constellation: filters.constellation, equipmentId: filters.equipmentId, galleryCatalogId: filters.galleryCatalogId }],
     enabled: true,
   });
 
@@ -134,6 +136,11 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full overflow-x-hidden">
         <div className="flex flex-col lg:flex-row gap-6">
           <main className="flex-1">
+            <GalleryCatalogBar
+              selectedId={filters.galleryCatalogId}
+              onSelect={(galleryCatalogId) => handleFiltersChange({ ...filters, galleryCatalogId })}
+              visibleImageIds={filteredImages.map(image => image.id)}
+            />
             <ImageGallery
               images={visibleImages}
               equipment={equipment}

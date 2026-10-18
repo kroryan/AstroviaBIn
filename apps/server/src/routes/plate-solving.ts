@@ -4,6 +4,33 @@ import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
 import { isPlateSolvingEligible } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
+import { parseCoordinate, type SolveHint } from '../services/astrometry-local';
+
+/** Optional `{ hint: { ra, dec, radius?, scaleLow?, scaleHigh? } }` body; RA/Dec accept degrees or sexagesimal. */
+async function solveHint(request: Request): Promise<SolveHint | undefined> {
+  if (!request.headers.get('content-type')?.includes('application/json')) return undefined;
+  const body = await request.json().catch(() => null) as { hint?: Record<string, unknown> } | null;
+  const value = body?.hint;
+  if (!value) return undefined;
+  const ra = parseCoordinate(value.ra, 'ra');
+  const dec = parseCoordinate(value.dec, 'dec');
+  if (ra === undefined || dec === undefined || ra < 0 || ra >= 360 || dec < -90 || dec > 90) {
+    throw new HintError('Enter RA as degrees or hh:mm:ss and Dec as degrees or ±dd:mm:ss');
+  }
+  const number = (item: unknown) => {
+    const parsed = Number(item);
+    return item !== undefined && item !== '' && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
+  const scaleLowArcsec = number(value.scaleLow);
+  const scaleHighArcsec = number(value.scaleHigh);
+  return {
+    ra, dec,
+    radiusDeg: Math.min(number(value.radius) ?? 3, 30),
+    ...(scaleLowArcsec && scaleHighArcsec && scaleHighArcsec > scaleLowArcsec ? { scaleLowArcsec, scaleHighArcsec } : {}),
+  };
+}
+
+class HintError extends Error {}
 import type { WsManager } from '../services/ws-manager';
 
 export default (wsManager?: WsManager) => {
@@ -34,8 +61,15 @@ export default (wsManager?: WsManager) => {
         return c.json({ status: 'processing', jobId: existingJob.id, submissionId: existingJob.astrometrySubmissionId, message: 'This image is already queued for private local solving.' }, 202);
       }
 
+      let hint: SolveHint | undefined;
+      try {
+        hint = await solveHint(c.req.raw);
+      } catch (error) {
+        if (error instanceof HintError) return c.json({ message: error.message }, 400);
+        throw error;
+      }
       // Use the shared service to complete the full plate solving workflow
-      const outcome = await astrometryService.completePlateSolvingWorkflow(image);
+      const outcome = await astrometryService.completePlateSolvingWorkflow(image, hint);
       if (outcome.status === 'processing') return c.json(outcome, 202);
 
       return c.json({
@@ -69,7 +103,7 @@ export default (wsManager?: WsManager) => {
   // Bulk submit images for plate solving
   app.post('/bulk', async (c) => {
     try {
-      const { imageIds } = await c.req.json();
+      const { imageIds, force } = await c.req.json();
 
       if (!Array.isArray(imageIds) || imageIds.length === 0) {
         return c.json({ message: 'imageIds array is required' }, 400);
@@ -93,12 +127,20 @@ export default (wsManager?: WsManager) => {
             continue;
           }
 
-          if (image.plateSolved) {
+          // `force` re-solves locally (e.g. to replace imported solutions with a full WCS); the
+          // previous solution stays in place until the new one succeeds.
+          if (image.plateSolved && force !== true) {
             results.push({ imageId, success: false, error: 'Image already plate solved' });
             continue;
           }
           if (!isPlateSolvingEligible(image.tags)) {
             results.push({ imageId, success: false, error: 'Plate solving requires the Deep Sky tag; Solar System and planet tags are excluded' });
+            continue;
+          }
+
+          const latest = await storage.getLatestPlateSolvingJob(imageId);
+          if (latest && ['pending', 'processing'].includes(latest.status)) {
+            results.push({ imageId, success: false, error: 'Already queued for local solving' });
             continue;
           }
 

@@ -178,3 +178,19 @@ export const userTargets = sqliteTable('user_targets', {
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });
+
+/** User-defined gallery catalogs: named groupings of photos and FITS frames. */
+export const galleryCatalogs = sqliteTable('gallery_catalogs', {
+    id: integer('id').primaryKey(),
+    name: text('name').notNull().unique(),
+    description: text('description'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});
+
+export const galleryCatalogImages = sqliteTable('gallery_catalog_images', {
+    id: integer('id').primaryKey(),
+    catalogId: integer('catalog_id').notNull().references(() => galleryCatalogs.id, { onDelete: 'cascade' }),
+    imageId: integer('image_id').notNull().references(() => astrophotographyImages.id, { onDelete: 'cascade' }),
+    addedAt: integer('added_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});

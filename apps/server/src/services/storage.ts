@@ -1,12 +1,12 @@
 import { db, schema, isPostgres } from '../db';
 import { eq, and, inArray, lte, desc, sql } from 'drizzle-orm';
 import { like, or } from 'drizzle-orm';
-import type { AstroImage, InsertAstroImage, LibraryAsset, InsertLibraryAsset, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget } from "@shared/types";
+import type { AstroImage, InsertAstroImage, LibraryAsset, InsertLibraryAsset, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget, GalleryCatalog } from "@shared/types";
 import { computeImageSummary, groupAndEnrichTargets } from '@shared/image-utils';
 
 class DbStorage {
   // Astrophotography images
-  async getAstroImages(filters?: { objectType?: string; tags?: string[]; plateSolved?: boolean; constellation?: string; equipmentId?: number }): Promise<AstroImage[]> {
+  async getAstroImages(filters?: { objectType?: string; tags?: string[]; plateSolved?: boolean; constellation?: string; equipmentId?: number; galleryCatalogId?: number }): Promise<AstroImage[]> {
     const conditions = [];
 
     if (filters) {
@@ -38,6 +38,14 @@ class DbStorage {
           sql`${schema.astrophotographyImages.id} IN (
             SELECT ${schema.imageEquipment.imageId} FROM ${schema.imageEquipment}
             WHERE ${schema.imageEquipment.equipmentId} = ${filters.equipmentId}
+          )`
+        );
+      }
+      if (filters.galleryCatalogId) {
+        conditions.push(
+          sql`${schema.astrophotographyImages.id} IN (
+            SELECT ${schema.galleryCatalogImages.imageId} FROM ${schema.galleryCatalogImages}
+            WHERE ${schema.galleryCatalogImages.catalogId} = ${filters.galleryCatalogId}
           )`
         );
       }
@@ -122,6 +130,7 @@ class DbStorage {
     await db.delete(schema.plateSolvingJobs).where(eq(schema.plateSolvingJobs.imageId, id)).execute();
     await db.delete(schema.imageEquipment).where(eq(schema.imageEquipment.imageId, id)).execute();
     await db.delete(schema.imageAcquisition).where(eq(schema.imageAcquisition.imageId, id)).execute();
+    await db.delete(schema.galleryCatalogImages).where(eq(schema.galleryCatalogImages.imageId, id)).execute();
     await db.delete(schema.astrophotographyImages).where(eq(schema.astrophotographyImages.id, id)).execute();
     return true;
   }
@@ -667,6 +676,71 @@ class DbStorage {
       console.error("Failed to get stats:", error);
       throw error;
     }
+  }
+
+  // Gallery catalogs (user-defined groupings of photos and FITS)
+  async getGalleryCatalogs(): Promise<Array<GalleryCatalog & { imageCount: number; coverImageId: number | null }>> {
+    const catalogs = await db.select().from(schema.galleryCatalogs).orderBy(schema.galleryCatalogs.name).execute() as GalleryCatalog[];
+    const items = await db.select().from(schema.galleryCatalogImages).orderBy(desc(schema.galleryCatalogImages.addedAt)).execute() as Array<{ catalogId: number; imageId: number }>;
+    return catalogs.map(catalog => {
+      const members = items.filter(item => item.catalogId === catalog.id);
+      return { ...catalog, imageCount: members.length, coverImageId: members[0]?.imageId ?? null };
+    });
+  }
+
+  async getGalleryCatalog(id: number): Promise<GalleryCatalog | undefined> {
+    const rows = await db.select().from(schema.galleryCatalogs).where(eq(schema.galleryCatalogs.id, id)).execute();
+    return rows[0];
+  }
+
+  async getGalleryCatalogByName(name: string): Promise<GalleryCatalog | undefined> {
+    const rows = await db.select().from(schema.galleryCatalogs).where(sql`lower(${schema.galleryCatalogs.name}) = lower(${name})`).execute();
+    return rows[0];
+  }
+
+  async createGalleryCatalog(data: { name: string; description?: string | null }): Promise<GalleryCatalog> {
+    const rows = await db.insert(schema.galleryCatalogs).values({ name: data.name, description: data.description ?? null }).returning().execute();
+    return rows[0];
+  }
+
+  async updateGalleryCatalog(id: number, data: { name?: string; description?: string | null }): Promise<GalleryCatalog | undefined> {
+    const rows = await db.update(schema.galleryCatalogs).set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.galleryCatalogs.id, id)).returning().execute();
+    return rows[0];
+  }
+
+  async deleteGalleryCatalog(id: number): Promise<void> {
+    // Only the grouping is removed; the photos and FITS themselves stay in the gallery.
+    await db.delete(schema.galleryCatalogImages).where(eq(schema.galleryCatalogImages.catalogId, id)).execute();
+    await db.delete(schema.galleryCatalogs).where(eq(schema.galleryCatalogs.id, id)).execute();
+  }
+
+  async addImagesToGalleryCatalog(catalogId: number, imageIds: number[]): Promise<number> {
+    if (imageIds.length === 0) return 0;
+    const existingImages = await db.select({ id: schema.astrophotographyImages.id }).from(schema.astrophotographyImages)
+      .where(inArray(schema.astrophotographyImages.id, imageIds)).execute() as Array<{ id: number }>;
+    const present = await db.select({ imageId: schema.galleryCatalogImages.imageId }).from(schema.galleryCatalogImages)
+      .where(eq(schema.galleryCatalogImages.catalogId, catalogId)).execute() as Array<{ imageId: number }>;
+    const already = new Set(present.map(row => row.imageId));
+    const toAdd = existingImages.map(row => row.id).filter(id => !already.has(id));
+    if (toAdd.length > 0) {
+      await db.insert(schema.galleryCatalogImages).values(toAdd.map(imageId => ({ catalogId, imageId }))).execute();
+      await db.update(schema.galleryCatalogs).set({ updatedAt: new Date() }).where(eq(schema.galleryCatalogs.id, catalogId)).execute();
+    }
+    return toAdd.length;
+  }
+
+  async removeImageFromGalleryCatalog(catalogId: number, imageId: number): Promise<void> {
+    await db.delete(schema.galleryCatalogImages).where(and(
+      eq(schema.galleryCatalogImages.catalogId, catalogId),
+      eq(schema.galleryCatalogImages.imageId, imageId),
+    )).execute();
+  }
+
+  async getGalleryCatalogIdsForImage(imageId: number): Promise<number[]> {
+    const rows = await db.select({ catalogId: schema.galleryCatalogImages.catalogId }).from(schema.galleryCatalogImages)
+      .where(eq(schema.galleryCatalogImages.imageId, imageId)).execute() as Array<{ catalogId: number }>;
+    return rows.map(row => row.catalogId);
   }
 }
 

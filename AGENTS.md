@@ -1,6 +1,6 @@
 # Sidereal — Agent Guide
 
-**Sidereal** is a self-hosted photo gallery and management system for astrophotographers. It integrates with [Immich](https://immich.app/) to provide plate solving (via Astrometry.net), equipment tracking, and deep-sky imaging metadata management.
+**Sidereal** is a self-hosted photo and FITS library for astrophotographers. This fork stores uploads in its own library (no Immich), plate-solves locally with Astrometry.net (WCS with SIP distortion is persisted and annotations are projected from it), runs HOTPANTS/Photutils difference analyses, and tracks equipment and deep-sky imaging metadata. Access requires a login (`SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD`).
 
 **Stack:** TypeScript monorepo · React 19 + Vite (frontend) · Hono (backend) · Drizzle ORM · SQLite (default) / PostgreSQL · Playwright (E2E)
 
@@ -60,7 +60,7 @@ cp .env.example .env.local
 | `npm run dev:frontend` | Vite dev server only |
 | `npm run dev:worker` | Worker process only |
 | `npm run check` | TypeScript type checking — **run this after every change** |
-| `npm run test` | Unit tests (`packages/shared/src/**/*.test.ts`) |
+| `npm run test` | Unit tests (`packages/shared/src/**/*.test.ts` and `apps/server/src/**/*.test.ts`) |
 | `npm run test:e2e` | Playwright E2E tests (requires app on port 5173) |
 | `npm run build` | Production build (frontend + backend) |
 | `npm run db:migrate` | Apply Drizzle migrations |
@@ -112,14 +112,14 @@ cp .env.example .env.local
 | `NODE_ENV` | `development` | Environment |
 | `DATABASE_URL` | *(unset)* | PostgreSQL connection string; omit to use SQLite |
 
-Runtime configuration (Immich API key, Astrometry.net API key, sync schedules, plate-solving settings) is managed through the admin UI at `/admin` and persisted in the database — it takes precedence over environment variables.
+Runtime configuration (catalog, worker and local plate-solving settings) is managed through the admin UI at `/admin` and persisted in the database — it takes precedence over environment variables. Login credentials and storage paths are environment-only; see the README's environment table.
 
 See `.env.example` and `.env.worker.example` for the full list.
 
 ## Testing
 
 - Run `npm run check` after every change — this is the minimum bar.
-- Unit tests live alongside source in `packages/shared/src/`.
+- Unit tests live alongside source in `packages/shared/src/` and `apps/server/src/`.
 - E2E tests use the Page Object Model; page objects are in `tests/e2e/pages/`.
 - E2E tests require the dev server running (`npm run dev`) before invoking `npm run test:e2e`.
 

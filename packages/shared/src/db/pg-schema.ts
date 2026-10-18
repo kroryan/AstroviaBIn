@@ -182,6 +182,22 @@ export const userTargets = pgTable('user_targets', {
 });
 
 
+/** User-defined gallery catalogs: named groupings of photos and FITS frames. */
+export const galleryCatalogs = pgTable('gallery_catalogs', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const galleryCatalogImages = pgTable('gallery_catalog_images', {
+  id: serial('id').primaryKey(),
+  catalogId: integer('catalog_id').notNull().references(() => galleryCatalogs.id, { onDelete: 'cascade' }),
+  imageId: integer('image_id').notNull().references(() => astrophotographyImages.id, { onDelete: 'cascade' }),
+  addedAt: timestamp('added_at').defaultNow(),
+});
+
 // Zod schemas for validation
 export const insertAstroImageSchema = createInsertSchema(astrophotographyImages);
 export const insertLibraryAssetSchema = createInsertSchema(libraryAssets);
@@ -194,6 +210,7 @@ export const insertEquipmentGroupMemberSchema = createInsertSchema(equipmentGrou
 export const insertLocationSchema = createInsertSchema(locations);
 export const insertCatalogObjectSchema = createInsertSchema(catalogObjects);
 export const insertUserTargetSchema = createInsertSchema(userTargets);
+export const insertGalleryCatalogSchema = createInsertSchema(galleryCatalogs);
 
 export type AstroImage = typeof astrophotographyImages.$inferSelect;
 export type InsertAstroImage = z.infer<typeof insertAstroImageSchema>;
@@ -217,3 +234,5 @@ export type CatalogObject = typeof catalogObjects.$inferSelect;
 export type InsertCatalogObject = z.infer<typeof insertCatalogObjectSchema>;
 export type UserTarget = typeof userTargets.$inferSelect;
 export type InsertUserTarget = z.infer<typeof insertUserTargetSchema>;
+export type GalleryCatalog = typeof galleryCatalogs.$inferSelect;
+export type InsertGalleryCatalog = z.infer<typeof insertGalleryCatalogSchema>;
