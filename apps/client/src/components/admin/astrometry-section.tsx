@@ -46,7 +46,7 @@ export function AstrometrySection({
           Astrometry.net Configuration
         </CardTitle>
         <CardDescription>
-          Configure plate solving with Astrometry.net
+          Run Astrometry.net privately on this Sidereal server
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -62,38 +62,11 @@ export function AstrometrySection({
           <Label htmlFor="astrometryEnabled">Enable plate solving</Label>
         </div>
         <p className="text-sm text-muted-foreground mb-4">
-          This enables manual plate solving from the UI. An API key is required for any plate solving functionality.
+          Image files and FITS data remain local. Install Astrometry.net and its index files in the server image; no external API key is used.
         </p>
 
         {settings.astrometry.enabled && (
           <>
-            <div>
-              <Label htmlFor="astrometryApiKey">API Key</Label>
-              <Input
-                id="astrometryApiKey"
-                type="password"
-                placeholder="Enter your Astrometry.net API key"
-                value={settings.astrometry.apiKey}
-                onChange={(e) => setSettings(prev => ({
-                  ...prev,
-                  astrometry: { ...prev.astrometry, apiKey: e.target.value }
-                }))}
-              />
-              <p className="text-sm text-muted-foreground mt-1">
-                Get your API key from{" "}
-                <a
-                  href="https://nova.astrometry.net/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  nova.astrometry.net
-                </a>
-              </p>
-            </div>
-
-            <Separator />
-
             <div className="flex items-center space-x-2 mb-4">
               <Switch
                 id="astrometryAutoEnabled"
@@ -102,12 +75,11 @@ export function AstrometrySection({
                   ...prev,
                   astrometry: { ...prev.astrometry, autoEnabled: checked }
                 }))}
-                disabled={!settings.astrometry.apiKey.trim()}
               />
               <Label htmlFor="astrometryAutoEnabled">Enable automatic background plate solving</Label>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              When enabled, the background worker will automatically process plate solving jobs. Requires API key to be configured.
+              When enabled, the background worker will automatically solve eligible images locally.
             </p>
 
             {settings.astrometry.autoEnabled && (
@@ -204,7 +176,7 @@ export function AstrometrySection({
             variant="outline"
           >
             {getTestButtonIcon(astrometryTestStatus)}
-            Test Connection
+            Check Local Solver
           </Button>
         </div>
       </CardContent>

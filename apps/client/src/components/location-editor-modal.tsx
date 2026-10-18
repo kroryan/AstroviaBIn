@@ -176,7 +176,7 @@ export function LocationEditorModal({ image, onClose }: LocationEditorModalProps
 
         <div className="text-xs text-gray-500 bg-blue-900/20 p-3 rounded border border-blue-800/30 flex gap-2">
           <Info className="h-4 w-4 text-blue-400 shrink-0" />
-          <p>Updating coordinates here will also sync them back to the original asset in Immich.</p>
+          <p>Coordinates are stored in Sidereal and never written to an external photo service.</p>
         </div>
 
         <div className="flex justify-end gap-3 pt-6 border-t border-gray-800">

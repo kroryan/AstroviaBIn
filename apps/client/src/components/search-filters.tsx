@@ -23,6 +23,7 @@ interface SearchFiltersProps {
   stats?: {
     totalImages: number;
     plateSolved: number;
+    fitsCount?: number;
     totalHours: number;
     uniqueTargets: number;
   };
@@ -207,8 +208,14 @@ export function SearchFilters({ filters, onFiltersChange, stats, totalCount, fil
           <div className="mt-4 flex flex-wrap gap-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-1">
               <Images className="h-4 w-4" />
-              {stats.totalImages} Images
+              {stats.totalImages} Photos
             </div>
+            {stats.fitsCount !== undefined && stats.fitsCount > 0 && (
+              <div className="flex items-center gap-1">
+                <Images className="h-4 w-4" />
+                {stats.fitsCount} FITS
+              </div>
+            )}
             <div className="flex items-center gap-1">
               <CheckCircle className="h-4 w-4" />
               {stats.plateSolved} Plate Solved

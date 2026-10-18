@@ -12,33 +12,15 @@ import type { Notification } from '@shared/types';
 import { useQuery } from '@tanstack/react-query';
 import { Header } from '@/components/header';
 import { NotificationsSection } from '@/components/admin/notifications-section';
-import { ImmichSection } from '@/components/admin/immich-section';
 import { AstrometrySection } from '@/components/admin/astrometry-section';
 import { SidecarSection } from '@/components/admin/sidecar-section';
 import { CatalogSection } from '@/components/admin/catalog-section';
 import { AppSettingsSection } from '@/components/admin/app-settings-section';
 import { DatabaseSection } from '@/components/admin/database-section';
-
-export interface ImmichAlbum {
-  id: string;
-  albumName: string;
-}
+import { AboutSection } from '@/components/admin/about-section';
 
 export interface AdminSettings {
-  immich: {
-    host: string;
-    apiKey: string;
-    autoSync: boolean;
-    syncFrequency: string;
-    syncByAlbum: boolean;
-    selectedAlbumIds: string[];
-    metadataSyncEnabled: boolean;
-    syncDescription: boolean;
-    syncCoordinates: boolean;
-    syncTags: boolean;
-  };
   astrometry: {
-    apiKey: string;
     enabled: boolean;
     autoEnabled: boolean;
     checkInterval: number;
@@ -59,20 +41,7 @@ export interface AdminSettings {
 export default function AdminPage() {
   const { toast } = useToast();
   const [settings, setSettings] = useState<AdminSettings>({
-    immich: {
-      host: '',
-      apiKey: '',
-      autoSync: false,
-      syncFrequency: '0 */4 * * *',
-      syncByAlbum: true,
-      selectedAlbumIds: [],
-      metadataSyncEnabled: false,
-      syncDescription: true,
-      syncCoordinates: true,
-      syncTags: true,
-    },
     astrometry: {
-      apiKey: '',
       enabled: true,
       autoEnabled: false,
       checkInterval: 30,
@@ -90,14 +59,9 @@ export default function AdminPage() {
     },
   });
   const [loading, setLoading] = useState(false);
-  const [immichTestStatus, setImmichTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [astrometryTestStatus, setAstrometryTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-  const [immichTestMessage, setImmichTestMessage] = useState('');
   const [astrometryTestMessage, setAstrometryTestMessage] = useState('');
   const [showAllNotifications, setShowAllNotifications] = useState(false);
-  const [albums, setAlbums] = useState<ImmichAlbum[]>([]);
-  const [albumsLoading, setAlbumsLoading] = useState(false);
-  const [albumError, setAlbumError] = useState<string | null>(null);
 
   // Use React Query for notifications for consistent state across Header and Admin
   const { data: notifications = [] } = useQuery<Notification[]>({
@@ -108,32 +72,6 @@ export default function AdminPage() {
   const { data: catalogStatus, refetch: refetchCatalogStatus } = useQuery<{ count: number; lastUpdated: string | null; commitSha: string | null }>({
     queryKey: ["/api/catalog/status"],
   });
-
-  // Fetch albums helper
-  const fetchAlbums = async () => {
-    setAlbumsLoading(true);
-    setAlbumError(null);
-    try {
-      const response = await fetch('/api/immich/albums', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          host: settings.immich.host,
-          apiKey: settings.immich.apiKey,
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (response.ok && Array.isArray(data)) {
-        setAlbums(data);
-      } else {
-        setAlbumError(data?.message || 'Failed to fetch albums');
-      }
-    } catch (e) {
-      setAlbumError('Failed to fetch albums');
-    } finally {
-      setAlbumsLoading(false);
-    }
-  };
 
   // Load settings on component mount
   useEffect(() => {
@@ -192,43 +130,6 @@ export default function AdminPage() {
     }
   };
 
-  const testImmichConnection = async () => {
-    if (!settings.immich.host.trim() || !settings.immich.apiKey.trim()) {
-      setImmichTestStatus('error');
-      setImmichTestMessage('Please enter both host URL and API key before testing');
-      return;
-    }
-
-    setImmichTestStatus('testing');
-    setImmichTestMessage('');
-
-    try {
-      const response = await fetch('/api/immich/test-immich-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          host: settings.immich.host,
-          apiKey: settings.immich.apiKey,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setImmichTestStatus('success');
-        setImmichTestMessage(data.message);
-      } else {
-        setImmichTestStatus('error');
-        setImmichTestMessage(data.message);
-      }
-    } catch (error) {
-      setImmichTestStatus('error');
-      setImmichTestMessage('Connection test failed');
-    }
-  };
-
   const testAstrometryConnection = async () => {
     setAstrometryTestStatus('testing');
     setAstrometryTestMessage('');
@@ -239,9 +140,7 @@ export default function AdminPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          apiKey: settings.astrometry.apiKey,
-        }),
+        body: JSON.stringify({}),
       });
 
       const data = await response.json();
@@ -258,19 +157,6 @@ export default function AdminPage() {
       setAstrometryTestMessage('Connection test failed');
     }
   };
-
-  // Fetch albums from Immich when syncByAlbum, host, or apiKey changes
-  useEffect(() => {
-    if (
-      settings.immich.syncByAlbum &&
-      settings.immich.host &&
-      settings.immich.apiKey
-    ) {
-      fetchAlbums();
-    } else if (!settings.immich.syncByAlbum) {
-      setAlbums([]);
-    }
-  }, [settings.immich.syncByAlbum, settings.immich.host, settings.immich.apiKey]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -291,17 +177,6 @@ export default function AdminPage() {
         />
 
         <form onSubmit={(e) => { e.preventDefault(); saveSettings(); }}>
-          <ImmichSection
-            settings={settings}
-            setSettings={setSettings}
-            albums={albums}
-            albumsLoading={albumsLoading}
-            albumError={albumError}
-            immichTestStatus={immichTestStatus}
-            immichTestMessage={immichTestMessage}
-            testImmichConnection={testImmichConnection}
-          />
-
           <AstrometrySection
             settings={settings}
             setSettings={setSettings}
@@ -326,6 +201,8 @@ export default function AdminPage() {
             settings={settings}
             setSettings={setSettings}
           />
+
+          <AboutSection />
 
           {/* Save Button */}
           <div className="flex justify-end">

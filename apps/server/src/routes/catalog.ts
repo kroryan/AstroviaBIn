@@ -178,7 +178,7 @@ app.post('/check-updates', async (c) => {
   }
 });
 
-// Backfill targets: re-match all plate-solved images that have tags but no targetName
+// Backfill target names from solved sky coordinates, validating candidate objects against the field.
 app.post('/backfill-targets', async (c) => {
   try {
     const images = await storage.getAstroImages();
@@ -186,24 +186,33 @@ app.post('/backfill-targets', async (c) => {
     let skipped = 0;
 
     for (const image of images) {
-      // Skip images that already have a target name
-      if (image.targetName) {
+      if (image.ra == null || image.dec == null || image.ra.trim() === '' || image.dec.trim() === '') {
         skipped++;
         continue;
       }
+      const ra = Number(image.ra);
+      const dec = Number(image.dec);
+      if (!image.plateSolved || !Number.isFinite(ra) || !Number.isFinite(dec)) { skipped++; continue; }
 
-      const tags = image.tags as string[] | null;
-      if (!tags || tags.length === 0) continue;
-
-      const matches = await catalogService.matchTargetFromTags(tags);
-      if (matches.length > 0) {
-        await storage.updateAstroImage(image.id, { targetName: matches[0].name });
-        matched++;
-      }
+      const latestJob = await storage.getLatestPlateSolvingJob(image.id, 'success');
+      const jobResult = latestJob?.result as { radius?: number } | null;
+      const radius = typeof jobResult?.radius === 'number' && Number.isFinite(jobResult.radius)
+        ? jobResult.radius
+        : 0.25;
+      const tags = Array.isArray(image.tags) ? image.tags : [];
+      const target = await catalogService.matchTargetAtCoordinates(ra, dec, radius, [
+        image.title,
+        image.filename,
+        ...tags,
+      ]);
+      if (!target) { skipped++; continue; }
+      if (target.name === image.targetName) { skipped++; continue; }
+      await storage.updateAstroImage(image.id, { targetName: target.name });
+      matched++;
     }
 
     return c.json({
-      message: `Backfill complete: ${matched} images matched, ${skipped} already had targets`,
+      message: `Backfill complete: ${matched} image target names corrected from plate-solved coordinates, ${skipped} images had no change`,
       matched,
       skipped,
       total: images.length,

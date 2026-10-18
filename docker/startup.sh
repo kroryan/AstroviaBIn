@@ -45,7 +45,7 @@ run_auto_db_migration() {
     echo "  From: $(mask_connection_string "$AUTO_DB_MIGRATE_FROM")"
     echo "  To: $(mask_connection_string "$AUTO_DB_MIGRATE_TARGET")"
 
-    if ! su-exec sidereal node "$MIGRATE_SCRIPT" --from "$AUTO_DB_MIGRATE_FROM" --to "$AUTO_DB_MIGRATE_TARGET"; then
+    if ! gosu sidereal node "$MIGRATE_SCRIPT" --from "$AUTO_DB_MIGRATE_FROM" --to "$AUTO_DB_MIGRATE_TARGET"; then
         echo "Automatic database migration failed; aborting startup."
         exit 1
     fi
@@ -66,9 +66,21 @@ echo "Updating sidereal user to PUID=$PUID and GID=$PGID..."
 groupmod -o -g "$PGID" nodejs || true
 usermod -o -u "$PUID" sidereal || true
 
-# Ensure proper ownership of application and data directories
+# These are bind mounts on Expansion in the test deployment. Only transfer the
+# mount roots; recursively walking a multi-GB photo/FITS library on every restart
+# would make startup painfully slow.
 echo "Setting directory permissions..."
-chown -R sidereal:nodejs /app/config /app/logs /app/sidecars /app/cache /app/dist
+mkdir -p /app/config /app/logs /app/sidecars /app/cache/thumbnails /app/cache/deep-zoom /app/cache/fits /app/library /app/fits-derived /app/fits-upload /app/fits-analysis
+for directory in /app/config /app/logs /app/sidecars /app/cache /app/cache/thumbnails /app/cache/deep-zoom /app/cache/fits /app/library /app/fits-derived /app/fits-upload /app/fits-analysis; do
+    if ! chown sidereal:nodejs "$directory" 2>/dev/null; then
+        echo "Ownership changes are unavailable for $directory; keeping the mounted filesystem's UID/GID permissions."
+    fi
+done
+if [ -f /app/config/sidereal.db ]; then
+    if ! chown sidereal:nodejs /app/config/sidereal.db 2>/dev/null; then
+        echo "Ownership changes are unavailable for the SQLite file; keeping the mounted filesystem's UID/GID permissions."
+    fi
+fi
 
 echo "Starting Sidereal container..."
 echo "Node.js version: $(node --version)"
@@ -114,7 +126,7 @@ if [ -n "$DATABASE_URL" ]; then
     # PostgreSQL migrations
     if [ -f "/app/dist/tools/scripts/apply-pg-migrations.js" ]; then
         echo "Running PostgreSQL migrations..."
-        su-exec sidereal node /app/dist/tools/scripts/apply-pg-migrations.js || {
+        gosu sidereal node /app/dist/tools/scripts/apply-pg-migrations.js || {
             echo "PostgreSQL migration failed, but continuing..."
         }
     else
@@ -127,13 +139,6 @@ run_auto_db_migration
 # Set up signal handlers for graceful shutdown
 cleanup() {
     echo "Received shutdown signal, stopping processes..."
-    
-    # Kill worker process if running
-    if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
-        echo "Stopping worker process (PID: $WORKER_PID)..."
-        kill -TERM "$WORKER_PID"
-        wait "$WORKER_PID" 2>/dev/null || true
-    fi
     
     # Kill main process if running
     if [ -n "$MAIN_PID" ] && kill -0 "$MAIN_PID" 2>/dev/null; then
@@ -151,20 +156,9 @@ trap cleanup TERM INT
 
 # Start main application as sidereal user
 echo "Starting main application..."
-su-exec sidereal node /app/dist/index.js &
+gosu sidereal node /app/dist/index.js &
 MAIN_PID=$!
 echo "Main process started with PID: $MAIN_PID"
-
-# Start worker process if enabled as sidereal user
-if [ "${ENABLE_PLATE_SOLVING:-true}" = "true" ]; then
-    echo "Starting worker process..."
-    su-exec sidereal node /app/dist/worker.js &
-    WORKER_PID=$!
-    echo "Worker process started with PID: $WORKER_PID"
-else
-    echo "Worker process disabled (ENABLE_PLATE_SOLVING=${ENABLE_PLATE_SOLVING})"
-    WORKER_PID=""
-fi
 
 # Function to check if processes are running
 check_processes() {
@@ -173,17 +167,6 @@ check_processes() {
         echo "ERROR: Main process (PID: $MAIN_PID) has died"
         return 1
     fi
-    
-    # Check worker process if it should be running
-    if [ "${ENABLE_PLATE_SOLVING:-true}" = "true" ] && [ -n "$WORKER_PID" ]; then
-        if ! kill -0 "$WORKER_PID" 2>/dev/null; then
-            echo "WARNING: Worker process (PID: $WORKER_PID) has died, restarting..."
-            su-exec sidereal node /app/dist/worker.js &
-            WORKER_PID=$!
-            echo "Worker process restarted with PID: $WORKER_PID"
-        fi
-    fi
-    
     return 0
 }
 

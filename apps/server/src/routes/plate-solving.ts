@@ -12,11 +12,11 @@ export default (wsManager?: WsManager) => {
   // Submit image for plate solving
   app.post('/images/:id/plate-solve', async (c) => {
     try {
-      // Check if plate solving is enabled and API key is configured
+      // Local solving requires the feature to be enabled, but no external API key.
       const astrometryConfig = await configService.getAstrometryConfig();
-      if (!astrometryConfig.enabled || !astrometryConfig.apiKey) {
+      if (!astrometryConfig.enabled) {
         return c.json({
-          message: 'Plate solving is not configured. Please enable it and provide an API key in the admin settings.',
+          message: 'Plate solving is disabled. Enable it in the admin settings.',
         }, 400);
       }
 
@@ -27,6 +27,11 @@ export default (wsManager?: WsManager) => {
       }
       if (!isPlateSolvingEligible(image.tags)) {
         return c.json({ message: 'Plate solving requires the Deep Sky tag. Add it for stellar fields; Solar System and planet tags are excluded.' }, 400);
+      }
+
+      const existingJob = await storage.getLatestPlateSolvingJob(imageId);
+      if (existingJob && ['pending', 'processing'].includes(existingJob.status)) {
+        return c.json({ status: 'processing', jobId: existingJob.id, submissionId: existingJob.astrometrySubmissionId, message: 'This image is already queued for private local solving.' }, 202);
       }
 
       // Use the shared service to complete the full plate solving workflow
@@ -53,7 +58,7 @@ export default (wsManager?: WsManager) => {
       const visibleJobs = [];
       for (const job of jobs) {
         const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
-        if (isPlateSolvingEligible(image?.tags)) visibleJobs.push(job);
+        if (image?.plateSolved || isPlateSolvingEligible(image?.tags)) visibleJobs.push(job);
       }
       return c.json(visibleJobs);
     } catch (error) {
@@ -70,11 +75,11 @@ export default (wsManager?: WsManager) => {
         return c.json({ message: 'imageIds array is required' }, 400);
       }
 
-      // Check if plate solving is enabled and API key is configured
+      // Check the local solver feature switch; images never leave this server.
       const astrometryConfig = await configService.getAstrometryConfig();
-      if (!astrometryConfig.enabled || !astrometryConfig.apiKey) {
+      if (!astrometryConfig.enabled) {
         return c.json({
-          message: 'Plate solving is not configured. Please enable it and provide an API key in the admin settings.',
+          message: 'Plate solving is disabled. Enable it in the admin settings.',
         }, 400);
       }
 
@@ -130,14 +135,9 @@ export default (wsManager?: WsManager) => {
   app.post('/update/:jobId', async (c) => {
     try {
       const jobId = parseInt(c.req.param('jobId'));
-      const { status, result } = await astrometryService.checkJobStatus(jobId, { resumeProcessing: true });
-
-      // Emit real-time update via WebSocket if available
-      if (wsManager) {
-        wsManager.broadcast('plate-solving-update', { jobId, status, result });
-      }
-
-      return c.json({ status, result });
+      const job = await storage.getPlateSolvingJob(jobId);
+      if (!job) return c.json({ message: 'Plate-solving job not found' }, 404);
+      return c.json({ status: job.status, result: job.result });
     } catch (error) {
       return handleRouteError(c, error, 'Failed to update plate solving status');
     }

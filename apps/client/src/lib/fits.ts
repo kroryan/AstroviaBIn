@@ -4,6 +4,17 @@ export function isFitsOriginalPath(originalPath: string | null | undefined): boo
   return Boolean(originalPath && FITS_PATH_PREFIXES.some(prefix => originalPath.startsWith(prefix)));
 }
 
+/**
+ * Fallback URL for viewers without a tile source: FITS gets its native-resolution render,
+ * Sidereal-library images get the real original instead of the downscaled gallery preview.
+ * Falls back to `fullUrl` for anything without a higher-resolution source available.
+ */
+export function resolveZoomUrl(image: { id: number; originalPath?: string | null; libraryAssetId?: number | null }): string {
+  if (isFitsOriginalPath(image.originalPath)) return `/api/fits/${image.id}/preview?stretch=asinh&preview=full`;
+  if (image.libraryAssetId) return `/api/images/${image.id}/full`;
+  return '';
+}
+
 export type CaptureTimeStatus = 'verified' | 'unverified' | 'edited';
 
 export interface CaptureMoment {

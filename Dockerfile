@@ -30,21 +30,28 @@ COPY tools/ ./tools/
 # Build frontend and copy assets
 RUN npm run build:docker
 
+# Build vendored upstream HOTPANTS programs, including its alternative
+# extractkernOnes helper. The C source and numerical methods are unmodified.
+FROM node:24-trixie-slim AS hotpants-builder
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make gcc libc6-dev libcfitsio-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY vendor/hotpants/ /opt/hotpants/
+RUN cd /opt/hotpants && make CFITSIOINCDIR=/usr/include LIBDIR=/usr/lib CC='gcc -fcommon' && \
+    gcc -fcommon -O3 -std=c99 -D_GNU_SOURCE -I/usr/include extractkernOnes.c -o extractkern-ones -lm -lcfitsio
+
 # Production stage
-FROM node:24-alpine AS runtime
+FROM node:24-trixie-slim AS runtime
 
 # Upgrade npm to the newest 11.x; node:24-alpine bundles an npm whose own
 # dependencies (tar, brace-expansion, ip-address) have known CVEs
 RUN npm install -g npm@11 && npm cache clean --force
 
-# Upgrade base packages (fixes zlib CVEs) and install runtime dependencies
-# hadolint ignore=DL3018
-RUN apk upgrade --no-cache && \
-    apk add --no-cache curl su-exec shadow
+# Enable Debian contrib. The local solver is installed after native build tools have
+# been purged so --auto-remove cannot delete Astrometry.net or its index files.
+RUN sed -i 's/Components: main/Components: main contrib/' /etc/apt/sources.list.d/debian.sources
 
 # Create app user for security (will be remapped via PUID/PGID if provided)
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S sidereal -u 1001 -G nodejs
+RUN groupadd --system --gid 1001 nodejs && \
+    useradd --system --uid 1001 --gid nodejs --home-dir /home/sidereal --create-home --shell /usr/sbin/nologin sidereal
 
 # Set working directory
 WORKDIR /app
@@ -53,19 +60,41 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies (including better-sqlite3 for built-in SQLite support)
-RUN apk add --no-cache --virtual .build-deps python3 make g++ && \
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 make g++ && \
     npm ci --omit=dev && \
-    apk del .build-deps && \
+    apt-get purge -y --auto-remove python3 make g++ && \
+    rm -rf /var/lib/apt/lists/* && \
     npm cache clean --force
+
+# Install the offline plate solver and public index files last. User photos/FITS are
+# never sent anywhere by this image or by the local solver.
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      astrometry.net astrometry-data-2mass-08-19 ca-certificates curl gosu passwd \
+      python3-astropy python3-scipy python3-numpy libcfitsio10t64 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=hotpants-builder /opt/hotpants/hotpants /usr/local/bin/hotpants
+COPY --from=hotpants-builder /opt/hotpants/extractkern /usr/local/bin/extractkern
+COPY --from=hotpants-builder /opt/hotpants/extractkern-ones /usr/local/bin/extractkern-ones
+COPY --from=hotpants-builder /opt/hotpants/maskim /usr/local/bin/maskim
+COPY --from=hotpants-builder /opt/hotpants/COPYING /usr/share/doc/hotpants/COPYING
+COPY --from=hotpants-builder /opt/hotpants/LICENSE /usr/share/doc/hotpants/LICENSE
+# Accompany container-distributed HOTPANTS binaries with corresponding source.
+COPY vendor/hotpants/ /usr/share/doc/hotpants/source/
+COPY LICENSE /usr/share/doc/sidereal/LICENSE
 
 # Remove package-manager tooling after production dependencies are installed
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy built application from builder stage (includes tools, config, and public assets)
 COPY --from=builder /build/dist ./dist
+COPY tools/scripts/hotpants_pipeline.py ./tools/scripts/hotpants_pipeline.py
+COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
 
 # Create directories for runtime
-RUN mkdir -p /app/config /app/logs /app/sidecars /app/cache/thumbnails
+RUN mkdir -p /app/config /app/logs /app/sidecars /app/cache/thumbnails /app/cache/deep-zoom /app/library /app/fits-analysis
 
 # Copy startup script
 COPY docker/startup.sh ./

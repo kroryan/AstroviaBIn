@@ -1,13 +1,33 @@
 import { Hono } from 'hono';
-import { readFile } from 'fs/promises';
+import { mkdir, readFile, rename, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import path from 'node:path';
+import sharp from 'sharp';
 import { storage } from '../services/storage';
 import { xmpSidecarService } from '../services/xmp-sidecar';
 import { configService } from '../services/config';
 import { handleRouteError } from './route-utils';
 import { SOLAR_SYSTEM_TAGS } from '../services/solar-system';
+import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
+import { resolveLibraryAssetPath } from '../services/library';
 
 const app = new Hono();
 const SOLAR_SYSTEM_TAG_SET = new Set(SOLAR_SYSTEM_TAGS.map(tag => tag.toLocaleLowerCase()));
+const FITS_PATH_PREFIXES = ['fits://', 'fits-derived://', 'fits-upload://'];
+const isFitsPath = (originalPath: string | null | undefined) => Boolean(originalPath && FITS_PATH_PREFIXES.some(prefix => originalPath.startsWith(prefix)));
+
+async function imageTileSource(image: { id: number; libraryAssetId?: number | null; updatedAt?: Date | string | null }) {
+  const asset = await storage.getLibraryAssetForAstroImage(image.id);
+  if (!asset) throw new Error('This image has not been migrated to the private Sidereal library');
+  const sourcePath = resolveLibraryAssetPath(asset);
+  const sourceStat = await stat(sourcePath);
+  const updatedAt = image.updatedAt instanceof Date ? image.updatedAt.getTime() : Date.parse(String(image.updatedAt || '')) || 0;
+  const cacheKey = `image-${image.id}-${updatedAt}-${sourceStat.size}-${Math.trunc(sourceStat.mtimeMs)}`;
+  const metadata = await sharp(sourcePath, { limitInputPixels: false }).metadata();
+  if (!metadata.width || !metadata.height) throw new Error('Could not read source image dimensions');
+  return { sourcePath, cacheKey, width: metadata.width, height: metadata.height };
+}
 
 function normalizeTags(value: unknown): string[] {
   if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string')) throw new Error('tags must be an array of strings');
@@ -26,31 +46,6 @@ function normalizeTags(value: unknown): string[] {
   if (hasSolarSystem) return tags.filter(tag => tag.toLocaleLowerCase() !== 'deep sky');
   if (hasDeepSky) return tags.filter(tag => !SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
   return tags;
-}
-
-// Helper to update Immich asset metadata
-async function updateImmichAssetMetadata(immichId: string, metadata: { latitude?: number; longitude?: number }) {
-  try {
-    const config = await configService.getImmichConfig();
-    if (!config.host || !config.apiKey) {
-      console.warn('Immich config missing, skipping metadata sync');
-      return;
-    }
-
-    await fetch(`${config.host}/api/assets`, {
-      method: 'PUT',
-      headers: { 'X-API-Key': config.apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ids: [immichId],
-        latitude: metadata.latitude,
-        longitude: metadata.longitude,
-      }),
-    });
-    console.log(`Synced metadata to Immich for asset ${immichId}`);
-  } catch (error: unknown) {
-    const err = error as Error;
-    console.error(`Failed to sync metadata to Immich for asset ${immichId}:`, err.message);
-  }
 }
 
 // Get all astrophotography images with optional filters
@@ -76,7 +71,7 @@ app.get('/', async (c) => {
   }
 });
 
-// Download the original FITS or Immich asset rather than a preview.
+// Download the original FITS or locally managed photo rather than a preview.
 app.get('/:id/download', async (c) => {
   try {
     const image = await storage.getAstroImage(parseInt(c.req.param('id')));
@@ -84,22 +79,104 @@ app.get('/:id/download', async (c) => {
     if (image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://')) {
       return c.redirect(`/api/fits/${image.id}/download`, 302);
     }
-    if (!image.immichId) return c.json({ message: 'No downloadable original is available for this image' }, 404);
-    const config = await configService.getImmichConfig();
-    if (!config.host || !config.apiKey) return c.json({ message: 'Immich configuration missing' }, 503);
-    const response = await fetch(`${config.host.replace(/\/+$/, '')}/api/assets/${encodeURIComponent(image.immichId)}/original`, {
-      headers: { 'X-API-Key': config.apiKey },
-    });
-    if (!response.ok || !response.body) return c.json({ message: `Immich returned ${response.status}` }, response.status as 400);
+    const asset = await storage.getLibraryAssetForAstroImage(image.id);
+    if (!asset) return c.json({ message: 'No local original is available for this image' }, 404);
     const name = (image.filename || `${image.id}.image`).replace(/[\r\n"]/g, '_');
-    return new Response(response.body, {
+    return new Response(Readable.toWeb(createReadStream(resolveLibraryAssetPath(asset))) as ReadableStream,
+      {
       headers: {
-        'content-type': response.headers.get('content-type') || 'application/octet-stream',
+        'content-type': asset.mimeType || 'application/octet-stream',
         'content-disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'cache-control': 'private, no-store',
       },
     });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to download original image');
+  }
+});
+
+// Serve the full-resolution local original inline, for zooming without the pixelation a
+// downscaled preview/thumbnail would show. FITS images have their own native-resolution route.
+app.get('/:id/full', async (c) => {
+  try {
+    const image = await storage.getAstroImage(parseInt(c.req.param('id')));
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+    if (image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://')) {
+      return c.redirect(`/api/fits/${image.id}/preview?preview=full`, 302);
+    }
+    const asset = await storage.getLibraryAssetForAstroImage(image.id);
+    if (!asset) return c.json({ message: 'No private local original is available for this image' }, 404);
+    return new Response(Readable.toWeb(createReadStream(resolveLibraryAssetPath(asset))) as ReadableStream, {
+      headers: {
+        'content-type': asset.mimeType || 'application/octet-stream',
+        'cache-control': 'private, no-store',
+      },
+    });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to fetch full-resolution image');
+  }
+});
+
+// Generate and privately cache a compact gallery thumbnail from the local original.
+app.get('/:id/thumbnail', async (c) => {
+  try {
+    const imageId = Number(c.req.param('id'));
+    const image = await storage.getAstroImage(imageId);
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+    if (isFitsPath(image.originalPath)) return c.redirect(`/api/fits/${image.id}/preview`, 302);
+    const asset = await storage.getLibraryAssetForAstroImage(image.id);
+    if (!asset) return c.json({ message: 'No private local original is available for this image' }, 404);
+    const cacheRoot = path.resolve(process.env.THUMBNAIL_CACHE_DIR || (process.env.NODE_ENV === 'production' ? '/app/cache/thumbnails' : './data/thumbnails'));
+    const thumbnailPath = path.join(cacheRoot, `image-${asset.sha256}.jpg`);
+    try {
+      await stat(thumbnailPath);
+    } catch {
+      await mkdir(cacheRoot, { recursive: true, mode: 0o700 });
+      const tempPath = `${thumbnailPath}.tmp`;
+      await sharp(resolveLibraryAssetPath(asset), { limitInputPixels: false })
+        .rotate().resize({ width: 720, height: 720, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 86 }).toFile(tempPath);
+      await rename(tempPath, thumbnailPath);
+    }
+    return new Response(Readable.toWeb(createReadStream(thumbnailPath)) as ReadableStream, {
+      headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=86400' },
+    });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to generate local image thumbnail');
+  }
+});
+
+// Tile metadata (native dimensions + pyramid depth) for the zoomable viewer.
+app.get('/:id/tile-info', async (c) => {
+  try {
+    const image = await storage.getAstroImage(parseInt(c.req.param('id')));
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+    if (isFitsPath(image.originalPath)) return c.redirect(`/api/fits/${image.id}/tile-info`, 302);
+    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private Sidereal library' }, 404);
+    const source = await imageTileSource(image);
+    return c.json(tileInfo(source.width, source.height));
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to read tile info');
+  }
+});
+
+// One 256x256 (edge tiles may be smaller) tile of the zoomable viewer's pyramid.
+app.get('/:id/tile', async (c) => {
+  try {
+    const image = await storage.getAstroImage(parseInt(c.req.param('id')));
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+    if (isFitsPath(image.originalPath)) {
+      return c.redirect(`/api/fits/${image.id}/tile?${new URLSearchParams(c.req.query()).toString()}`, 302);
+    }
+    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private Sidereal library' }, 404);
+    const level = Number(c.req.query('level'));
+    const x = Number(c.req.query('x'));
+    const y = Number(c.req.query('y'));
+    const source = await imageTileSource(image);
+    const tile = await renderTile(source.sourcePath, tileCacheDirectory(), source.cacheKey, source.width, source.height, level, x, y);
+    return new Response(new Uint8Array(tile), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to render tile');
   }
 });
 
@@ -144,14 +221,6 @@ app.patch('/:id', async (c) => {
       return c.json({ message: 'Image not found' }, 404);
     }
 
-    // Sync to Immich if coordinates were updated
-    if (updatedImage.immichId && (updates.latitude !== undefined || updates.longitude !== undefined)) {
-      await updateImmichAssetMetadata(updatedImage.immichId, {
-        latitude: updatedImage.latitude || undefined,
-        longitude: updatedImage.longitude || undefined,
-      });
-    }
-
     return c.json(updatedImage);
   } catch (error) {
     return handleRouteError(c, error, 'Failed to update image');
@@ -168,12 +237,8 @@ app.get('/:id/plate-solving-job', async (c) => {
       return c.json({ message: 'Image not found' }, 404);
     }
 
-    // Find the successful plate solving job for this image directly
-    const job = await storage.getLatestPlateSolvingJob(imageId, 'success');
-
-    if (!image.plateSolved || !job) {
-      return c.json({ message: 'Image has not been successfully plate solved' }, 400);
-    }
+    const job = await storage.getLatestPlateSolvingJob(imageId);
+    if (!job) return c.json({ status: 'none' });
 
     return c.json({
       jobId: job.id,

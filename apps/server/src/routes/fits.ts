@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { access, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import path from 'node:path';
@@ -12,12 +12,15 @@ import {
   fitsPathFor,
   fitsRelativePath,
   fitsUploadDirectory,
+  renderFitsTile,
   readFitsMetadata,
   resolveFitsFile,
   type FitsSource,
   type FitsProcessingSettings,
 } from '../services/fits';
 import { stackFits, type StackMethod } from '../services/fits-stacking';
+import { tileInfo } from '../services/tiles';
+import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -170,23 +173,23 @@ app.post('/scan', async (c) => {
 });
 
 app.post('/upload', async (c) => {
+  let outputPath: string | undefined;
   try {
-    const form = await c.req.parseBody();
-    const input = form.file;
-    const file = Array.isArray(input) ? input[0] : input;
-    if (!file || typeof file === 'string') return c.json({ message: 'Choose one FITS file to upload' }, 400);
-    const extension = path.extname(file.name).toLowerCase();
-    if (!FITS_EXTENSIONS.has(extension)) return c.json({ message: 'Only .fit, .fits, and .fts files are supported' }, 400);
-    const originalName = path.basename(file.name);
+    rejectDeclaredOversize(c.req.header('content-length'));
+    const originalName = sanitizedUploadFilename(c.req.query('filename') || c.req.header('x-file-name'));
+    const extension = path.extname(originalName).toLowerCase();
+    if (!FITS_EXTENSIONS.has(extension)) return c.json({ message: 'Only .fit, .fits, and .fts files are supported' }, 415);
     const basename = originalName.slice(0, -extension.length).replace(/[^a-z0-9._-]+/gi, '_').replace(/^[_ .-]+|[_ .-]+$/g, '');
     if (!basename) return c.json({ message: 'Invalid FITS filename' }, 400);
     const outputName = `${basename}-${Date.now()}${extension}`;
-    const outputPath = path.join(fitsUploadDirectory(), outputName);
+    outputPath = path.join(fitsUploadDirectory(), outputName);
     await mkdir(fitsUploadDirectory(), { recursive: true });
-    await writeFile(outputPath, Buffer.from(await file.arrayBuffer()));
+    await writeUploadBody(c.req.raw.body, outputPath);
     const image = await importFits(outputPath, fitsUploadDirectory(), 'upload');
     return c.json({ image, output: outputName }, 201);
   } catch (error) {
+    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    if (error instanceof UploadRequestError) return c.json({ message: error.message }, error.status);
     return handleRouteError(c, error, 'Failed to upload FITS image');
   }
 });
@@ -201,6 +204,8 @@ app.get('/:imageId/download', async (c) => {
       headers: {
         'content-type': 'application/fits',
         'content-disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
       },
     });
   } catch (error) {
@@ -214,6 +219,7 @@ app.get('/:imageId/metadata', async (c) => {
     const filePath = resolveFitsFile(image?.originalPath || null);
     if (!image || !filePath) return c.json({ message: 'FITS image not found' }, 404);
     const metadata = await readFitsMetadata(filePath);
+    c.header('cache-control', 'private, no-store');
     return c.json({ ...metadata, cards: undefined, source: fitsRelativePath(image.originalPath) });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to read FITS metadata');
@@ -249,11 +255,46 @@ app.get('/:imageId/preview', async (c) => {
       hotPixelThreshold: query.hotPixelThreshold ? Number(query.hotPixelThreshold) : undefined,
       colorMap: query.colorMap,
     });
-    const preview = await cachedFitsPreview(filePath, settings, query.preview === 'interactive' ? 1024 : 2048);
+    const maximumDimension = query.preview === 'interactive' ? 1024 : query.preview === 'full' ? Infinity : 2048;
+    const preview = await cachedFitsPreview(filePath, settings, maximumDimension);
     const body = preview.buffer.slice(preview.byteOffset, preview.byteOffset + preview.byteLength) as ArrayBuffer;
-    return new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'no-store' } });
+    return new Response(body, { headers: { 'content-type': 'image/png', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to render FITS preview');
+  }
+});
+
+// Tiling for the main gallery viewer: always the same default render (matching fullUrl), so
+// tiles stay a stable, shareable cache regardless of who's looking. The live-editing processing
+// panel keeps using /preview directly — it needs arbitrary settings, which tiling intentionally
+// does not support.
+const TILE_SOURCE_SETTINGS: FitsProcessingSettings = { stretch: 'asinh' };
+
+app.get('/:imageId/tile-info', async (c) => {
+  try {
+    const image = await storage.getAstroImage(Number(c.req.param('imageId')));
+    const filePath = resolveFitsFile(image?.originalPath || null);
+    if (!image || !filePath) return c.json({ message: 'FITS image not found' }, 404);
+    const metadata = await readFitsMetadata(filePath);
+    c.header('cache-control', 'private, no-store');
+    return c.json(tileInfo(metadata.width, metadata.height));
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to read FITS tile info');
+  }
+});
+
+app.get('/:imageId/tile', async (c) => {
+  try {
+    const image = await storage.getAstroImage(Number(c.req.param('imageId')));
+    const filePath = resolveFitsFile(image?.originalPath || null);
+    if (!image || !filePath) return c.json({ message: 'FITS image not found' }, 404);
+    const level = Number(c.req.query('level'));
+    const x = Number(c.req.query('x'));
+    const y = Number(c.req.query('y'));
+    const tile = await renderFitsTile(filePath, TILE_SOURCE_SETTINGS, level, x, y);
+    return new Response(new Uint8Array(tile), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to render FITS tile');
   }
 });
 

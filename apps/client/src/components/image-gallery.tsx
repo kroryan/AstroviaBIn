@@ -80,7 +80,7 @@ export function ImageGallery({
     return (
       <div className="text-center py-12">
         <p className="text-muted-foreground mb-4">
-          No astrophotography images found. Sync with Immich to get started.
+          No astrophotography images found. Add images to the local Sidereal library to get started.
         </p>
       </div>
     );
@@ -106,6 +106,16 @@ export function ImageGallery({
               </div>
             </div>
             <CardContent className="p-4">
+              <div className="mb-2 min-w-0">
+                <h3 className="truncate text-sm font-semibold text-foreground" title={image.title || "Untitled"}>
+                  {image.title || "Untitled"}
+                </h3>
+                {image.targetName && image.targetName !== image.title && (
+                  <p className="truncate text-xs text-muted-foreground" title={image.targetName}>
+                    {image.targetName}
+                  </p>
+                )}
+              </div>
               <div className="flex justify-between items-center mb-2">
                 <div className="text-xs text-muted-foreground">
                   {formatDate(image.captureDate)}
@@ -129,7 +139,7 @@ export function ImageGallery({
             onClick={onLoadMore}
           >
             <Plus className="mr-2 h-4 w-4" />
-            Load More Images ({visibleCount} of {totalImages})
+            Load More ({visibleCount} of {totalImages} library items)
           </Button>
         </div>
       )}

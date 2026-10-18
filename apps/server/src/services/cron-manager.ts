@@ -1,5 +1,4 @@
 import cron, { ScheduledTask } from 'node-cron';
-import { configService } from './config';
 import { storage } from './storage';
 
 import type { WsManager } from './ws-manager';
@@ -29,78 +28,11 @@ class CronManager {
 
     console.log('[CRON] Initializing cron manager...');
 
-    // Set up Immich sync job
-    await this.setupImmichSync();
-
     // Clean up old notifications daily
     this.setupNotificationCleanup();
 
     this.isInitialized = true;
     console.log('[CRON] Cron manager initialized');
-  }
-
-  private async setupImmichSync() {
-    const config = await configService.getConfig();
-    const cronExpr = config.immich.syncFrequency || '0 */4 * * *';
-
-    this.scheduleJob('immich-sync', 'Immich Sync', cronExpr, async () => {
-      try {
-        console.log('[CRON] Starting Immich sync...');
-        const { immichSyncService } = await import('./immich-sync');
-        const result = await immichSyncService.syncImagesFromImmich();
-
-        console.log(`[CRON] Immich sync completed: ${result.message}`);
-
-        if (wsManager) {
-          wsManager.broadcast('immich-sync-complete', {
-            success: true,
-            message: result.message,
-            syncedCount: result.syncedCount,
-            removedCount: result.removedCount
-          });
-        }
-
-        const job = this.jobs.get('immich-sync');
-        if (job) {
-          job.lastRun = new Date();
-          delete job.lastError;
-        }
-
-      } catch (error: unknown) {
-        const err = error as Error;
-        const errorMessage = err.message || 'Unknown error';
-        console.error('[CRON] Immich sync failed:', errorMessage);
-
-        if (wsManager) {
-          wsManager.broadcast('immich-sync-complete', {
-            success: false,
-            message: errorMessage
-          });
-        }
-
-        const job = this.jobs.get('immich-sync');
-        if (job) {
-          job.lastRun = new Date();
-          job.lastError = errorMessage;
-        }
-
-        try {
-          await storage.createNotification({
-            type: 'error',
-            title: 'Immich Sync Failed',
-            message: `Automatic sync with Immich failed: ${errorMessage}`,
-            details: {
-              jobId: 'immich-sync',
-              timestamp: new Date().toISOString(),
-              error: errorMessage
-            }
-          });
-          console.log('[CRON] Error notification created successfully');
-        } catch (notificationError) {
-          console.error('[CRON] Failed to create error notification:', notificationError);
-        }
-      }
-    });
   }
 
   private setupNotificationCleanup() {
@@ -177,14 +109,12 @@ class CronManager {
   }
 
   async rescheduleJob(id: string) {
-    if (id === 'immich-sync') {
-      await this.setupImmichSync();
-    }
+    if (id === 'notification-cleanup') this.setupNotificationCleanup();
   }
 
   async rescheduleAll() {
     console.log('[CRON] Rescheduling all jobs...');
-    await this.setupImmichSync();
+    this.setupNotificationCleanup();
   }
 
   getJobStatus(id: string) {

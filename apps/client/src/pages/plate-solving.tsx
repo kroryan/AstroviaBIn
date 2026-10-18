@@ -24,11 +24,6 @@ import {
 import { Header } from "@/components/header";
 import type { AstroImage, PlateSolvingJob } from "@shared/schema";
 
-// Astrometry identifiers are positive safe integers, including decimal strings.
-function validRemoteId(value: string | null): boolean {
-  return value !== null && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
-}
-
 const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
 const isSolarSystemImage = (image: AstroImage) => Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TAGS.has(tag.trim().toLowerCase())));
 const isDeepSkyImage = (image: AstroImage) => Boolean(image.tags?.some(tag => tag.trim().toLowerCase() === 'deep sky'));
@@ -129,17 +124,31 @@ export default function PlateSolvingPage() {
   });
 
   // Calculate stats
+  const completedImageIds = new Set([
+    ...images.filter(image => image.plateSolved).map(image => image.id),
+    ...jobs.filter(job => job.status === "success" && job.imageId !== null).map(job => job.imageId!),
+  ]);
+  const unresolvedJobs = jobs.filter(job => job.imageId !== null && !completedImageIds.has(job.imageId));
+  const pendingImageIds = new Set(unresolvedJobs.filter(job => job.status === "pending").map(job => job.imageId!));
+  const processingImageIds = new Set(unresolvedJobs.filter(job => job.status === "processing").map(job => job.imageId!));
+  const failedImageIds = new Set(unresolvedJobs.filter(job => job.status === "failed").map(job => job.imageId!));
+  const allTrackedImageIds = new Set([
+    ...completedImageIds,
+    ...pendingImageIds,
+    ...processingImageIds,
+    ...failedImageIds,
+  ]);
   const stats: PlateSolvingStats = {
-    totalJobs: jobs.length,
-    pendingJobs: jobs.filter(job => job.status === "pending").length,
-    processingJobs: jobs.filter(job => job.status === "processing").length,
-    completedJobs: jobs.filter(job => job.status === "success").length,
-    failedJobs: jobs.filter(job => job.status === "failed").length,
+    totalJobs: allTrackedImageIds.size,
+    pendingJobs: pendingImageIds.size,
+    processingJobs: processingImageIds.size,
+    completedJobs: completedImageIds.size,
+    failedJobs: failedImageIds.size,
   };
 
   // Filter images
   const filteredImages = images.filter((image) => {
-    if (!isPlateSolvingEligible(image)) return false;
+    if (!image.plateSolved && !isPlateSolvingEligible(image)) return false;
     if (searchTerm && !image.title.toLowerCase().includes(searchTerm.toLowerCase())) {
       return false;
     }
@@ -148,9 +157,17 @@ export default function PlateSolvingPage() {
     }
     return true;
   });
+  const selectableImages = filteredImages.filter(image =>
+    !image.plateSolved &&
+    isPlateSolvingEligible(image) &&
+    !jobs.some(job => job.imageId === image.id && (job.status === "pending" || job.status === "processing"))
+  );
+  const selectableImageIds = new Set(selectableImages.map(image => image.id));
+  const selectedSelectableCount = [...selectedImages].filter(id => selectableImageIds.has(id)).length;
 
   // Handle image selection
   const handleImageToggle = (imageId: number) => {
+    if (!selectableImageIds.has(imageId)) return;
     const newSelected = new Set(selectedImages);
     if (newSelected.has(imageId)) {
       newSelected.delete(imageId);
@@ -162,17 +179,18 @@ export default function PlateSolvingPage() {
 
   // Handle select all/none
   const handleSelectAll = () => {
-    if (selectedImages.size === filteredImages.length) {
+    if (selectedSelectableCount === selectableImages.length) {
       setSelectedImages(new Set());
     } else {
-      setSelectedImages(new Set(filteredImages.map(img => img.id)));
+      setSelectedImages(new Set(selectableImageIds));
     }
   };
 
   // Handle bulk plate solving
   const handleBulkPlateSolve = () => {
-    if (selectedImages.size > 0) {
-      plateSolveMutation.mutate(Array.from(selectedImages));
+    const imageIds = [...selectedImages].filter(id => selectableImageIds.has(id));
+    if (imageIds.length > 0) {
+      plateSolveMutation.mutate(imageIds);
     }
   };
 
@@ -204,7 +222,7 @@ export default function PlateSolvingPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Plate Solving</h1>
           <p className="text-muted-foreground">
-            Manually submit images for plate solving using Astrometry.net
+            Solve images privately on this Sidereal server with local Astrometry.net
           </p>
         </div>
 
@@ -214,7 +232,7 @@ export default function PlateSolvingPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Jobs</p>
+                  <p className="text-sm text-muted-foreground">Images tracked</p>
                   <p className="text-2xl font-bold">{stats.totalJobs}</p>
                 </div>
                 <Crosshair className="h-8 w-8 text-muted-foreground" />
@@ -250,7 +268,7 @@ export default function PlateSolvingPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Completed</p>
+                  <p className="text-sm text-muted-foreground">Complete</p>
                   <p className="text-2xl font-bold text-green-600">{stats.completedJobs}</p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-green-600" />
@@ -310,18 +328,18 @@ export default function PlateSolvingPage() {
                 <Button
                   variant="outline"
                   onClick={handleSelectAll}
-                  disabled={filteredImages.length === 0}
+                  disabled={selectableImages.length === 0}
                 >
-                  {selectedImages.size === filteredImages.length ? "Deselect All" : "Select All"}
+                  {selectedSelectableCount === selectableImages.length ? "Deselect All" : "Select All"}
                 </Button>
                 <span className="text-sm text-muted-foreground">
-                  {selectedImages.size} of {filteredImages.length} images selected
+                  {selectedSelectableCount} of {selectableImages.length} images available to solve
                 </span>
               </div>
               
               <Button
                 onClick={handleBulkPlateSolve}
-                disabled={selectedImages.size === 0 || plateSolveMutation.isPending}
+                disabled={selectedSelectableCount === 0 || plateSolveMutation.isPending}
                 className="sky-button-primary"
               >
                 {plateSolveMutation.isPending ? (
@@ -332,7 +350,7 @@ export default function PlateSolvingPage() {
                 ) : (
                   <>
                     <Crosshair className="mr-2 h-4 w-4" />
-                    Submit {selectedImages.size} for Plate Solving
+                    Submit {selectedSelectableCount} for Plate Solving
                   </>
                 )}
               </Button>
@@ -367,15 +385,17 @@ export default function PlateSolvingPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
           {filteredImages.map((image) => {
             const job = getJobStatus(image.id);
-            const isSelected = selectedImages.has(image.id);
+            const isSelectable = selectableImageIds.has(image.id);
+            const isSelected = isSelectable && selectedImages.has(image.id);
+            const isComplete = image.plateSolved || job?.status === "success";
             
             return (
               <Card 
                 key={image.id} 
-                className={`cursor-pointer transition-all hover:shadow-md overflow-hidden ${
+                className={`${isSelectable ? 'cursor-pointer hover:shadow-md' : ''} transition-all overflow-hidden ${
                   isSelected ? 'ring-2 ring-primary' : ''
                 }`}
-                onClick={() => handleImageToggle(image.id)}
+                onClick={() => isSelectable && handleImageToggle(image.id)}
               >
                 <CardContent className="p-0">
                   <div className="relative">
@@ -397,14 +417,14 @@ export default function PlateSolvingPage() {
                     
                     {/* Overlay with checkbox and title */}
                     <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity">
-                      <div className="absolute top-2 left-2">
+                      {isSelectable && <div className="absolute top-2 left-2">
                         <Checkbox
                           checked={isSelected}
                           onChange={() => handleImageToggle(image.id)}
                           onClick={(e) => e.stopPropagation()}
                           className="bg-white/90"
                         />
-                      </div>
+                      </div>}
                       <div className="absolute bottom-2 left-2 right-2">
                         <h3 className="font-medium text-xs text-white line-clamp-2 drop-shadow-lg">
                           {image.title}
@@ -414,13 +434,13 @@ export default function PlateSolvingPage() {
                     
                     {/* Status badges - always visible */}
                     <div className="absolute top-2 right-2 flex flex-col items-end space-y-1">
-                      {image.plateSolved && (
+                      {isComplete && (
                         <Badge className="status-plate-solved text-xs">
                           <CheckCircle className="mr-1 h-3 w-3" />
-                          Solved
+                          Complete
                         </Badge>
                       )}
-                      {job && (
+                      {job && !isComplete && (
                         <Badge
                           variant={
                             job.status === "success" ? "default" :
@@ -433,7 +453,7 @@ export default function PlateSolvingPage() {
                           {job.status === "success" && <CheckCircle className="mr-1 h-3 w-3" />}
                           {job.status === "failed" && <XCircle className="mr-1 h-3 w-3" />}
                           {job.status === "pending" && <Clock className="mr-1 h-3 w-3" />}
-                          {job.status === "processing" ? (validRemoteId(job.astrometryJobId) ? "Solving" : "Waiting for Astrometry.net") : job.status === "success" ? "Solved" : job.status === "failed" ? "Failed" : "Pending"}
+                          {job.status === "processing" ? "Solving locally" : job.status === "success" ? "Complete" : job.status === "failed" ? "Failed" : "Pending"}
                         </Badge>
                       )}
                     </div>
@@ -455,7 +475,7 @@ export default function PlateSolvingPage() {
                           {expandedJobId === job.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                           Details
                         </button>
-                        {(job.status === "processing" || job.status === "failed") && validRemoteId(job.astrometrySubmissionId) && (
+                        {(job.status === "processing" || job.status === "failed") && (
                           <Button
                             variant="outline"
                             size="sm"
@@ -478,6 +498,7 @@ export default function PlateSolvingPage() {
                           )}
                           {job.status === "success" && (
                             <div className="text-muted-foreground space-y-0.5 font-mono">
+                              <div className="font-sans">{job.astrometryJobId?.startsWith("local-") ? "Solved locally" : "Existing plate solution imported"}</div>
                               {(job.result as any)?.ra !== undefined && (
                                 <div>RA: {Number((job.result as any).ra).toFixed(4)}</div>
                               )}
@@ -505,28 +526,6 @@ export default function PlateSolvingPage() {
                               Completed: {new Date(job.completedAt).toLocaleString()}
                             </div>
                           )}
-                          <div className="flex gap-2 pt-1">
-                            {validRemoteId(job.astrometrySubmissionId) && (
-                              <a
-                                href={`https://nova.astrometry.net/status/${job.astrometrySubmissionId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-400 hover:text-blue-300 underline"
-                              >
-                                Submission
-                              </a>
-                            )}
-                            {validRemoteId(job.astrometryJobId) && (
-                              <a
-                                href={`https://nova.astrometry.net/annotated_full/${job.astrometryJobId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-400 hover:text-blue-300 underline"
-                              >
-                                Annotated Result
-                              </a>
-                            )}
-                          </div>
                         </div>
                       )}
                     </div>
@@ -545,7 +544,7 @@ export default function PlateSolvingPage() {
               <p className="text-muted-foreground">
                 {showOnlyUnsolved 
                   ? "All images have been plate solved, or try adjusting your search criteria."
-                  : "Try adjusting your search criteria or sync with Immich to get more images."
+                  : "Try adjusting your search criteria or add images to the private Sidereal library."
                 }
               </p>
             </CardContent>

@@ -3,6 +3,10 @@
   "version": "0.10.5",
   "type": "module",
   "license": "MIT",
+  "allowScripts": {
+    "better-sqlite3": true,
+    "bufferutil": true
+  },
   "scripts": {
     "dev:server": "NODE_ENV=development tsx --env-file=.env apps/server/src/index.ts",
     "dev:server:watch": "NODE_ENV=development nodemon --watch apps/server --ext ts,js --exec \"tsx --env-file=.env apps/server/src/index.ts\"",

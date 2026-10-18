@@ -2,7 +2,7 @@
  * Seed script for local development.
  *
  * Populates the SQLite database with sample data so you can develop
- * against a realistic UI without needing a live Immich/Astrometry connection.
+ * against a realistic UI without needing external services.
  *
  * Usage:
  *   npm run seed            # seed all tables
@@ -20,7 +20,7 @@ const RESET = process.argv.includes('--reset');
 
 const images = [
   {
-    immichId: 'seed-001',
+    immichId: null,
     title: 'Orion Nebula (M42)',
     filename: 'orion_nebula.fits',
     thumbnailUrl: '/api/placeholder/400/300',
@@ -52,7 +52,7 @@ const images = [
     description: 'The Great Orion Nebula, one of the brightest nebulae visible to the naked eye.',
   },
   {
-    immichId: 'seed-002',
+    immichId: null,
     title: 'Andromeda Galaxy (M31)',
     filename: 'andromeda.fits',
     thumbnailUrl: '/api/placeholder/400/300',
@@ -84,7 +84,7 @@ const images = [
     description: null,
   },
   {
-    immichId: 'seed-003',
+    immichId: null,
     title: 'Ring Nebula (M57)',
     filename: 'ring_nebula.fits',
     thumbnailUrl: '/api/placeholder/400/300',
@@ -116,7 +116,7 @@ const images = [
     description: 'The Ring Nebula, a well-known planetary nebula in the constellation Lyra.',
   },
   {
-    immichId: 'seed-004',
+    immichId: null,
     title: 'Pleiades (M45)',
     filename: 'pleiades.fits',
     thumbnailUrl: '/api/placeholder/400/300',
@@ -199,16 +199,16 @@ const notificationsList = [
   },
   {
     type: 'success',
-    title: 'Sync completed',
-    message: 'Successfully synced 12 new images from Immich',
+    title: 'Local library import completed',
+    message: 'Added 12 originals to the local library',
     details: ({ newImages: 12, updatedImages: 3 }),
     acknowledged: false,
     createdAt: new Date('2024-12-16T09:00:00Z'),
   },
   {
     type: 'warning',
-    title: 'Astrometry rate limit',
-    message: 'Approaching Astrometry.net API rate limit. 8 of 10 requests used.',
+    title: 'Local solver needs indexes',
+    message: 'The local Astrometry solver has no index files available.',
     details: null,
     acknowledged: false,
     createdAt: new Date('2024-12-16T08:45:00Z'),
@@ -223,9 +223,9 @@ const notificationsList = [
   },
   {
     type: 'error',
-    title: 'Immich connection lost',
-    message: 'Unable to connect to Immich server at http://localhost:2283',
-    details: ({ host: 'http://localhost:2283' }),
+    title: 'Image upload failed',
+    message: 'The uploaded image could not be added to the local library.',
+    details: null,
     acknowledged: false,
     createdAt: new Date('2024-12-16T06:00:00Z'),
   },
@@ -247,8 +247,8 @@ const notificationsList = [
   },
   {
     type: 'info',
-    title: 'Scheduled sync started',
-    message: 'Automatic Immich sync job started',
+    title: 'Thumbnail generation started',
+    message: 'Local thumbnail generation started',
     details: null,
     acknowledged: false,
     createdAt: new Date('2024-12-15T16:00:00Z'),

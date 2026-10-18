@@ -131,7 +131,7 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="text-center">
                 <div className="text-2xl font-bold text-foreground">{stats.totalImages}</div>
-                <div className="text-muted-foreground">Total Images</div>
+                <div className="text-muted-foreground">Photos</div>
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold text-green-400">{stats.plateSolved}</div>

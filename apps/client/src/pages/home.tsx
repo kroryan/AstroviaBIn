@@ -5,7 +5,7 @@ import { SearchFilters } from "@/components/search-filters";
 import { ImageGallery } from "@/components/image-gallery";
 import { Sidebar } from "@/components/sidebar";
 import { ImageOverlay } from "@/components/image-overlay";
-import { usePlateSolvingUpdates, useImmichSyncUpdates } from "@/hooks/use-socket";
+import { usePlateSolvingUpdates } from "@/hooks/use-socket";
 import { useSearch, useLocation } from "wouter";
 import type { AstroImage, Equipment } from "@shared/schema";
 
@@ -25,7 +25,7 @@ export default function Home() {
   });
   const [visibleCount, setVisibleCount] = useState(12); // Show 12 images initially
 
-  type Stats = { totalImages: number; plateSolved: number; totalHours: number; uniqueTargets: number; };
+  type Stats = { totalImages: number; plateSolved: number; fitsCount: number; totalHours: number; uniqueTargets: number; };
   type Tag = { tag: string; count: number };
 
   const { data: images = [], isLoading: imagesLoading, refetch: refetchImages } = useQuery<AstroImage[]>({
@@ -66,14 +66,6 @@ export default function Home() {
   usePlateSolvingUpdates((update) => {
     console.log('Received plate solving update:', update);
     // Refresh data when plate solving status changes
-    refetchImages();
-    refetchStats();
-  });
-
-  // Listen for real-time Immich sync updates
-  useImmichSyncUpdates((update) => {
-    console.log('Received Immich sync update:', update);
-    // Refresh data when Immich sync completes
     refetchImages();
     refetchStats();
   });
@@ -175,6 +167,7 @@ export default function Home() {
 
       {selectedImage && (
         <ImageOverlay
+          key={selectedImage.id}
           image={selectedImage}
           onClose={handleCloseOverlay}
           onFilterByEquipment={(equipmentId, equipmentName) => {

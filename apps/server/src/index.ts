@@ -10,6 +10,7 @@ import { cronManager, setWsManager as setCronWsManager } from './services/cron-m
 import { setWsManager } from './services/astrometry';
 import { workerManager } from './services/worker-manager';
 import { catalogService } from './services/catalog';
+import { storage } from './services/storage';
 
 const app = new Hono();
 
@@ -22,6 +23,15 @@ let wsManager: WsManager;
 
 // Main startup function
 async function startServer() {
+  try {
+    const importedSolutions = await storage.importExistingPlateSolutions();
+    if (importedSolutions > 0) {
+      console.log(`Imported ${importedSolutions} existing plate solutions as completed jobs; no images were re-solved.`);
+    }
+  } catch (error) {
+    console.error('Failed to import existing plate solutions; the saved image metadata remains untouched:', error);
+  }
+
   const PORT = parseInt(process.env.PORT || '5000', 10);
 
   // Start Hono with @hono/node-server — returns a Node http.Server

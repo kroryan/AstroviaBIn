@@ -8,8 +8,9 @@ import { X, Crosshair, Loader, Eye, AlertTriangle } from "lucide-react";
 import type { AstroImage } from "@shared/schema";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
 import { ImageTagsEditor } from "./image-tags-editor";
-import { formatCaptureMoment } from "@/lib/fits";
+import { formatCaptureMoment, resolveZoomUrl } from "@/lib/fits";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { HotpantsAnalysis } from "./hotpants-analysis";
 
 interface ImageModalProps {
   image: AstroImage;
@@ -25,6 +26,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
   const solarSystemFrame = Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TAGS.has(tag.trim().toLowerCase())));
   const deepSkyFrame = Boolean(image.tags?.some(tag => tag.trim().toLowerCase() === 'deep sky'));
   const plateSolvingEligible = deepSkyFrame && !solarSystemFrame;
+  const isFits = /^(fits|fits-derived|fits-upload):\/\//.test(image.originalPath || '');
 
   const plateSolveMutation = useMutation({
     mutationFn: async (imageId: number): Promise<{ processing: boolean; message?: string }> => {
@@ -58,8 +60,10 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
       const response = await apiRequest("GET", `/api/images/${image.id}/plate-solving-job`);
       return response.json();
     },
-    enabled: !!(image.id && image.plateSolved),
+    enabled: !!image.id,
+    refetchInterval: query => query.state.data?.status === "processing" ? 5_000 : false,
   });
+  const isPlateSolveProcessing = plateSolvingJob?.status === "processing";
 
   // HTML overlays for Astrometry.net annotations
   const annotationOverlays = showAnnotations && annotationsData?.annotations ? (
@@ -138,11 +142,13 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               {image.fullUrl ? (
                 <div className="relative w-full h-full">
                   <DeepZoomViewer
-                    imageUrl={image.fullUrl || ""}
-                    annotations={showAnnotations && annotationsData?.annotations ? annotationsData.annotations : []}
+                    imageUrl={resolveZoomUrl(image)}
+                    tileInfoUrl={`/api/images/${image.id}/tile-info`}
+                    tileUrlBase={`/api/images/${image.id}/tile`}
+                    annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
                   />
                   {/* Annotation Toggle Button */}
-                  {image.plateSolved && (
+                  {image.plateSolved && !isPlateSolveProcessing && (
                     <div className="absolute bottom-4 right-4 z-10">
                       <Button
                         variant="outline"
@@ -181,10 +187,10 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-foreground">Plate Solution</h4>
-                  {!image.plateSolved && plateSolvingEligible && (
+                  {plateSolvingEligible && (
                     <Button
                       onClick={() => plateSolveMutation.mutate(image.id)}
-                      disabled={plateSolveMutation.isPending}
+                      disabled={plateSolveMutation.isPending || plateSolvingJob?.status === "processing"}
                       size="sm"
                       className="sky-button-secondary"
                     >
@@ -193,14 +199,16 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                       ) : (
                         <Crosshair className="mr-2 h-4 w-4" />
                       )}
-                      Solve
+                      {image.plateSolved ? "Solve again locally" : "Solve locally"}
                     </Button>
                   )}
                 </div>
-                {plateSolveMutation.data?.processing && (
-                  <p role="status" className="mb-2 text-sm text-muted-foreground">{plateSolveMutation.data.message}</p>
+                {(isPlateSolveProcessing || plateSolveMutation.data?.processing) && (
+                  <p role="status" className="mb-2 text-sm text-muted-foreground">Private local plate solving is in progress. The previous coordinates and target are not being treated as verified.</p>
                 )}
-                {image.plateSolved ? (
+                {isPlateSolveProcessing ? (
+                  <p className="text-sm text-muted-foreground">Waiting for the private local solve to verify the image.</p>
+                ) : image.plateSolved ? (
                   <div className="text-sm text-muted-foreground space-y-1">
                     {image.ra && <div>RA: {image.ra}</div>}
                     {image.dec && <div>Dec: {image.dec}</div>}
@@ -208,30 +216,18 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                     {image.fieldOfView && <div>Field of View: {image.fieldOfView}</div>}
                     {image.rotation && <div>Rotation: {image.rotation}°</div>}
                     <div className="text-green-400 flex items-center">
-                      {plateSolvingJob?.submissionId ? (
-                        <a
-                          href={`https://nova.astrometry.net/status/${plateSolvingJob.submissionId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                        >
-                          <Badge className="status-plate-solved cursor-pointer hover:bg-green-600">
-                            ✓ Verified by Astrometry.net
-                          </Badge>
-                        </a>
-                      ) : (
-                        <Badge className="status-plate-solved">✓ Verified by Astrometry.net</Badge>
-                      )}
+                      <Badge className="status-plate-solved">✓ {plateSolvingJob?.astrometryJobId?.startsWith("local-") ? "Solved locally with Astrometry.net" : "Existing plate solution imported"}</Badge>
                     </div>
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     <p>No plate solving data available.</p>
-                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
+                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to process this image privately on this Sidereal server.</p>}
                   </div>
                 )}
               </div>
               <ImageTagsEditor image={image} />
+              {isFits && <HotpantsAnalysis image={image} />}
               {/* Description */}
               {image.description && (
                 <div>
@@ -248,11 +244,13 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               {image.fullUrl ? (
                 <div className="relative">
                   <DeepZoomViewer
-                    imageUrl={image.fullUrl || ""}
-                    annotations={showAnnotations && annotationsData?.annotations ? annotationsData.annotations : []}
+                    imageUrl={resolveZoomUrl(image)}
+                    tileInfoUrl={`/api/images/${image.id}/tile-info`}
+                    tileUrlBase={`/api/images/${image.id}/tile`}
+                    annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
                   />
                   {/* Annotation Toggle Button */}
-                  {image.plateSolved && (
+                  {image.plateSolved && !isPlateSolveProcessing && (
                     <div className="absolute bottom-4 right-4 z-10">
                       <Button
                         variant="outline"
@@ -291,10 +289,10 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-foreground">Plate Solution</h4>
-                  {!image.plateSolved && plateSolvingEligible && (
+                  {plateSolvingEligible && (
                     <Button
                       onClick={() => plateSolveMutation.mutate(image.id)}
-                      disabled={plateSolveMutation.isPending}
+                      disabled={plateSolveMutation.isPending || plateSolvingJob?.status === "processing"}
                       size="sm"
                       className="sky-button-secondary"
                     >
@@ -303,14 +301,16 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                       ) : (
                         <Crosshair className="mr-2 h-4 w-4" />
                       )}
-                      Solve
+                      {image.plateSolved ? "Solve again locally" : "Solve locally"}
                     </Button>
                   )}
                 </div>
-                {plateSolveMutation.data?.processing && (
-                  <p role="status" className="mb-2 text-sm text-muted-foreground">{plateSolveMutation.data.message}</p>
+                {(isPlateSolveProcessing || plateSolveMutation.data?.processing) && (
+                  <p role="status" className="mb-2 text-sm text-muted-foreground">Private local plate solving is in progress. The previous coordinates and target are not being treated as verified.</p>
                 )}
-                {image.plateSolved ? (
+                {isPlateSolveProcessing ? (
+                  <p className="text-sm text-muted-foreground">Waiting for the private local solve to verify the image.</p>
+                ) : image.plateSolved ? (
                   <div className="text-sm text-muted-foreground space-y-1">
                     {image.ra && <div>RA: {image.ra}</div>}
                     {image.dec && <div>Dec: {image.dec}</div>}
@@ -318,26 +318,13 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                     {image.fieldOfView && <div>Field of View: {image.fieldOfView}</div>}
                     {image.rotation && <div>Rotation: {image.rotation}°</div>}
                     <div className="text-green-400 flex items-center">
-                      {plateSolvingJob?.submissionId ? (
-                        <a
-                          href={`https://nova.astrometry.net/status/${plateSolvingJob.submissionId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                        >
-                          <Badge className="status-plate-solved cursor-pointer hover:bg-green-600">
-                            ✓ Verified by Astrometry.net
-                          </Badge>
-                        </a>
-                      ) : (
-                        <Badge className="status-plate-solved">✓ Verified by Astrometry.net</Badge>
-                      )}
+                      <Badge className="status-plate-solved">✓ {plateSolvingJob?.astrometryJobId?.startsWith("local-") ? "Solved locally with Astrometry.net" : "Existing plate solution imported"}</Badge>
                     </div>
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     <p>No plate solving data available.</p>
-                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
+                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to process this image privately on this Sidereal server.</p>}
                   </div>
                 )}
               </div>
@@ -345,6 +332,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
             <div className="mt-4">
               <ImageTagsEditor image={image} />
             </div>
+            {isFits && <HotpantsAnalysis image={image} />}
             {/* Description */}
             {image.description && (
               <div className="mt-4">

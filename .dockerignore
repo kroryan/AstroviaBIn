@@ -61,6 +61,8 @@ docker-compose.yml
 # Documentation
 *.md
 docs/
+!vendor/hotpants/README.md
+!vendor/hotpants/UPSTREAM.md
 
 # Test files
 test/

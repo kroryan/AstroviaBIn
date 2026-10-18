@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { Hono } from 'hono';
+import sharp from 'sharp';
 
 delete process.env.DATABASE_URL;
 process.env.SQLITE_DB_PATH = ':memory:';
@@ -21,6 +22,18 @@ function testFits(): Buffer {
   const data = Buffer.alloc(8);
   [0, 100, 500, 1000].forEach((value, index) => data.writeInt16BE(value, index * 2));
   return Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), data, Buffer.alloc(2880 - data.length)]);
+}
+
+/** A mono FITS wider than the default 2048px preview cap, to tell "full" resolution apart from it. */
+function wideTestFits(width: number): Buffer {
+  const header = Buffer.from([
+    card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(width)), card('NAXIS2', '2'), card('END'),
+  ].join(''), 'ascii');
+  const values = new Array(width * 2).fill(500);
+  const data = Buffer.alloc(values.length * 2);
+  values.forEach((value, index) => data.writeInt16BE(value, index * 2));
+  const dataBlocks = Math.ceil(data.length / 2880) * 2880;
+  return Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), data, Buffer.alloc(dataBlocks - data.length)]);
 }
 
 test('scan indexes FITS into the existing gallery and serves a preview', async () => {
@@ -110,6 +123,41 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('preview=full renders at native resolution instead of the capped preview size', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-route-'));
+  const sourceDirectory = path.join(directory, 'source');
+  const cacheDirectory = path.join(directory, 'cache');
+  const oldLibraryDir = process.env.FITS_LIBRARY_DIR;
+  const oldCacheDir = process.env.FITS_CACHE_DIR;
+  process.env.FITS_LIBRARY_DIR = sourceDirectory;
+  process.env.FITS_CACHE_DIR = cacheDirectory;
+  await mkdir(sourceDirectory, { recursive: true });
+  const width = 2500;
+  await writeFile(path.join(sourceDirectory, 'wide.fits'), wideTestFits(width));
+
+  try {
+    const app = new Hono().route('/api/fits', routes);
+    await app.request('/api/fits/scan', { method: 'POST' });
+    const images = await (await app.request('/api/fits')).json() as Array<{ id: number; originalPath: string }>;
+    const image = images.find(item => item.originalPath === 'fits://wide.fits');
+    assert.ok(image);
+
+    const capped = await app.request(`/api/fits/${image.id}/preview`);
+    const cappedMeta = await sharp(await capped.arrayBuffer()).metadata();
+    assert.ok(cappedMeta.width! <= 2048, `expected capped width <= 2048, got ${cappedMeta.width}`);
+
+    const full = await app.request(`/api/fits/${image.id}/preview?preview=full`);
+    const fullMeta = await sharp(await full.arrayBuffer()).metadata();
+    assert.equal(fullMeta.width, width);
+  } finally {
+    if (oldLibraryDir === undefined) delete process.env.FITS_LIBRARY_DIR;
+    else process.env.FITS_LIBRARY_DIR = oldLibraryDir;
+    if (oldCacheDir === undefined) delete process.env.FITS_CACHE_DIR;
+    else process.env.FITS_CACHE_DIR = oldCacheDir;
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,5 @@
 // Re-export database types
-export type { AstroImage, InsertAstroImage, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget, InsertUserTarget } from '../db/pg-schema';
+export type { AstroImage, InsertAstroImage, LibraryAsset, InsertLibraryAsset, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget, InsertUserTarget } from '../db/pg-schema';
 
 // Notification types
 export type NotificationType = 'error' | 'warning' | 'info' | 'success';

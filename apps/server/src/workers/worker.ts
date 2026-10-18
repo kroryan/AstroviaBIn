@@ -83,40 +83,26 @@ class PlateSolvingWorker {
     }
   }
 
-  private async isStandaloneMode(): Promise<boolean> {
-    try {
-      const astrometryConfig = await configService.getAstrometryConfig();
-      return !astrometryConfig.apiKey && !!(process.env.ASTROMETRY_API_KEY || process.env.ASTROMETRY_KEY);
-    } catch (error) {
-      return true;
-    }
-  }
-
   private async getWorkerConfig() {
-    const isStandalone = await this.isStandaloneMode();
-
-    if (isStandalone) {
-      console.log('Worker running in standalone mode - using environment variables');
-      return {
-        apiKey: process.env.ASTROMETRY_API_KEY || process.env.ASTROMETRY_KEY || "",
-        enabled: true,
-        autoEnabled: true,
-        checkInterval: parseInt(process.env.ASTROMETRY_CHECK_INTERVAL || "30", 10),
-        pollInterval: parseInt(process.env.ASTROMETRY_POLL_INTERVAL || "5", 10),
-        maxConcurrent: parseInt(process.env.PLATE_SOLVE_MAX_CONCURRENT || "3", 10),
-        autoResubmit: process.env.ASTROMETRY_AUTO_RESUBMIT === 'true',
-      };
-    } else {
-      console.log('Worker running with UI server - using database configuration');
-      return await configService.getAstrometryConfig();
-    }
+    const settings = await configService.getAstrometryConfig();
+    const hasStandaloneSettings = process.env.ASTROMETRY_AUTO_ENABLED !== undefined;
+    if (!hasStandaloneSettings) return settings;
+    return {
+      ...settings,
+      enabled: process.env.ASTROMETRY_ENABLED !== 'false',
+      autoEnabled: process.env.ASTROMETRY_AUTO_ENABLED === 'true',
+      checkInterval: parseInt(process.env.ASTROMETRY_CHECK_INTERVAL || String(settings.checkInterval), 10),
+      pollInterval: parseInt(process.env.ASTROMETRY_POLL_INTERVAL || String(settings.pollInterval), 10),
+      maxConcurrent: parseInt(process.env.PLATE_SOLVE_MAX_CONCURRENT || String(settings.maxConcurrent), 10),
+      autoResubmit: process.env.ASTROMETRY_AUTO_RESUBMIT === 'true',
+    };
   }
 
   async createAndSubmitJobsForUnsolvedImages() {
     const astrometryConfig = await this.getWorkerConfig();
 
-    if (!astrometryConfig.enabled || !astrometryConfig.autoEnabled || !astrometryConfig.apiKey) {
-      console.log('Automatic plate solving not enabled or configured, skipping job creation');
+    if (!astrometryConfig.enabled || !astrometryConfig.autoEnabled) {
+      console.log('Automatic local plate solving is disabled, skipping job creation');
       return;
     }
 
@@ -146,7 +132,7 @@ class PlateSolvingWorker {
         }
       }
 
-      if (image.fullUrl) {
+      if (image.libraryAssetId || image.originalPath) {
         try {
           console.log(`Auto-submitting image ${image.id} (${image.title}) for plate solving`);
           await this.astrometryService.submitImageForPlateSolving(image);

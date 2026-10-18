@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Maximize2, Minimize2, RotateCcw, Save, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useToast } from '@/hooks/use-toast';
 import { useDebounce } from '@/hooks/use-debounce';
@@ -145,11 +144,9 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
   };
 
   return (
-    <section className="bg-muted/30 rounded-xl p-4 border border-red-500/30 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold text-foreground flex items-center gap-2"><Sparkles className="h-4 w-4 text-red-400" /> FITS processing</h3>
-        <Badge className="bg-red-700 text-white border-red-500">FITS</Badge>
-      </div>
+    <details className="bg-muted/30 rounded-xl p-4 border border-red-500/30">
+      <summary className="cursor-pointer font-semibold text-foreground"><Sparkles className="inline h-4 w-4 mr-2 text-red-400" />FITS processing</summary>
+      <div className="pt-3 space-y-3">
       {metadata && <p className="text-xs text-muted-foreground font-mono">{metadata.width}×{metadata.height} · {metadata.channels === 3 ? 'RGB' : 'Mono'} · BITPIX {metadata.bitpix}</p>}
       <div className="relative h-64 rounded-md bg-black overflow-hidden">
         {!fullscreen && <DeepZoomViewer
@@ -247,6 +244,7 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Save processed FITS
       </Button>
       <p className="text-xs text-muted-foreground">Creates a new float FITS derivative. The source file is never changed.</p>
-    </section>
+      </div>
+    </details>
   );
 }

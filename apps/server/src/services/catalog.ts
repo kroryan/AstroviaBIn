@@ -7,6 +7,15 @@ import { normalizeObjectName, raToDecimalDegrees, decToDecimalDegrees, parseNGCC
 // Re-export for consumers that imported from here
 export { normalizeObjectName, raToDecimalDegrees, decToDecimalDegrees };
 
+function angularDistanceDegrees(ra1: number, dec1: number, ra2: number, dec2: number): number {
+  const radians = Math.PI / 180;
+  const deltaRa = ((((ra2 - ra1) % 360) + 540) % 360) - 180;
+  const sinDec = Math.sin((dec2 - dec1) * radians / 2);
+  const sinRa = Math.sin(deltaRa * radians / 2);
+  const haversine = sinDec * sinDec + Math.cos(dec1 * radians) * Math.cos(dec2 * radians) * sinRa * sinRa;
+  return 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, haversine)))) / radians;
+}
+
 /**
  * Build a case-insensitive OR condition across catalog search columns.
  * Searches both the raw query and the normalized form (e.g. "m45" → "M 45").
@@ -32,6 +41,27 @@ function catalogSearchCondition(query: string): SQL {
 const NGC_CSV_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/master/database_files/NGC.csv';
 const ADDENDUM_CSV_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/master/database_files/addendum.csv';
 const GITHUB_API_URL = 'https://api.github.com/repos/mattiaverga/OpenNGC/commits?path=database_files/NGC.csv&per_page=1';
+
+// OpenNGC marks NGC 2244 as a duplicate of NGC 2239. For Sidereal we present the
+// modern, commonly used NGC 2244 designation while retaining NGC 2239 as a searchable alias.
+const ROSETTE_PRIMARY_NAME = 'NGC 2239';
+const ROSETTE_CANONICAL_NAME = 'NGC 2244';
+const ROSETTE_DESIGNATIONS = new Set([ROSETTE_PRIMARY_NAME, ROSETTE_CANONICAL_NAME]);
+
+function canonicalRosetteEntry<T extends { name: string; identifiers?: string | null }>(object: T): T & { identifiers: string | null } {
+  const identifiers = new Set((object.identifiers || '').split(',').map(value => value.trim()).filter(Boolean));
+  identifiers.add(ROSETTE_PRIMARY_NAME);
+  return { ...object, name: ROSETTE_CANONICAL_NAME, identifiers: Array.from(identifiers).join(', ') };
+}
+
+function canonicalizeRosetteCatalog<T extends { name: string; type?: string | null; identifiers?: string | null }>(objects: T[]): Array<Omit<T, 'identifiers'> & { identifiers: string | null }> {
+  const primary = objects.find(object => object.name === ROSETTE_PRIMARY_NAME && object.type?.toUpperCase() !== 'DUP');
+  if (!primary) return objects.map(object => ({ ...object, identifiers: object.identifiers ?? null }));
+  return [
+    ...objects.filter(object => !ROSETTE_DESIGNATIONS.has(object.name)).map(object => ({ ...object, identifiers: object.identifiers ?? null })),
+    canonicalRosetteEntry(primary),
+  ];
+}
 
 class CatalogService {
   /**
@@ -61,7 +91,7 @@ class CatalogService {
       console.warn('Failed to fetch addendum.csv, continuing with NGC.csv only:', err);
     }
 
-    const allObjects = [...ngcObjects, ...addendumObjects];
+    const allObjects = canonicalizeRosetteCatalog([...ngcObjects, ...addendumObjects]);
 
     // Deduplicate by name (prefer NGC entry over addendum)
     const nameMap = new Map<string, InsertCatalogObject>();
@@ -138,19 +168,34 @@ class CatalogService {
    * Search catalog objects by name, messier designation, common names, or identifiers
    */
   async searchCatalog(query: string, limit: number = 20): Promise<CatalogObject[]> {
-    return await db.select().from(schema.catalogObjects)
+    const results = await db.select().from(schema.catalogObjects)
       .where(catalogSearchCondition(query))
       .limit(limit)
       .execute();
+    const queryName = normalizeObjectName(query).toUpperCase();
+    if (!(results as CatalogObject[]).some((object: CatalogObject) => ROSETTE_DESIGNATIONS.has(object.name)) && !ROSETTE_DESIGNATIONS.has(queryName)) return results;
+    const canonical = await this.getCatalogObject(ROSETTE_CANONICAL_NAME);
+    return canonical
+      ? [canonical, ...(results as CatalogObject[]).filter((object: CatalogObject) => !ROSETTE_DESIGNATIONS.has(object.name))]
+      : results;
   }
 
   /**
    * Get a single catalog object by exact name match
    */
   async getCatalogObject(name: string): Promise<CatalogObject | undefined> {
+    const normalized = normalizeObjectName(name);
+    const requested = normalized.toUpperCase();
+    const lookupName = ROSETTE_DESIGNATIONS.has(requested) ? ROSETTE_PRIMARY_NAME : normalized;
     const results = await db.select().from(schema.catalogObjects)
-      .where(eq(schema.catalogObjects.name, name))
+      .where(eq(schema.catalogObjects.name, lookupName))
       .execute();
+    if (results[0] && ROSETTE_DESIGNATIONS.has(results[0].name)) return canonicalRosetteEntry(results[0]);
+    if (!results[0] && ROSETTE_DESIGNATIONS.has(requested)) {
+      const canonical = await db.select().from(schema.catalogObjects)
+        .where(eq(schema.catalogObjects.name, ROSETTE_CANONICAL_NAME)).execute();
+      return canonical[0] ? canonicalRosetteEntry(canonical[0]) : undefined;
+    }
     return results[0] || undefined;
   }
 
@@ -189,6 +234,55 @@ class CatalogService {
     }
 
     return sortCatalogMatchesByPriority(matches);
+  }
+
+  /** Resolve a target only when its catalog position overlaps the solved image footprint. */
+  async matchTargetAtCoordinates(
+    ra: number,
+    dec: number,
+    fieldRadiusDeg: number,
+    labels: string[] = [],
+  ): Promise<CatalogObject | undefined> {
+    if (!Number.isFinite(ra) || !Number.isFinite(dec) || Math.abs(dec) > 90) return undefined;
+    const objects = await db.select().from(schema.catalogObjects)
+      .where(and(isNotNull(schema.catalogObjects.raDeg), isNotNull(schema.catalogObjects.decDeg)))
+      .execute() as CatalogObject[];
+    const objectsByName = new Map(objects.map(object => [object.name.toUpperCase(), object]));
+    const rosetteSource = objectsByName.get(ROSETTE_PRIMARY_NAME) || objectsByName.get(ROSETTE_CANONICAL_NAME);
+    const canonicalRosette = rosetteSource ? canonicalRosetteEntry(rosetteSource) : undefined;
+    const radius = Number.isFinite(fieldRadiusDeg) && fieldRadiusDeg > 0
+      ? Math.min(fieldRadiusDeg, 180)
+      : 0.25;
+    const candidates = objects.flatMap(object => {
+      if (object.raDeg === null || object.decDeg === null) return [];
+      const distance = angularDistanceDegrees(ra, dec, object.raDeg, object.decDeg);
+      const objectRadius = Math.max(object.majorAxis || 0, object.minorAxis || 0) / 120;
+      if (distance > radius + objectRadius) return [];
+      const canonicalObject = ROSETTE_DESIGNATIONS.has(object.name.toUpperCase()) ? canonicalRosette : undefined;
+      return [{ object: canonicalObject || object, distance, score: distance / Math.max(objectRadius, 1 / 60) }];
+    });
+    if (candidates.length === 0) return undefined;
+
+    const hints = new Set<string>();
+    for (const label of labels) {
+      const direct = normalizeObjectName(label);
+      if (/^(?:NGC|IC|M)\s*\d+[A-Z]*$/i.test(direct)) {
+        const normalized = direct.toUpperCase().replace(/\s+/g, ' ');
+        hints.add(ROSETTE_DESIGNATIONS.has(normalized) ? ROSETTE_CANONICAL_NAME : normalized);
+      }
+      for (const match of label.matchAll(/\b(NGC|IC|M)\s*0*(\d+)([A-Z]*)\b/gi)) {
+        const normalized = normalizeObjectName(`${match[1]} ${match[2]}${match[3]}`).toUpperCase();
+        hints.add(ROSETTE_DESIGNATIONS.has(normalized) ? ROSETTE_CANONICAL_NAME : normalized);
+      }
+    }
+
+    const hinted = candidates.filter(candidate => hints.has(candidate.object.name.toUpperCase()));
+    if (hinted.length > 0) {
+      return hinted.sort((left, right) => left.distance - right.distance)[0].object;
+    }
+    return candidates.sort((left, right) => left.score - right.score ||
+      (left.object.messier ? -1 : 0) - (right.object.messier ? -1 : 0) ||
+      (left.object.vMag ?? 999) - (right.object.vMag ?? 999))[0].object;
   }
 
   /**

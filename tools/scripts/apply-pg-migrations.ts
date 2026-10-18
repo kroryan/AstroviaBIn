@@ -24,6 +24,21 @@ async function runMigrations() {
 
   try {
     console.log('Creating tables if they don\'t exist...');
+
+    await connection`
+      CREATE TABLE IF NOT EXISTS library_assets (
+        id SERIAL PRIMARY KEY,
+        legacy_asset_id TEXT UNIQUE,
+        legacy_relative_path TEXT NOT NULL UNIQUE,
+        relative_path TEXT NOT NULL UNIQUE,
+        filename TEXT NOT NULL,
+        mime_type TEXT,
+        byte_size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        metadata JSON,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `;
     
     // Create tables using SQL DDL since we don't have migration files
     await connection`
@@ -65,6 +80,9 @@ async function runMigrations() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `;
+
+    await connection`ALTER TABLE astrophotography_images ADD COLUMN IF NOT EXISTS library_asset_id INTEGER REFERENCES library_assets(id) ON DELETE SET NULL;`;
+    await connection`CREATE INDEX IF NOT EXISTS astrophotography_images_library_asset_id_idx ON astrophotography_images(library_asset_id);`;
 
     await connection`
       CREATE TABLE IF NOT EXISTS equipment (

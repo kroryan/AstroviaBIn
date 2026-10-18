@@ -4,9 +4,23 @@ import { pgTable, serial, text, timestamp, real, integer, boolean, json } from '
 import { createInsertSchema } from 'drizzle-zod';
 import { z } from 'zod';
 
+export const libraryAssets = pgTable('library_assets', {
+  id: serial('id').primaryKey(),
+  legacyAssetId: text('legacy_asset_id').unique(),
+  legacyRelativePath: text('legacy_relative_path').notNull().unique(),
+  relativePath: text('relative_path').notNull().unique(),
+  filename: text('filename').notNull(),
+  mimeType: text('mime_type'),
+  byteSize: integer('byte_size').notNull(),
+  sha256: text('sha256').notNull(),
+  metadata: json('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 export const astrophotographyImages = pgTable('astrophotography_images', {
   id: serial('id').primaryKey(),
   immichId: text('immich_id').unique(),
+  libraryAssetId: integer('library_asset_id').references(() => libraryAssets.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
   filename: text('filename').notNull(),
   thumbnailUrl: text('thumbnail_url'),
@@ -170,6 +184,7 @@ export const userTargets = pgTable('user_targets', {
 
 // Zod schemas for validation
 export const insertAstroImageSchema = createInsertSchema(astrophotographyImages);
+export const insertLibraryAssetSchema = createInsertSchema(libraryAssets);
 export const insertEquipmentSchema = createInsertSchema(equipment);
 export const insertImageEquipmentSchema = createInsertSchema(imageEquipment);
 export const insertPlateSolvingJobSchema = createInsertSchema(plateSolvingJobs);
@@ -182,6 +197,8 @@ export const insertUserTargetSchema = createInsertSchema(userTargets);
 
 export type AstroImage = typeof astrophotographyImages.$inferSelect;
 export type InsertAstroImage = z.infer<typeof insertAstroImageSchema>;
+export type LibraryAsset = typeof libraryAssets.$inferSelect;
+export type InsertLibraryAsset = z.infer<typeof insertLibraryAssetSchema>;
 export type Equipment = typeof equipment.$inferSelect;
 export type InsertEquipment = z.infer<typeof insertEquipmentSchema>;
 export type ImageEquipment = typeof imageEquipment.$inferSelect;

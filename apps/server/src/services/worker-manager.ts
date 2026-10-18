@@ -19,12 +19,15 @@ export class WorkerManager extends EventEmitter {
   async start(): Promise<void> {
     // Check admin configuration for automatic plate solving
     const astrometryConfig = await configService.getAstrometryConfig();
-    this.isEnabled = astrometryConfig.enabled && astrometryConfig.autoEnabled && !!astrometryConfig.apiKey;
+    // The worker must run even when automatic submissions are disabled: manually
+    // queued local solve jobs are processed by the same worker loop.
+    this.isEnabled = astrometryConfig.enabled && process.env.ENABLE_PLATE_SOLVING !== 'false';
     
     console.log(`WorkerManager: Checking automatic plate solving configuration...`);
     console.log(`  - Basic enabled: ${astrometryConfig.enabled}`);
     console.log(`  - Auto enabled: ${astrometryConfig.autoEnabled}`);
-    console.log(`  - API key configured: ${!!astrometryConfig.apiKey}`);
+    console.log(`  - Worker enabled: ${this.isEnabled}`);
+    console.log('  - Using the local Astrometry.net solver');
     console.log(`WorkerManager: Automatic plate solving enabled: ${this.isEnabled}`);
 
     if (!this.isEnabled) {

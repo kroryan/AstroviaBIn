@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Upload, Target, Download, AlertTriangle } from "lucide-react";
+import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Target, Download, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
-import { formatCaptureMoment } from "@/lib/fits";
+import { formatCaptureMoment, resolveZoomUrl } from "@/lib/fits";
 import { EquipmentManager } from "./equipment-manager";
 import { AcquisitionEditor } from "./acquisition-editor";
 import { LocationEditorModal } from "./location-editor-modal";
@@ -11,6 +11,7 @@ import { ImageDetailsEditorModal } from "./image-details-editor-modal";
 import { DescriptionEditorModal } from "./description-editor-modal";
 import { TargetPickerModal } from "./target-picker-modal";
 import { FitsProcessingPanel } from "./fits-processing-panel";
+import { HotpantsAnalysis } from "./hotpants-analysis";
 import { ImageTagsEditor } from "./image-tags-editor";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -39,8 +40,6 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
   const [showTargetPicker, setShowTargetPicker] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
-  const [immichSyncing, setImmichSyncing] = useState(false);
-  const [immichSyncMessage, setImmichSyncMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const isMobile = useIsMobile();
 
   // Fetch the latest image data to ensure we have the most up-to-date information
@@ -103,8 +102,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
       const response = await apiRequest("GET", `/api/images/${currentImage.id}/plate-solving-job`);
       return response.json();
     },
-    enabled: !!(currentImage.id && currentImage.plateSolved),
+    enabled: !!currentImage.id,
+    refetchInterval: query => query.state.data?.status === "processing" ? 5_000 : false,
   });
+  const isPlateSolveProcessing = plateSolvingJob?.status === "processing";
 
   // Group equipment by type
   const equipmentByType = equipment.reduce((acc, item) => {
@@ -159,7 +160,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             >
               <Download className="h-5 w-5" />
             </button>
-            {currentImage.plateSolved && (
+            {currentImage.plateSolved && !isPlateSolveProcessing && (
               <button
                 onClick={() => setShowAnnotations((v) => !v)}
                 aria-label={showAnnotations ? 'Hide Annotations' : 'Show Annotations'}
@@ -175,8 +176,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
           {currentImage.fullUrl ? (
             <div className="relative w-full h-full">
               <DeepZoomViewer
-                imageUrl={currentImage.fullUrl || ""}
-                annotations={showAnnotations && annotationsData?.annotations ? annotationsData.annotations : []}
+                imageUrl={resolveZoomUrl(currentImage)}
+                tileInfoUrl={`/api/images/${currentImage.id}/tile-info`}
+                tileUrlBase={`/api/images/${currentImage.id}/tile`}
+                annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
                 fullHeight={isExpanded}
                 height={isExpanded ? '100vh' : '100%'}
                 disableZoom={!isExpanded}
@@ -307,6 +310,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 {image.filters && <div>Filters: {image.filters}</div>}
               </div>
             </section>
+            {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
             <FitsProcessingPanel image={currentImage} />
             {/* Location */}
             {(image.latitude || image.longitude) && (
@@ -335,7 +339,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             {/* Plate Solution */}
             <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
               <h3 className="font-semibold mb-2 text-foreground">Plate Solution</h3>
-              {image.plateSolved ? (
+              {isPlateSolveProcessing ? (
+                <p role="status" className="text-xs text-amber-300">Private local solve in progress. Previous coordinates are not currently verified.</p>
+              ) : image.plateSolved ? (
                 <div className="text-xs text-muted-foreground space-y-1">
                   {image.ra && <div>RA: {image.ra}</div>}
                   {image.dec && <div>Dec: {image.dec}</div>}
@@ -349,20 +355,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   {image.fieldOfView && <div>Field of View: {image.fieldOfView}</div>}
                   {image.rotation && <div>Rotation: {image.rotation}°</div>}
                   <div className="text-green-400 flex items-center">
-                    {plateSolvingJob?.submissionId ? (
-                      <a
-                        href={`https://nova.astrometry.net/status/${plateSolvingJob.submissionId}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline"
-                      >
-                        <Badge className="status-plate-solved cursor-pointer hover:bg-green-600">
-                          ✓ Verified by Astrometry.net
-                        </Badge>
-                      </a>
-                    ) : (
-                      <Badge className="status-plate-solved">✓ Verified by Astrometry.net</Badge>
-                    )}
+                    <Badge className="status-plate-solved">✓ {plateSolvingJob?.astrometryJobId?.startsWith("local-") ? "Solved locally with Astrometry.net" : "Existing plate solution imported"}</Badge>
                   </div>
                 </div>
               ) : (
@@ -403,8 +396,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
         <div className="w-screen h-screen flex items-center justify-center">
           <div className="relative w-full h-full">
             <DeepZoomViewer
-              imageUrl={image.fullUrl || ""}
-              annotations={showAnnotations && annotationsData?.annotations ? annotationsData.annotations : []}
+              imageUrl={resolveZoomUrl(image)}
+              tileInfoUrl={`/api/images/${image.id}/tile-info`}
+              tileUrlBase={`/api/images/${image.id}/tile`}
+              annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
               fullHeight={true}
               height="100vh"
               disableZoom={false}
@@ -432,7 +427,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 <Download className="mr-2 h-4 w-4" />
                 Download
               </Button>
-              {image.plateSolved && (
+              {image.plateSolved && !isPlateSolveProcessing && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -512,7 +507,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               </button>
               {!collapsedSections['plateSolution'] && (
                 <div>
-                  {currentImage.plateSolved ? (
+                  {isPlateSolveProcessing ? (
+                    <p role="status" className="text-xs text-amber-300">Private local solve in progress. Previous coordinates are not currently verified.</p>
+                  ) : currentImage.plateSolved ? (
                     <div className="text-xs text-gray-300 space-y-1">
                       {currentImage.ra && <div>RA: {currentImage.ra}</div>}
                       {currentImage.dec && <div>Dec: {currentImage.dec}</div>}
@@ -526,20 +523,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                       {currentImage.fieldOfView && <div>Field of View: {currentImage.fieldOfView}</div>}
                       {currentImage.rotation && <div>Rotation: {currentImage.rotation}°</div>}
                       <div className="text-green-400 flex items-center mt-1">
-                        {plateSolvingJob?.submissionId ? (
-                          <a
-                            href={`https://nova.astrometry.net/status/${plateSolvingJob.submissionId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:underline"
-                          >
-                            <Badge className="status-plate-solved cursor-pointer hover:bg-green-600">
-                              ✓ Verified by Astrometry.net
-                            </Badge>
-                          </a>
-                        ) : (
-                          <Badge className="status-plate-solved">✓ Verified by Astrometry.net</Badge>
-                        )}
+                        <Badge className="status-plate-solved">✓ {plateSolvingJob?.astrometryJobId?.startsWith("local-") ? "Solved locally with Astrometry.net" : "Existing plate solution imported"}</Badge>
                       </div>
                     </div>
                   ) : (
@@ -569,7 +553,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 </Button>
               </div>
               <div className="text-sm">
-                {currentImage.targetName ? (
+                {isPlateSolveProcessing ? (
+                  <span className="text-amber-300">Rechecking privately; previous target is unverified.</span>
+                ) : currentImage.targetName ? (
                   <span className="text-white font-medium">{currentImage.targetName}</span>
                 ) : (
                   <span className="text-gray-500 italic">Not set</span>
@@ -808,53 +794,8 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
 
             <ImageTagsEditor image={currentImage} dark />
 
-            {/* Sync to Immich Button */}
+            {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
             <FitsProcessingPanel image={currentImage} />
-            {currentImage.immichId && (
-              <div className="mt-2 mb-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full bg-black/30 border-black/40 text-gray-300 hover:text-white hover:bg-black/50"
-                  disabled={immichSyncing}
-                  onClick={async () => {
-                    setImmichSyncing(true);
-                    setImmichSyncMessage(null);
-                    try {
-                      const response = await apiRequest("POST", `/api/immich/sync-metadata/${currentImage.id}`);
-                      const data = await response.json();
-                      if (data.success) {
-                        setImmichSyncMessage({ type: 'success', text: 'Metadata synced to Immich' });
-                      } else {
-                        setImmichSyncMessage({ type: 'error', text: data.message || 'Sync failed' });
-                      }
-                    } catch (error: unknown) {
-                      let errorText = 'Failed to sync metadata';
-                      try {
-                        const body = (error as Error).message?.replace(/^\d+:\s*/, '');
-                        const parsed = JSON.parse(body);
-                        if (parsed.message) errorText = parsed.message;
-                      } catch { /* use default */ }
-                      setImmichSyncMessage({ type: 'error', text: errorText });
-                    } finally {
-                      setImmichSyncing(false);
-                    }
-                  }}
-                >
-                  {immichSyncing ? (
-                    <Loader className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Upload className="mr-2 h-4 w-4" />
-                  )}
-                  Sync to Immich
-                </Button>
-                {immichSyncMessage && (
-                  <p className={`text-xs mt-1 ${immichSyncMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
-                    {immichSyncMessage.text}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
         </aside>
       )}
@@ -862,8 +803,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
         {image.fullUrl ? (
           <div className="relative w-full h-full flex items-center justify-center">
             <DeepZoomViewer
-              imageUrl={image.fullUrl || ""}
-              annotations={showAnnotations && annotationsData?.annotations ? annotationsData.annotations : []}
+              imageUrl={resolveZoomUrl(image)}
+              tileInfoUrl={`/api/images/${image.id}/tile-info`}
+              tileUrlBase={`/api/images/${image.id}/tile`}
+              annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
               fullHeight={false}
               height="100%"
               disableZoom={true}
@@ -879,7 +822,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 <Download className="mr-2 h-4 w-4" />
                 Download
               </Button>
-              {image.plateSolved && (
+              {image.plateSolved && !isPlateSolveProcessing && (
                 <Button
                   variant="outline"
                   size="sm"

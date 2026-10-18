@@ -2,9 +2,23 @@
 // When adding/removing columns, update BOTH files.
 import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 
+export const libraryAssets = sqliteTable('library_assets', {
+    id: integer('id').primaryKey(),
+    legacyAssetId: text('legacy_asset_id').unique(),
+    legacyRelativePath: text('legacy_relative_path').notNull().unique(),
+    relativePath: text('relative_path').notNull().unique(),
+    filename: text('filename').notNull(),
+    mimeType: text('mime_type'),
+    byteSize: integer('byte_size').notNull(),
+    sha256: text('sha256').notNull(),
+    metadata: text('metadata', { mode: 'json' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});
+
 export const astrophotographyImages = sqliteTable('astrophotography_images', {
     id: integer('id').primaryKey(),
     immichId: text('immich_id').unique(),
+    libraryAssetId: integer('library_asset_id').references(() => libraryAssets.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     filename: text('filename').notNull(),
     thumbnailUrl: text('thumbnail_url'),

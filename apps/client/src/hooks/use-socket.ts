@@ -65,7 +65,6 @@ class WebSocketManager {
     this.ws?.close();
   }
 }
-
 // Singleton instance shared across all hook consumers
 let manager: WebSocketManager | null = null;
 let refCount = 0;
@@ -112,20 +111,6 @@ export function usePlateSolvingUpdates(callback: (data: any) => void) {
 
     return () => {
       socket.off('plate-solving-update', callback);
-    };
-  }, [socket, callback]);
-}
-
-export function useImmichSyncUpdates(callback: (data: any) => void) {
-  const socket = useSocket();
-
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on('immich-sync-complete', callback);
-
-    return () => {
-      socket.off('immich-sync-complete', callback);
     };
   }, [socket, callback]);
 }

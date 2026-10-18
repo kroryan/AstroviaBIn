@@ -9,6 +9,13 @@ interface Annotation {
   radius?: number;
 }
 
+interface TileInfo {
+  width: number;
+  height: number;
+  tileSize: number;
+  maxLevel: number;
+}
+
 interface DeepZoomViewerProps {
   imageUrl: string;
   annotations?: Annotation[];
@@ -20,6 +27,12 @@ interface DeepZoomViewerProps {
   preserveViewport?: boolean;
   onLoad?: () => void;
   onError?: () => void;
+  /**
+   * Fetches tile metadata once and lets OpenSeadragon request only the visible tiles. `imageUrl`
+   * remains the fallback for sources without a local tiled original.
+   */
+  tileInfoUrl?: string;
+  tileUrlBase?: string;
 }
 
 if (typeof window !== 'undefined') {
@@ -36,7 +49,7 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(style);
 }
 
-export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError }: DeepZoomViewerProps) {
+export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase }: DeepZoomViewerProps) {
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdViewer = useRef<OpenSeadragon.Viewer | null>(null);
   const overlayElements = useRef<HTMLDivElement[]>([]);
@@ -63,13 +76,39 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
       osdViewer.current.destroy();
       osdViewer.current = null;
     }
+
+    let cancelled = false;
+
+    async function resolveTileSources(): Promise<OpenSeadragon.TileSourceOptions | string> {
+      if (!tileInfoUrl || !tileUrlBase) return imageUrl;
+      const response = await fetch(tileInfoUrl, { cache: 'no-store' });
+      if (!response.ok) {
+        if (response.status === 404) return imageUrl;
+        throw new Error(`tile info failed (${response.status})`);
+      }
+      const info: TileInfo = await response.json();
+      return {
+          width: info.width,
+          height: info.height,
+          tileSize: info.tileSize,
+          minLevel: 0,
+          maxLevel: info.maxLevel,
+          getTileUrl: (level: number, x: number, y: number) => `${tileUrlBase}?level=${level}&x=${x}&y=${y}`,
+      } as unknown as OpenSeadragon.TileSourceOptions;
+    }
+
+    resolveTileSources().then(tileSources => {
+      if (cancelled || !viewerRef.current) return;
+      createViewer(tileSources);
+    }).catch(() => {
+      if (!cancelled) onError?.();
+    });
+
+    function createViewer(tileSources: OpenSeadragon.TileSourceOptions | string) {
     osdViewer.current = OpenSeadragon({
-      element: viewerRef.current,
+      element: viewerRef.current!,
       prefixUrl: "//openseadragon.github.io/openseadragon/images/",
-      tileSources: {
-        type: "image",
-        url: imageUrl,
-      },
+      tileSources,
       showNavigator: false,
       showFullPageControl: false,
       showHomeControl: false,
@@ -189,7 +228,10 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
         addOverlays();
       }, 500);
     });
+    }
+
     return () => {
+      cancelled = true;
       if (osdViewer.current) {
         if (preserveViewport && viewerOpenRef.current) {
           pendingViewportRef.current = {
@@ -202,7 +244,7 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
         osdViewer.current = null;
       }
     };
-  }, [imageUrl, onZoom, fullHeight, disableZoom, preserveViewport, onLoad, onError]);
+  }, [imageUrl, tileInfoUrl, tileUrlBase, onZoom, fullHeight, disableZoom, preserveViewport, onLoad, onError]);
 
   // Function to add overlays
   const addOverlays = useCallback(() => {
@@ -405,4 +447,4 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
       )}
     </div>
   );
-} 
+}

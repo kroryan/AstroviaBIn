@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, open, readFile, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 
@@ -10,6 +10,10 @@ export const FITS_BLOCK_SIZE = 2880;
 export const FITS_CARD_SIZE = 80;
 const MAX_HEADER_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PROCESS_BYTES = 1024 * 1024 * 1024;
+const FITS_TILE_SIZE = 256;
+const FITS_RANGE_CACHE_MAX = 32;
+const fitsRangeJobs = new Map<string, Promise<ProcessingRanges>>();
+const fitsTileJobs = new Map<string, Promise<Buffer>>();
 
 export type FitsStretch = 'linear' | 'asinh' | 'log' | 'gamma' | 'mtf' | 'sqrt' | 'square';
 export type FitsColorMap = 'grey' | 'inverted' | 'heat' | 'cool' | 'rainbow' | 'viridis';
@@ -61,6 +65,26 @@ export interface FitsMetadata {
   bscale: number;
   bzero: number;
   pixelCount: number;
+}
+
+export async function readFitsHeader(filePath: string): Promise<Record<string, string | number | boolean>> {
+  const source = await stat(filePath);
+  const file = Buffer.alloc(Math.min(source.size, MAX_HEADER_BYTES));
+  const handle = await open(filePath, 'r');
+  try {
+    await handle.read(file, 0, file.length, 0);
+  } finally {
+    await handle.close();
+  }
+
+  const headers: Record<string, string | number | boolean> = {};
+  for (let offset = 0; offset + FITS_CARD_SIZE <= file.length; offset += FITS_CARD_SIZE) {
+    const card = file.subarray(offset, offset + FITS_CARD_SIZE).toString('ascii');
+    const key = card.slice(0, 8).trim();
+    if (key === 'END') return headers;
+    if (key && card[8] === '=') headers[key] = parseFitsValue(card.slice(10).split(/\s\/\s/)[0] || '');
+  }
+  throw new Error('Invalid FITS header: missing END card');
 }
 
 export interface FitsPreview {
@@ -154,8 +178,8 @@ export async function readFitsMetadata(filePath: string): Promise<FitsMetadata> 
   }
 
   const pixelCount = width * height * channels;
-  if (!Number.isSafeInteger(pixelCount) || pixelCount * bytesPerPixel(bitpix) > maxProcessBytes()) {
-    throw new Error(`FITS image is too large for this server. Increase FITS_MAX_PROCESS_BYTES to process it.`);
+  if (!Number.isSafeInteger(pixelCount) || !Number.isSafeInteger(pixelCount * bytesPerPixel(bitpix))) {
+    throw new Error('FITS image dimensions exceed supported file offsets');
   }
   const dataOffset = Math.ceil(endOffset / FITS_BLOCK_SIZE) * FITS_BLOCK_SIZE;
   if (dataOffset + pixelCount * bytesPerPixel(bitpix) > source.size) {
@@ -178,6 +202,9 @@ function readValue(file: Buffer, offset: number, bitpix: number): number {
 }
 
 export function readPixels(file: Buffer, metadata: FitsMetadata): Float64Array {
+  if (metadata.pixelCount * bytesPerPixel(metadata.bitpix) > maxProcessBytes()) {
+    throw new Error('FITS derivative processing exceeds FITS_MAX_PROCESS_BYTES; previews and zoom remain available.');
+  }
   const result = new Float64Array(metadata.pixelCount);
   const bytes = bytesPerPixel(metadata.bitpix);
   for (let index = 0; index < metadata.pixelCount; index++) {
@@ -249,28 +276,37 @@ function processingRanges(pixels: Float64Array, metadata: FitsMetadata, settings
   return { low, high };
 }
 
-function processedPixel(pixels: Float64Array, sourceIndex: number, metadata: FitsMetadata, ranges: ProcessingRanges, settings: FitsProcessingSettings): number[] {
+/**
+ * Writes the processed value(s) for one pixel into `output` (sized to metadata.channels).
+ * Takes a reused scratch buffer instead of returning a new array: at multi-megapixel native
+ * resolutions, allocating a handful of small arrays per pixel (the previous approach) spends
+ * most of its time in GC rather than in the actual math.
+ */
+function processedPixel(pixels: Float64Array, sourceIndex: number, metadata: FitsMetadata, ranges: ProcessingRanges, settings: FitsProcessingSettings, output: Float64Array): void {
   const planeSize = metadata.width * metadata.height;
-  const values = Array.from({ length: metadata.channels }, (_, channel) => normalized(pixels[sourceIndex + channel * planeSize], ranges.low[channel], ranges.high[channel]));
-  if (metadata.channels !== 3) return values.map(value => transfer(value, settings));
-  const balances = [settings.redBalance ?? 1, settings.greenBalance ?? 1, settings.blueBalance ?? 1];
-  const balanced = values.map((value, channel) => Math.max(0, Math.min(1, value * Math.max(0, balances[channel]))));
-  const scnrAmount = Math.max(0, Math.min(1, settings.scnrAmount ?? 0));
-  if (scnrAmount > 0) {
-    // Subtractive Chromatic Noise Reduction (average-neutral): pulls green back
-    // toward the red/blue average, as Siril's SCNR filter does for OSC/narrowband data.
-    const neutral = 0.5 * (balanced[0] + balanced[2]);
-    balanced[1] = Math.max(0, balanced[1] - scnrAmount * Math.max(0, balanced[1] - neutral));
+  for (let channel = 0; channel < metadata.channels; channel++) {
+    output[channel] = normalized(pixels[sourceIndex + channel * planeSize], ranges.low[channel], ranges.high[channel]);
   }
-  // Stretch the luminance then apply that factor to RGB, as Siril's colour
-  // preserving asinh mode does. This avoids colour shifts in bright stars.
-  const luminance = balanced[0] * 0.2126 + balanced[1] * 0.7152 + balanced[2] * 0.0722;
+  if (metadata.channels !== 3) {
+    for (let channel = 0; channel < metadata.channels; channel++) output[channel] = transfer(output[channel], settings);
+    return;
+  }
+  const r = clampUnit(output[0] * Math.max(0, settings.redBalance ?? 1));
+  const g0 = clampUnit(output[1] * Math.max(0, settings.greenBalance ?? 1));
+  const b = clampUnit(output[2] * Math.max(0, settings.blueBalance ?? 1));
+  const scnrAmount = Math.max(0, Math.min(1, settings.scnrAmount ?? 0));
+  // Subtractive Chromatic Noise Reduction (average-neutral): pulls green back toward the
+  // red/blue average, as Siril's SCNR filter does for OSC/narrowband data.
+  const g = scnrAmount > 0 ? Math.max(0, g0 - scnrAmount * Math.max(0, g0 - 0.5 * (r + b))) : g0;
+  // Stretch the luminance then apply that factor to RGB, as Siril's colour preserving asinh
+  // mode does. This avoids colour shifts in bright stars.
+  const luminance = r * 0.2126 + g * 0.7152 + b * 0.0722;
   const stretchedLuminance = transfer(luminance, settings);
-  const stretched = luminance > Number.EPSILON
-    ? balanced.map(value => Math.max(0, Math.min(1, value * stretchedLuminance / luminance)))
-    : balanced.map(() => 0);
   const saturation = Math.max(0, Math.min(3, settings.saturation ?? 1));
-  return stretched.map(value => Math.max(0, Math.min(1, stretchedLuminance + (value - stretchedLuminance) * saturation)));
+  const ratio = luminance > Number.EPSILON ? stretchedLuminance / luminance : 0;
+  output[0] = clampUnit(stretchedLuminance + (clampUnit(r * ratio) - stretchedLuminance) * saturation);
+  output[1] = clampUnit(stretchedLuminance + (clampUnit(g * ratio) - stretchedLuminance) * saturation);
+  output[2] = clampUnit(stretchedLuminance + (clampUnit(b * ratio) - stretchedLuminance) * saturation);
 }
 
 function clampUnit(value: number): number {
@@ -486,22 +522,55 @@ function previewDimensions(width: number, height: number, maximum = 2048): { wid
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
+async function readPreviewPixels(filePath: string, metadata: FitsMetadata, width: number, height: number): Promise<Float64Array> {
+  const bytes = bytesPerPixel(metadata.bitpix);
+  const sourcePlaneSize = metadata.width * metadata.height;
+  const previewPlaneSize = width * height;
+  const pixels = new Float64Array(previewPlaneSize * metadata.channels);
+  const firstX = 0;
+  const lastX = Math.min(metadata.width - 1, Math.floor((width - 1) * metadata.width / width));
+  const row = Buffer.allocUnsafe((lastX - firstX + 1) * bytes);
+  const handle = await open(filePath, 'r');
+  try {
+    for (let channel = 0; channel < metadata.channels; channel++) {
+      for (let y = 0; y < height; y++) {
+        const sourceY = Math.min(metadata.height - 1, Math.floor(y * metadata.height / height));
+        const offset = metadata.dataOffset + (channel * sourcePlaneSize + sourceY * metadata.width + firstX) * bytes;
+        await readExactly(handle, row, row.length, offset);
+        for (let x = 0; x < width; x++) {
+          const sourceX = Math.min(metadata.width - 1, Math.floor(x * metadata.width / width));
+          const raw = readValue(row, (sourceX - firstX) * bytes, metadata.bitpix);
+          const value = raw * metadata.bscale + metadata.bzero;
+          pixels[channel * previewPlaneSize + y * width + x] = Number.isFinite(value) ? value : Number.NaN;
+        }
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+  return pixels;
+}
+
 export async function renderFitsPreview(filePath: string, settings: FitsProcessingSettings = {}, maximumDimension = 2048): Promise<FitsPreview> {
-  const [metadata, file] = await Promise.all([readFitsMetadata(filePath), readFile(filePath)]);
-  const pixels = preparePixels(readPixels(file, metadata), metadata, settings);
-  const ranges = processingRanges(pixels, metadata, settings);
-  const dimensions = previewDimensions(metadata.width, metadata.height, maximumDimension);
+  const metadata = await readFitsMetadata(filePath);
+  const dimensions = previewDimensions(metadata.width, metadata.height, Math.min(maximumDimension, 4096));
+  const previewMetadata = { ...metadata, width: dimensions.width, height: dimensions.height,
+    pixelCount: dimensions.width * dimensions.height * metadata.channels };
+  const [rawPixels, ranges] = await Promise.all([
+    readPreviewPixels(filePath, metadata, dimensions.width, dimensions.height),
+    cachedFileProcessingRanges(filePath, metadata, settings),
+  ]);
+  const pixels = preparePixels(rawPixels, previewMetadata, settings);
   const sourceChannels = metadata.channels === 3 ? 3 : 1;
   const planes = Array.from({ length: sourceChannels }, () => new Float32Array(dimensions.width * dimensions.height));
+  const scratch = new Float64Array(sourceChannels);
 
   for (let y = 0; y < dimensions.height; y++) {
-    const sourceY = Math.min(metadata.height - 1, Math.floor(y * metadata.height / dimensions.height));
     for (let x = 0; x < dimensions.width; x++) {
-      const sourceX = Math.min(metadata.width - 1, Math.floor(x * metadata.width / dimensions.width));
-      const sourceIndex = sourceY * metadata.width + sourceX;
-      const values = processedPixel(pixels, sourceIndex, metadata, ranges, settings);
+      const sourceIndex = y * dimensions.width + x;
+      processedPixel(pixels, sourceIndex, previewMetadata, ranges, settings, scratch);
       const outputIndex = y * dimensions.width + x;
-      for (let channel = 0; channel < sourceChannels; channel++) planes[channel][outputIndex] = values[channel];
+      for (let channel = 0; channel < sourceChannels; channel++) planes[channel][outputIndex] = scratch[channel];
     }
   }
   applyDenoise(planes, dimensions.width, dimensions.height, settings);
@@ -518,7 +587,11 @@ export async function renderFitsPreview(filePath: string, settings: FitsProcessi
   // single-channel raw buffer into a 3-channel sRGB PNG regardless of `channels`.
   let pipeline = sharp(raw, { raw: { width: dimensions.width, height: dimensions.height, channels: outputChannels } });
   if (outputChannels === 1) pipeline = pipeline.toColourspace('b-w');
-  const buffer = await pipeline.png({ compressionLevel: 9 }).toBuffer();
+  // Max zlib compression (level 9) on a multi-megapixel, noisy astro image can take tens of
+  // seconds; drop to the fastest level once there's enough resolution for that cost to matter —
+  // this is a view-only render, not the saved derivative, so a larger file is the right trade.
+  const compressionLevel = dimensions.width * dimensions.height > 4_000_000 ? 1 : 9;
+  const buffer = await pipeline.png({ compressionLevel }).toBuffer();
   return { buffer, metadata, ...dimensions };
 }
 
@@ -564,9 +637,10 @@ export async function createProcessedFits(filePath: string, outputPath: string, 
   const data = Buffer.alloc(pixels.length * 4);
   const planeSize = metadata.width * metadata.height;
   const planes = Array.from({ length: metadata.channels }, () => new Float32Array(planeSize));
+  const scratch = new Float64Array(metadata.channels);
   for (let index = 0; index < planeSize; index++) {
-    const values = processedPixel(pixels, index, metadata, ranges, settings);
-    for (let channel = 0; channel < metadata.channels; channel++) planes[channel][index] = values[channel];
+    processedPixel(pixels, index, metadata, ranges, settings, scratch);
+    for (let channel = 0; channel < metadata.channels; channel++) planes[channel][index] = scratch[channel];
   }
   applyDenoise(planes, metadata.width, metadata.height, settings);
   applySharpen(planes, metadata.width, metadata.height, settings);
@@ -640,4 +714,209 @@ export async function cachedFitsPreview(filePath: string, settings: FitsProcessi
   await mkdir(path.dirname(cachePath), { recursive: true });
   await writeFile(cachePath, preview.buffer);
   return preview.buffer;
+}
+
+async function readExactly(handle: Awaited<ReturnType<typeof open>>, buffer: Buffer, length: number, position: number): Promise<void> {
+  let offset = 0;
+  while (offset < length) {
+    const { bytesRead } = await handle.read(buffer, offset, length - offset, position + offset);
+    if (bytesRead <= 0) throw new Error('FITS pixel data is truncated');
+    offset += bytesRead;
+  }
+}
+
+async function sampleFilePercentile(
+  handle: Awaited<ReturnType<typeof open>>,
+  metadata: FitsMetadata,
+  percentileValue: number,
+  channel?: number,
+): Promise<number> {
+  const bytes = bytesPerPixel(metadata.bitpix);
+  const valueCount = metadata.width * metadata.height;
+  const channels = channel === undefined ? Array.from({ length: metadata.channels }, (_, index) => index) : [channel];
+  const targetSamplesPerChannel = Math.max(1, Math.floor(200_000 / channels.length));
+  const valuesPerWindow = Math.max(1, Math.floor((256 * 1024) / bytes));
+  // Spread small, bounded reads over the whole plane. For very large FITS files this
+  // samples at most 16 MiB per channel instead of scanning many gigabytes per first tile.
+  const windowCount = Math.min(64, Math.ceil(valueCount / valuesPerWindow));
+  const samplesPerWindow = Math.max(1, Math.floor(targetSamplesPerChannel / windowCount));
+  const step = Math.max(1, Math.floor(valuesPerWindow / samplesPerWindow));
+  const values: number[] = [];
+
+  for (const channelIndex of channels) {
+    const planeOffset = channelIndex * metadata.width * metadata.height;
+    for (let window = 0; window < windowCount; window++) {
+      const start = windowCount === 1
+        ? 0
+        : Math.floor(window * (valueCount - valuesPerWindow) / (windowCount - 1));
+      const count = Math.min(valuesPerWindow, valueCount - start);
+      const buffer = Buffer.allocUnsafe(count * bytes);
+      await readExactly(handle, buffer, buffer.length, metadata.dataOffset + (planeOffset + start) * bytes);
+      for (let index = 0; index < count; index++) {
+        if (index % step !== 0) continue;
+        const raw = readValue(buffer, index * bytes, metadata.bitpix);
+        const value = raw * metadata.bscale + metadata.bzero;
+        if (Number.isFinite(value)) values.push(value);
+      }
+    }
+  }
+
+  if (values.length === 0) throw new Error('FITS image contains no finite pixel values');
+  values.sort((left, right) => left - right);
+  const position = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * percentileValue)));
+  return values[position];
+}
+
+async function cachedFileProcessingRanges(filePath: string, metadata: FitsMetadata, settings: FitsProcessingSettings): Promise<ProcessingRanges> {
+  const source = await stat(filePath);
+  const key = createHash('sha256').update(JSON.stringify({
+    filePath,
+    size: source.size,
+    mtimeMs: source.mtimeMs,
+    blackPoint: settings.blackPoint,
+    whitePoint: settings.whitePoint,
+    shadowPercentile: settings.shadowPercentile,
+    highlightPercentile: settings.highlightPercentile,
+    backgroundNeutralization: settings.backgroundNeutralization,
+  })).digest('hex');
+  const cached = fitsRangeJobs.get(key);
+  if (cached) return cached;
+
+  const work = (async () => {
+    const handle = await open(filePath, 'r');
+    try {
+      const shadowPercentile = Math.max(0, Math.min(0.5, settings.shadowPercentile ?? (settings.backgroundNeutralization ? 0.01 : 0.005)));
+      const highlightPercentile = Math.max(0.5, Math.min(1, settings.highlightPercentile ?? 0.995));
+      if (settings.backgroundNeutralization && metadata.channels === 3) {
+        const low: number[] = [];
+        const high: number[] = [];
+        for (let channel = 0; channel < metadata.channels; channel++) {
+          low.push(settings.blackPoint ?? await sampleFilePercentile(handle, metadata, shadowPercentile, channel));
+          high.push(settings.whitePoint ?? await sampleFilePercentile(handle, metadata, highlightPercentile, channel));
+        }
+        return { low, high };
+      }
+      const low = settings.blackPoint ?? await sampleFilePercentile(handle, metadata, shadowPercentile);
+      const high = settings.whitePoint ?? await sampleFilePercentile(handle, metadata, highlightPercentile);
+      return {
+        low: Array.from({ length: metadata.channels }, () => low),
+        high: Array.from({ length: metadata.channels }, () => high),
+      };
+    } finally {
+      await handle.close();
+    }
+  })();
+
+  fitsRangeJobs.set(key, work);
+  try {
+    const result = await work;
+    while (fitsRangeJobs.size > FITS_RANGE_CACHE_MAX) {
+      const oldest = fitsRangeJobs.keys().next().value;
+      if (!oldest || oldest === key) break;
+      fitsRangeJobs.delete(oldest);
+    }
+    return result;
+  } catch (error) {
+    fitsRangeJobs.delete(key);
+    throw error;
+  }
+}
+
+/** Render only the requested native-resolution FITS tile. No full-size PNG or pyramid is built. */
+export async function renderFitsTile(filePath: string, settings: FitsProcessingSettings, level: number, x: number, y: number): Promise<Buffer> {
+  const metadata = await readFitsMetadata(filePath);
+  const maxLevel = Math.max(0, Math.ceil(Math.log2(Math.max(metadata.width, metadata.height))));
+  if (!Number.isInteger(level) || level < 0 || level > maxLevel) throw new Error('Invalid tile level');
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0) throw new Error('Invalid tile coordinates');
+
+  const scale = 2 ** (maxLevel - level);
+  const levelWidth = Math.max(1, Math.ceil(metadata.width / scale));
+  const levelHeight = Math.max(1, Math.ceil(metadata.height / scale));
+  const left = x * FITS_TILE_SIZE;
+  const top = y * FITS_TILE_SIZE;
+  if (left >= levelWidth || top >= levelHeight) throw new Error('Tile out of bounds');
+  const width = Math.min(FITS_TILE_SIZE, levelWidth - left);
+  const height = Math.min(FITS_TILE_SIZE, levelHeight - top);
+
+  const source = await stat(filePath);
+  const tileKey = createHash('sha256').update(JSON.stringify({
+    filePath, size: source.size, mtimeMs: source.mtimeMs, settings, level, x, y,
+  })).digest('hex');
+  const cacheDirectory = path.join(fitsCacheDirectory(), 'tiles');
+  const cachePath = path.join(cacheDirectory, `${tileKey}.jpg`);
+  try {
+    const cached = await readFile(cachePath);
+    if (cached.length > 0) {
+      await sharp(cached).metadata();
+      return cached;
+    }
+    await rm(cachePath, { force: true });
+  } catch { /* cache miss or a partial cache file */ }
+  const pending = fitsTileJobs.get(cachePath);
+  if (pending) return pending;
+
+  const work = (async () => {
+    const ranges = await cachedFileProcessingRanges(filePath, metadata, settings);
+    const planeSize = metadata.width * metadata.height;
+    const bytes = bytesPerPixel(metadata.bitpix);
+    const tilePlaneSize = width * height;
+    const pixels = new Float64Array(tilePlaneSize * metadata.channels);
+    const handle = await open(filePath, 'r');
+    try {
+      for (let channel = 0; channel < metadata.channels; channel++) {
+        const channelOffset = channel * planeSize;
+        for (let tileY = 0; tileY < height; tileY++) {
+          const sourceY = Math.min(metadata.height - 1, Math.floor((top + tileY) * metadata.height / levelHeight));
+          const firstX = Math.floor(left * metadata.width / levelWidth);
+          const lastX = Math.floor((left + width - 1) * metadata.width / levelWidth);
+          const rowValues = lastX - firstX + 1;
+          const row = Buffer.allocUnsafe(rowValues * bytes);
+          await readExactly(handle, row, row.length, metadata.dataOffset + (channelOffset + sourceY * metadata.width + firstX) * bytes);
+          for (let tileX = 0; tileX < width; tileX++) {
+            const sourceX = Math.min(metadata.width - 1, Math.floor((left + tileX) * metadata.width / levelWidth));
+            const raw = readValue(row, (sourceX - firstX) * bytes, metadata.bitpix);
+            const value = raw * metadata.bscale + metadata.bzero;
+            pixels[channel * tilePlaneSize + tileY * width + tileX] = Number.isFinite(value) ? value : Number.NaN;
+          }
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+
+    const tileMetadata = { ...metadata, width, height, pixelCount: tilePlaneSize * metadata.channels };
+    const planes = Array.from({ length: metadata.channels }, () => new Float32Array(tilePlaneSize));
+    const scratch = new Float64Array(metadata.channels);
+    for (let index = 0; index < tilePlaneSize; index++) {
+      processedPixel(pixels, index, tileMetadata, ranges, settings, scratch);
+      for (let channel = 0; channel < metadata.channels; channel++) planes[channel][index] = scratch[channel];
+    }
+    const mapped = applyColorMap(planes, settings.colorMap ?? 'grey');
+    const outputChannels = mapped.length === 3 ? 3 : 1;
+    const raw = Buffer.alloc(tilePlaneSize * outputChannels);
+    for (let index = 0; index < tilePlaneSize; index++) {
+      for (let channel = 0; channel < outputChannels; channel++) raw[index * outputChannels + channel] = Math.round(255 * mapped[channel][index]);
+    }
+    let pipeline = sharp(raw, { raw: { width, height, channels: outputChannels as 1 | 3 } });
+    if (outputChannels === 1) pipeline = pipeline.toColourspace('b-w');
+    const buffer = await pipeline.jpeg({ quality: 90 }).toBuffer();
+
+    await mkdir(cacheDirectory, { recursive: true, mode: 0o700 });
+    const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, buffer, { mode: 0o600, flag: 'wx' });
+      await rename(temporaryPath, cachePath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => {});
+      throw error;
+    }
+    return buffer;
+  })();
+
+  fitsTileJobs.set(cachePath, work);
+  try {
+    return await work;
+  } finally {
+    fitsTileJobs.delete(cachePath);
+  }
 }

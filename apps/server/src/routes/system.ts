@@ -3,55 +3,41 @@ import { storage } from '../services/storage';
 import { configService } from '../services/config';
 import { cronManager } from '../services/cron-manager';
 import { workerManager } from '../services/worker-manager';
-import { astrometryService } from '../services/astrometry';
+import { localAstrometryStatus } from '../services/astrometry-local';
 import { filterRelevantTags } from '../services/tags-utils';
 import { handleRouteError } from './route-utils';
 import { isPostgres, sqliteDbPath } from '../db';
 import { stat, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { WsManager } from '../services/ws-manager';
-
-function maskApiKey(key: string): string {
-  if (!key || key.length <= 4) return key ? '••••' : '';
-  return '••••' + key.slice(-4);
-}
-
-function isRedactedKey(key: string): boolean {
-  return key.startsWith('••••');
-}
 
 export default function systemRoutes(wsManager?: WsManager) {
   const app = new Hono();
+
+  app.get('/licenses/sidereal', async c => {
+    try {
+      const source = process.env.NODE_ENV === 'production'
+        ? '/usr/share/doc/sidereal/LICENSE' : path.resolve(process.cwd(), 'LICENSE');
+      return c.text(await readFile(source, 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+    } catch { return c.text('License file unavailable', 404); }
+  });
+
+  app.get('/licenses/hotpants/:file', async c => {
+    const file = c.req.param('file');
+    if (!['LICENSE', 'COPYING'].includes(file)) return c.text('Not found', 404);
+    try {
+      const source = process.env.NODE_ENV === 'production'
+        ? path.join('/usr/share/doc/hotpants', file)
+        : path.resolve(process.cwd(), 'vendor/hotpants', file);
+      const contents = await readFile(source, 'utf8');
+      return c.text(contents, 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+    } catch { return c.text('License file unavailable', 404); }
+  });
 
   // Save admin settings
   app.post('/admin/settings', async (c) => {
     try {
       const settings = await c.req.json();
-
-      // Validate Immich host URL if provided
-      if (settings.immich?.host) {
-        try {
-          const url = new URL(settings.immich.host);
-          if (!['http:', 'https:'].includes(url.protocol)) {
-            return c.json({
-              message: 'Only HTTP and HTTPS protocols are allowed for Immich host',
-            }, 400);
-          }
-        } catch {
-          return c.json({
-            message: 'Invalid Immich host URL format',
-          }, 400);
-        }
-      }
-
-      // Preserve existing API keys if the client sends back redacted values
-      if (settings.immich?.apiKey && isRedactedKey(settings.immich.apiKey)) {
-        const currentConfig = await configService.getConfig();
-        settings.immich.apiKey = currentConfig.immich.apiKey;
-      }
-      if (settings.astrometry?.apiKey && isRedactedKey(settings.astrometry.apiKey)) {
-        const currentConfig = await configService.getConfig();
-        settings.astrometry.apiKey = currentConfig.astrometry.apiKey;
-      }
 
       await configService.updateConfig(settings);
       return c.json({ message: 'Settings saved successfully' });
@@ -60,75 +46,26 @@ export default function systemRoutes(wsManager?: WsManager) {
     }
   });
 
-  // Get admin settings (with redacted API keys)
+  // Get admin settings; local plate solving has no remote API key.
   app.get('/admin/settings', async (c) => {
     try {
       const config = await configService.getConfig();
-      const redacted = {
-        ...config,
-        immich: {
-          ...config.immich,
-          apiKey: maskApiKey(config.immich.apiKey),
-        },
-        astrometry: {
-          ...config.astrometry,
-          apiKey: maskApiKey(config.astrometry.apiKey),
-        },
-      };
-      return c.json(redacted);
+      return c.json(config);
     } catch (error) {
       return handleRouteError(c, error, 'Failed to get settings');
     }
   });
 
-  // Test Astrometry connection
+  // Check the private local solver installation and index files.
   app.post('/test-astrometry-connection', async (c) => {
     try {
-      let { apiKey } = await c.req.json();
-
-      // If a redacted key was sent, use the stored key
-      if (apiKey && isRedactedKey(apiKey)) {
-        const config = await configService.getConfig();
-        apiKey = config.astrometry.apiKey;
+      const status = await localAstrometryStatus();
+      if (!status.available) {
+        return c.json({ success: false, message: `Local solver is missing or has no index files (${status.indexCount} found).` });
       }
-
-      if (!apiKey) {
-        return c.json({ message: 'API key is required' }, 400);
-      }
-
-      // Test the connection by trying to login (same as working plate solve)
-      const loginData = new URLSearchParams();
-      loginData.append('request-json', JSON.stringify({ apikey: apiKey }));
-
-      const response = await fetch('https://nova.astrometry.net/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: loginData,
-        signal: AbortSignal.timeout(10000),
-      });
-
-      const data = await response.json() as Record<string, unknown>;
-
-      if (response.ok && data.status === 'success') {
-        return c.json({ success: true, message: 'Connection successful!' });
-      } else {
-        return c.json({
-          success: false, message: `Connection failed: ${data.message || 'Unknown error'}`,
-        });
-      }
-    } catch (error: unknown) {
-      const err = error as Error & { code?: string };
-
-      let errorMessage = 'Connection failed';
-      if (err.code === 'ECONNREFUSED') {
-        errorMessage = 'Cannot connect to Astrometry.net server.';
-      } else if (err.code === 'ENOTFOUND') {
-        errorMessage = 'Astrometry.net server not found.';
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-
-      return c.json({ message: errorMessage }, 500);
+      return c.json({ success: true, message: `Local solver ready with ${status.indexCount} index files. Images stay on this server.` });
+    } catch (error) {
+      return c.json({ success: false, message: error instanceof Error ? error.message : 'Local solver check failed' }, 500);
     }
   });
 

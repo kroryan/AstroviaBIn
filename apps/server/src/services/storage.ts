@@ -1,7 +1,7 @@
 import { db, schema, isPostgres } from '../db';
 import { eq, and, inArray, lte, desc, sql } from 'drizzle-orm';
 import { like, or } from 'drizzle-orm';
-import type { AstroImage, InsertAstroImage, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget } from "@shared/types";
+import type { AstroImage, InsertAstroImage, LibraryAsset, InsertLibraryAsset, Equipment, InsertEquipment, ImageEquipment, InsertImageEquipment, PlateSolvingJob, InsertPlateSolvingJob, EquipmentGroup, InsertEquipmentGroup, EquipmentGroupMember, InsertEquipmentGroupMember, Location, InsertLocation, ImageAcquisitionRow, InsertImageAcquisitionRow, CatalogObject, InsertCatalogObject, UserTarget } from "@shared/types";
 import { computeImageSummary, groupAndEnrichTargets } from '@shared/image-utils';
 
 class DbStorage {
@@ -57,15 +57,38 @@ class DbStorage {
     return result[0] || undefined;
   }
 
-  async getAstroImageByImmichId(immichId: string): Promise<AstroImage | undefined> {
-    const result = await db.select().from(schema.astrophotographyImages).where(eq(schema.astrophotographyImages.immichId, immichId)).execute();
-    return result[0] || undefined;
-  }
-
   async getAstroImageByOriginalPath(originalPath: string): Promise<AstroImage | undefined> {
     const result = await db.select().from(schema.astrophotographyImages)
       .where(eq(schema.astrophotographyImages.originalPath, originalPath)).execute();
     return result[0] || undefined;
+  }
+
+  async getLibraryAssets(): Promise<LibraryAsset[]> {
+    return db.select().from(schema.libraryAssets).execute();
+  }
+
+  async getLibraryAsset(id: number): Promise<LibraryAsset | undefined> {
+    const result = await db.select().from(schema.libraryAssets)
+      .where(eq(schema.libraryAssets.id, id)).execute();
+    return result[0] || undefined;
+  }
+
+  async getLibraryAssetForAstroImage(imageId: number): Promise<LibraryAsset | undefined> {
+    const result = await db.select({ asset: schema.libraryAssets })
+      .from(schema.astrophotographyImages)
+      .innerJoin(schema.libraryAssets, eq(schema.astrophotographyImages.libraryAssetId, schema.libraryAssets.id))
+      .where(eq(schema.astrophotographyImages.id, imageId)).execute();
+    return result[0]?.asset;
+  }
+
+  async createLibraryAsset(asset: Omit<InsertLibraryAsset, 'id' | 'createdAt'>): Promise<LibraryAsset> {
+    const result = await db.insert(schema.libraryAssets).values(asset).returning().execute();
+    if (!result[0]) throw new Error('Failed to create local library asset');
+    return result[0];
+  }
+
+  async deleteLibraryAsset(id: number): Promise<void> {
+    await db.delete(schema.libraryAssets).where(eq(schema.libraryAssets.id, id)).execute();
   }
 
   async getFitsImages(): Promise<AstroImage[]> {
@@ -329,6 +352,50 @@ class DbStorage {
     return result[0];
   }
 
+  /**
+   * Materialize existing plate solutions as completed local records. Older Sidereal
+   * data stored the WCS fields directly on each image but did not always retain a job
+   * row. Importing that metadata avoids re-solving images just to make their status
+   * visible in the queue. This is safe to run at every startup.
+   */
+  async importExistingPlateSolutions(): Promise<number> {
+    const [images, jobs] = await Promise.all([
+      this.getAstroImages({ plateSolved: true }),
+      this.getPlateSolvingJobs(),
+    ]);
+    const completedImageIds = new Set(
+      jobs.filter(job => job.status === 'success' && job.imageId !== null).map(job => job.imageId!),
+    );
+    let imported = 0;
+
+    for (const image of images) {
+      if (completedImageIds.has(image.id)) continue;
+
+      const result: Record<string, number | string> = { source: 'existing-image-plate-solution' };
+      const ra = image.ra === null ? Number.NaN : Number(image.ra);
+      const dec = image.dec === null ? Number.NaN : Number(image.dec);
+      if (Number.isFinite(ra)) result.ra = ra;
+      if (Number.isFinite(dec)) result.dec = dec;
+      if (image.pixelScale !== null && Number.isFinite(image.pixelScale)) result.pixscale = image.pixelScale;
+      if (image.rotation !== null && Number.isFinite(image.rotation)) result.orientation = image.rotation;
+
+      const completedAt = image.updatedAt || image.createdAt || new Date();
+      await this.createPlateSolvingJob({
+        imageId: image.id,
+        astrometrySubmissionId: null,
+        astrometryJobId: image.astrometryJobId || `imported-${image.id}`,
+        status: 'success',
+        submittedAt: completedAt,
+        completedAt,
+        result,
+      });
+      completedImageIds.add(image.id);
+      imported++;
+    }
+
+    return imported;
+  }
+
   async updatePlateSolvingJob(id: number, updates: Partial<InsertPlateSolvingJob>): Promise<PlateSolvingJob | undefined> {
     const values = {
         ...updates,
@@ -552,8 +619,9 @@ class DbStorage {
       const jobs = schema.plateSolvingJobs;
 
       const [imageStats] = await db.select({
-        totalImages: sql<number>`count(*)`,
-        plateSolved: sql<number>`sum(case when ${img.plateSolved} = true then 1 else 0 end)`,
+        totalImages: sql<number>`sum(case when ${img.libraryAssetId} is not null then 1 else 0 end)`,
+        plateSolved: sql<number>`sum(case when ${img.libraryAssetId} is not null and ${img.plateSolved} = true then 1 else 0 end)`,
+        fitsCount: sql<number>`sum(case when ${img.originalPath} like 'fits://%' or ${img.originalPath} like 'fits-derived://%' or ${img.originalPath} like 'fits-upload://%' then 1 else 0 end)`,
         totalHours: sql<number>`coalesce(sum(${img.totalIntegration}), 0)`,
         uniqueTargets: sql<number>`count(distinct case when ${img.title} is not null and ${img.title} != '' then ${img.title} end)`,
       }).from(img).execute();
@@ -583,6 +651,7 @@ class DbStorage {
       return {
         totalImages: Number(imageStats.totalImages),
         plateSolved: Number(imageStats.plateSolved),
+        fitsCount: Number(imageStats.fitsCount),
         totalHours: Math.round(Number(imageStats.totalHours) * 100) / 100,
         uniqueTargets: Number(imageStats.uniqueTargets),
         totalEquipment: Number(equipmentCount.total),
