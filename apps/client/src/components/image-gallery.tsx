@@ -27,6 +27,11 @@ export function ImageGallery({
   visibleCount = 0
 }: ImageGalleryProps) {
   const getStatusBadge = (image: AstroImage) => {
+    const isFits = image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://');
+    if (isFits) return <div className="flex items-center gap-1.5">
+      <Badge className="bg-red-700 text-white border-red-500 text-xs px-1.5 py-0.5 text-[10px]">FITS</Badge>
+      {image.plateSolved && <Badge className="status-plate-solved text-xs px-1.5 py-0.5 text-[10px]">Plate Solved</Badge>}
+    </div>;
     if (image.plateSolved) {
       return <Badge className="status-plate-solved text-xs px-1.5 py-0.5 text-[10px]">Plate Solved</Badge>;
     }

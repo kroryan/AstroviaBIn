@@ -122,11 +122,11 @@ export default function AdminPage() {
           apiKey: settings.immich.apiKey,
         }),
       });
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(data)) {
         setAlbums(data);
       } else {
-        setAlbumError('Failed to fetch albums');
+        setAlbumError(data?.message || 'Failed to fetch albums');
       }
     } catch (e) {
       setAlbumError('Failed to fetch albums');
@@ -138,7 +138,6 @@ export default function AdminPage() {
   // Load settings on component mount
   useEffect(() => {
     loadSettings();
-    fetchAlbums();
   }, []);
 
   const loadSettings = async () => {

@@ -22,12 +22,21 @@ services:
       - AUTO_DB_MIGRATE_ONCE=${AUTO_DB_MIGRATE_ONCE:-true}
       - AUTO_DB_MIGRATE_MARKER=${AUTO_DB_MIGRATE_MARKER:-/app/config/.auto-db-migrated}
       - AUTO_DB_MIGRATE_RESET_SQLITE=${AUTO_DB_MIGRATE_RESET_SQLITE:-true}
+      - FITS_LIBRARY_DIR=/app/fits
+      - FITS_DERIVATIVES_DIR=/app/fits-derived
+      - FITS_UPLOAD_DIR=/app/fits-upload
+      - FITS_CACHE_DIR=/app/cache/fits
+      - FITS_MAX_PROCESS_BYTES=${FITS_MAX_PROCESS_BYTES:-1073741824}
     volumes:
       - sidereal-config:/app/config
       - sidereal-logs:/app/logs
       - sidereal-sidecars:/app/sidecars
       - sidereal-cache:/app/cache
       - sidereal_immich-upload:/immich-upload
+      # Sources stay read-only. Sidereal writes derivatives separately and never edits originals.
+      - ${FITS_HOST_LIBRARY:-./data/fits}:/app/fits:ro
+      - ${FITS_HOST_DERIVATIVES:-./data/fits-derived}:/app/fits-derived
+      - ${FITS_HOST_UPLOADS:-./data/fits-upload}:/app/fits-upload
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s

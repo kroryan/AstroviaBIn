@@ -62,6 +62,21 @@ class DbStorage {
     return result[0] || undefined;
   }
 
+  async getAstroImageByOriginalPath(originalPath: string): Promise<AstroImage | undefined> {
+    const result = await db.select().from(schema.astrophotographyImages)
+      .where(eq(schema.astrophotographyImages.originalPath, originalPath)).execute();
+    return result[0] || undefined;
+  }
+
+  async getFitsImages(): Promise<AstroImage[]> {
+    return await db.select().from(schema.astrophotographyImages)
+      .where(or(
+        like(schema.astrophotographyImages.originalPath, 'fits://%'),
+        like(schema.astrophotographyImages.originalPath, 'fits-derived://%'),
+        like(schema.astrophotographyImages.originalPath, 'fits-upload://%'),
+      )!).execute();
+  }
+
   async createAstroImage(image: InsertAstroImage): Promise<AstroImage> {
     const result = await db.insert(schema.astrophotographyImages).values(image).returning().execute();
     if (!result[0]) {

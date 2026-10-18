@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { storage } from '../services/storage';
 import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
+import { isPlateSolvingEligible } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
 import type { WsManager } from '../services/ws-manager';
 
@@ -23,6 +24,9 @@ export default (wsManager?: WsManager) => {
       const image = await storage.getAstroImage(imageId);
       if (!image) {
         return c.json({ message: 'Image not found' }, 404);
+      }
+      if (!isPlateSolvingEligible(image.tags)) {
+        return c.json({ message: 'Plate solving requires the Deep Sky tag. Add it for stellar fields; Solar System and planet tags are excluded.' }, 400);
       }
 
       // Use the shared service to complete the full plate solving workflow
@@ -46,7 +50,12 @@ export default (wsManager?: WsManager) => {
   app.get('/jobs', async (c) => {
     try {
       const jobs = await storage.getPlateSolvingJobs();
-      return c.json(jobs);
+      const visibleJobs = [];
+      for (const job of jobs) {
+        const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
+        if (isPlateSolvingEligible(image?.tags)) visibleJobs.push(job);
+      }
+      return c.json(visibleJobs);
     } catch (error) {
       return handleRouteError(c, error, 'Failed to fetch plate solving jobs');
     }
@@ -81,6 +90,10 @@ export default (wsManager?: WsManager) => {
 
           if (image.plateSolved) {
             results.push({ imageId, success: false, error: 'Image already plate solved' });
+            continue;
+          }
+          if (!isPlateSolvingEligible(image.tags)) {
+            results.push({ imageId, success: false, error: 'Plate solving requires the Deep Sky tag; Solar System and planet tags are excluded' });
             continue;
           }
 

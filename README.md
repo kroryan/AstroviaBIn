@@ -203,6 +203,29 @@ npm run dev:worker:standalone
 | `ENABLE_PLATE_SOLVING` | `true` | Enable background worker |
 | `PLATE_SOLVE_MAX_CONCURRENT` | `3` | Max simultaneous jobs |
 | `XMP_SIDECAR_PATH` | `/app/sidecars` | Directory for XMP sidecar files |
+| `FITS_LIBRARY_DIR` | `data/fits` | Local directory scanned for source `.fit`, `.fits`, and `.fts` files |
+| `FITS_DERIVATIVES_DIR` | `data/fits-derived` | Local directory where processed FITS derivatives are written |
+| `FITS_UPLOAD_DIR` | `data/fits-upload` | Local directory used by Sidereal's direct FITS upload button |
+| `FITS_CACHE_DIR` | `data/fits-cache` | PNG preview cache for FITS files |
+| `FITS_MAX_PROCESS_BYTES` | `1073741824` | Maximum uncompressed primary FITS image size processed in memory |
+
+### FITS in the main gallery
+
+FITS is a local source in the existing gallery, not a separate gallery. Use **Upload FITS** in the header to send a frame straight to Sidereal, or mount/configure a source folder and use **Scan FITS**. Direct uploads are stored in `FITS_UPLOAD_DIR`; mounted source files stay read-only. Imported FITS frames receive a red `FITS` badge and keep the normal Sidereal features: metadata, target association, sky map, and plate solving. For plate solving Sidereal creates a local stretched PNG preview and sends that preview to Astrometry.net; the original FITS never leaves the server.
+
+The FITS panel offers linear, asinh, logarithmic, and gamma stretches plus background neutralization. **Save processed FITS** writes a new 32-bit floating-point derivative to `FITS_DERIVATIVES_DIR`; it never overwrites the original. The current reader supports uncompressed primary-HDU mono and RGB FITS with `BITPIX` 8, 16, 32, 64, -32, or -64. Set `FITS_MAX_PROCESS_BYTES` according to available RAM for large frames.
+
+Tags are editable from every image sheet: create your own, remove them, or use the `Deep Sky`, `Solar System`, Sun, Moon, and planet presets. `Solar System` and each planet tag exclude an image from manual, bulk, and automatic plate solving, because Astrometry.net solves stellar fields rather than planetary images.
+
+With Docker Compose, configure host folders in `.env.local` before starting:
+
+```bash
+FITS_HOST_LIBRARY=/absolute/path/to/fits
+FITS_HOST_DERIVATIVES=/absolute/path/to/fits-derived
+FITS_HOST_UPLOADS=/absolute/path/to/fits-upload
+# Optional; default is 1 GiB
+FITS_MAX_PROCESS_BYTES=1073741824
+```
 
 ### Admin Configuration
 

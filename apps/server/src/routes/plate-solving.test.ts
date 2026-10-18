@@ -12,7 +12,7 @@ for (const status of ['processing', 'success', 'failed']) {
   it(`single-image route preserves ${status} response`, async t => {
     t.mock.method(console, 'error', () => {});
     t.mock.method(configService, 'getAstrometryConfig', async () => ({ enabled: true, apiKey: 'test' }));
-    t.mock.method(storage, 'getAstroImage', async () => ({ id: 1 }));
+    t.mock.method(storage, 'getAstroImage', async () => ({ id: 1, tags: ['Deep Sky'] }));
     const result = { calibration: { ra: 1, dec: 2, pixscale: 3, radius: 4, orientation: 5 }, annotations: [], machineTags: [] };
     const processing = { status: 'processing', message: 'Still processing. Check status later.', jobId: 14, submissionId: '16141301' };
     t.mock.method(astrometryService, 'completePlateSolvingWorkflow', async image => {
@@ -37,4 +37,24 @@ it('update route opts into recovery using existing local ID without submission',
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'processing' });
   assert.deepEqual(options, { resumeProcessing: true });
+});
+
+it('rejects a Solar System image before it reaches Astrometry.net', async t => {
+  t.mock.method(configService, 'getAstrometryConfig', async () => ({ enabled: true, apiKey: 'test' }));
+  t.mock.method(storage, 'getAstroImage', async () => ({ id: 1, tags: ['Mars'] }));
+  t.mock.method(astrometryService, 'completePlateSolvingWorkflow', async () => assert.fail('Solar System image must not be submitted'));
+  const app = new Hono().route('/api/plate-solving', routes());
+  const response = await app.request('/api/plate-solving/images/1/plate-solve', { method: 'POST' });
+  assert.equal(response.status, 400);
+  assert.match((await response.json() as { message: string }).message, /Solar System/);
+});
+
+it('rejects images without the Deep Sky tag before they reach Astrometry.net', async t => {
+  t.mock.method(configService, 'getAstrometryConfig', async () => ({ enabled: true, apiKey: 'test' }));
+  t.mock.method(storage, 'getAstroImage', async () => ({ id: 1, tags: ['FITS'] }));
+  t.mock.method(astrometryService, 'completePlateSolvingWorkflow', async () => assert.fail('An untagged image must not be submitted'));
+  const app = new Hono().route('/api/plate-solving', routes());
+  const response = await app.request('/api/plate-solving/images/1/plate-solve', { method: 'POST' });
+  assert.equal(response.status, 400);
+  assert.match((await response.json() as { message: string }).message, /Deep Sky/);
 });

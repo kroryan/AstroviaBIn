@@ -4,8 +4,29 @@ import { storage } from '../services/storage';
 import { xmpSidecarService } from '../services/xmp-sidecar';
 import { configService } from '../services/config';
 import { handleRouteError } from './route-utils';
+import { SOLAR_SYSTEM_TAGS } from '../services/solar-system';
 
 const app = new Hono();
+const SOLAR_SYSTEM_TAG_SET = new Set(SOLAR_SYSTEM_TAGS.map(tag => tag.toLocaleLowerCase()));
+
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(tag => typeof tag !== 'string')) throw new Error('tags must be an array of strings');
+  const seen = new Set<string>();
+  const tags = value.reduce<string[]>((tags, rawTag) => {
+    const tag = rawTag.trim();
+    const key = tag.toLocaleLowerCase();
+    if (tag && !seen.has(key)) {
+      seen.add(key);
+      tags.push(tag);
+    }
+    return tags;
+  }, []);
+  const hasSolarSystem = tags.some(tag => SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+  const hasDeepSky = tags.some(tag => tag.toLocaleLowerCase() === 'deep sky');
+  if (hasSolarSystem) return tags.filter(tag => tag.toLocaleLowerCase() !== 'deep sky');
+  if (hasDeepSky) return tags.filter(tag => !SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+  return tags;
+}
 
 // Helper to update Immich asset metadata
 async function updateImmichAssetMetadata(immichId: string, metadata: { latitude?: number; longitude?: number }) {
@@ -55,6 +76,33 @@ app.get('/', async (c) => {
   }
 });
 
+// Download the original FITS or Immich asset rather than a preview.
+app.get('/:id/download', async (c) => {
+  try {
+    const image = await storage.getAstroImage(parseInt(c.req.param('id')));
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+    if (image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://')) {
+      return c.redirect(`/api/fits/${image.id}/download`, 302);
+    }
+    if (!image.immichId) return c.json({ message: 'No downloadable original is available for this image' }, 404);
+    const config = await configService.getImmichConfig();
+    if (!config.host || !config.apiKey) return c.json({ message: 'Immich configuration missing' }, 503);
+    const response = await fetch(`${config.host.replace(/\/+$/, '')}/api/assets/${encodeURIComponent(image.immichId)}/original`, {
+      headers: { 'X-API-Key': config.apiKey },
+    });
+    if (!response.ok || !response.body) return c.json({ message: `Immich returned ${response.status}` }, response.status as 400);
+    const name = (image.filename || `${image.id}.image`).replace(/[\r\n"]/g, '_');
+    return new Response(response.body, {
+      headers: {
+        'content-type': response.headers.get('content-type') || 'application/octet-stream',
+        'content-disposition': `attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      },
+    });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to download original image');
+  }
+});
+
 // Get a specific image
 app.get('/:id', async (c) => {
   try {
@@ -74,6 +122,15 @@ app.patch('/:id', async (c) => {
   try {
     const id = parseInt(c.req.param('id'));
     const updates = await c.req.json();
+    const existing = await storage.getAstroImage(id);
+    if (!existing) return c.json({ message: 'Image not found' }, 404);
+    if (updates.tags !== undefined) {
+      updates.tags = normalizeTags(updates.tags);
+      const hasSolarSystem = updates.tags.some((tag: string) => SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+      const hasDeepSky = updates.tags.some((tag: string) => tag.toLocaleLowerCase() === 'deep sky');
+      const currentType = existing.objectType?.toLocaleLowerCase();
+      if ((hasSolarSystem && currentType === 'deep sky') || (hasDeepSky && currentType && SOLAR_SYSTEM_TAG_SET.has(currentType))) updates.objectType = null;
+    }
 
     const updatedImage = await storage.updateAstroImage(id, updates);
     if (!updatedImage) {

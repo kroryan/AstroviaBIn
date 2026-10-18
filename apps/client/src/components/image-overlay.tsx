@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Upload, Target } from "lucide-react";
+import { X, Eye, Loader, Telescope, Camera, Settings, Edit3, Maximize2, Minimize2, Star, MapPin, Monitor, ChevronDown, ChevronRight, Upload, Target, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
@@ -9,6 +9,8 @@ import { LocationEditorModal } from "./location-editor-modal";
 import { ImageDetailsEditorModal } from "./image-details-editor-modal";
 import { DescriptionEditorModal } from "./description-editor-modal";
 import { TargetPickerModal } from "./target-picker-modal";
+import { FitsProcessingPanel } from "./fits-processing-panel";
+import { ImageTagsEditor } from "./image-tags-editor";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage, Equipment, ImageAcquisitionRow } from "@shared/schema";
@@ -57,6 +59,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
       ...prev,
       [sectionName]: !prev[sectionName]
     }));
+  };
+
+  const downloadCurrentImage = () => {
+    window.location.assign(`/api/images/${currentImage.id}/download`);
   };
 
   // Fetch annotations only if plate solved and showAnnotations is true
@@ -144,6 +150,14 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             >
               {isExpanded ? <Minimize2 className="h-5 w-5 text-white" /> : <Maximize2 className="h-5 w-5 text-white" />}
             </button>
+            <button
+              onClick={downloadCurrentImage}
+              aria-label="Download original image"
+              title="Download original image"
+              className="p-2 rounded-full hover:bg-black/60 text-white border border-white/20 bg-black/50"
+            >
+              <Download className="h-5 w-5" />
+            </button>
             {currentImage.plateSolved && (
               <button
                 onClick={() => setShowAnnotations((v) => !v)}
@@ -157,7 +171,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
           </div>
         </div>
         <div className="relative w-full max-w-md mx-auto bg-black rounded-b-xl overflow-hidden flex items-center justify-center mt-4" style={{ height: isExpanded ? '100vh' : 'min(50vh, 60vw)' }}>
-          {currentImage.immichId ? (
+          {currentImage.fullUrl ? (
             <div className="relative w-full h-full">
               <DeepZoomViewer
                 imageUrl={currentImage.fullUrl || ""}
@@ -283,6 +297,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 {image.filters && <div>Filters: {image.filters}</div>}
               </div>
             </section>
+            <FitsProcessingPanel image={currentImage} />
             {/* Location */}
             {(image.latitude || image.longitude) && (
               <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
@@ -346,22 +361,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 </div>
               )}
             </section>
-            {/* Tags */}
-            {image.tags && image.tags.length > 0 && (
-              <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
-                <h3 className="font-semibold mb-2 text-foreground">Tags</h3>
-                <div className="flex flex-wrap gap-2">
-                  {image.tags.map((tag) => (
-                    <Badge key={tag} className="sky-tag">
-                      {tag}
-                    </Badge>
-                  ))}
-                  {image.objectType && (
-                    <Badge className="sky-tag">{image.objectType}</Badge>
-                  )}
-                </div>
-              </section>
-            )}
+            <ImageTagsEditor image={currentImage} />
             {/* Description */}
             {image.description && (
               <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
@@ -412,8 +412,17 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               </Button>
             </div>
             {/* Show/Hide Annotations Button (bottom right) */}
-            {image.plateSolved && (
-              <div className="absolute bottom-4 right-4 z-50">
+            <div className="absolute bottom-4 right-4 z-50 flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadCurrentImage}
+                className="bg-black/50 text-white border-white/20 hover:bg-black/70"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+              {image.plateSolved && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -424,8 +433,8 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   <Eye className="mr-2 h-4 w-4" />
                   {showAnnotations ? "Hide" : "Show"} Annotations
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -778,36 +787,10 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               )}
             </section>
 
-            {/* Tags - Sixth */}
-            {image.tags && image.tags.length > 0 && (
-              <section className="bg-black/30 rounded-xl p-4 mb-2 shadow border border-black/40">
-                <button
-                  onClick={() => toggleSection('tags')}
-                  className="flex items-center justify-between w-full mb-2"
-                >
-                  <h3 className="font-semibold text-white">Tags</h3>
-                  {collapsedSections['tags'] ? (
-                    <ChevronRight className="h-4 w-4 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-gray-400" />
-                  )}
-                </button>
-                {!collapsedSections['tags'] && (
-                  <div className="flex flex-wrap gap-2">
-                    {image.tags.map((tag) => (
-                      <Badge key={tag} className="sky-tag">
-                        {tag}
-                      </Badge>
-                    ))}
-                    {image.objectType && (
-                      <Badge className="sky-tag">{image.objectType}</Badge>
-                    )}
-                  </div>
-                )}
-              </section>
-            )}
+            <ImageTagsEditor image={currentImage} dark />
 
             {/* Sync to Immich Button */}
+            <FitsProcessingPanel image={currentImage} />
             {currentImage.immichId && (
               <div className="mt-2 mb-2">
                 <Button
@@ -857,7 +840,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
         </aside>
       )}
       <main className={`flex items-center justify-center bg-black flex-1`}>
-        {image.immichId ? (
+        {image.fullUrl ? (
           <div className="relative w-full h-full flex items-center justify-center">
             <DeepZoomViewer
               imageUrl={image.fullUrl || ""}
@@ -867,8 +850,17 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               disableZoom={true}
             />
             {/* Show/Hide Annotations Button (desktop/tablet, not expanded) */}
-            {image.plateSolved && (
-              <div className="absolute bottom-4 right-4 z-10">
+            <div className="absolute bottom-4 right-4 z-10 flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadCurrentImage}
+                className="bg-black/50 text-white border-white/20 hover:bg-black/70"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download
+              </Button>
+              {image.plateSolved && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -879,8 +871,8 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   <Eye className="mr-2 h-4 w-4" />
                   {showAnnotations ? "Hide" : "Show"} Annotations
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
             {/* Expand Button (desktop/tablet, not expanded) */}
             <div className="absolute top-4 right-4 z-10">
               <Button
@@ -953,4 +945,4 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
       )}
     </div>
   );
-} 
+}

@@ -1,6 +1,7 @@
 import { storage } from "../services/storage";
 import { AstrometryService } from "../services/astrometry";
 import { configService } from "../services/config";
+import { isPlateSolvingEligible } from "../services/solar-system";
 import WebSocket from "ws";
 
 class PlateSolvingWorker {
@@ -121,7 +122,7 @@ class PlateSolvingWorker {
 
     const images = await storage.getAstroImages();
     const jobs = await storage.getPlateSolvingJobs();
-    const unsolvedImages = images.filter(img => !img.plateSolved);
+    const unsolvedImages = images.filter(img => !img.plateSolved && isPlateSolvingEligible(img.tags));
     const processingJobs = jobs.filter(job => ["pending", "processing"].includes(job.status));
 
     if (processingJobs.length >= this.maxConcurrent) {
@@ -167,6 +168,14 @@ class PlateSolvingWorker {
 
     for (const job of processingJobs) {
       try {
+        const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
+        if (!isPlateSolvingEligible(image?.tags)) {
+          await storage.updatePlateSolvingJob(job.id, {
+            status: 'failed',
+            result: { error: 'Skipped because the image no longer has the Deep Sky tag or is marked Solar System' },
+          });
+          continue;
+        }
         const result = await this.astrometryService.checkJobStatus(job.id);
 
         if (result.status !== "processing") {

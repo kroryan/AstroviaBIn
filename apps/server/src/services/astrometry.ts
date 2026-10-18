@@ -5,6 +5,7 @@ import { getConstellationFromCoordinates } from './constellation-utils';
 import { filterRelevantTags } from './tags-utils';
 import { catalogService } from './catalog';
 import { checkAstrometrySubmission, normalizeJobId, parseCalibration } from './astrometry-polling';
+import { cachedFitsPreview, resolveFitsFile } from './fits';
 
 import type { WsManager } from './ws-manager';
 
@@ -105,48 +106,43 @@ export class AstrometryService {
     return loginResult.session as string;
   }
 
-  async submitImageForPlateSolving(image: { id: number; fullUrl?: string | null; immichId?: string | null; title?: string | null; filename?: string | null }): Promise<{ submissionId: string; jobId: number }> {
+  async submitImageForPlateSolving(image: { id: number; fullUrl?: string | null; immichId?: string | null; originalPath?: string | null; title?: string | null; filename?: string | null }): Promise<{ submissionId: string; jobId: number }> {
     await this.ensureConfigLoaded();
 
-    if (!image.fullUrl) {
+    const fitsPath = resolveFitsFile(image.originalPath || null);
+    if (!image.fullUrl && !fitsPath) {
       throw new Error("Image does not have a fullUrl");
     }
 
-    if (!this.immichHost) {
-      throw new Error("Immich host not configured");
-    }
-
-    if (!this.immichApiKey) {
-      throw new Error("Immich API key not configured");
-    }
-
     const sessionKey = await this.login();
-
-    // Construct full URL to Immich server
-    let fullImageUrl: string;
-    if (image.fullUrl.startsWith('http')) {
-      fullImageUrl = image.fullUrl;
+    let imageBuffer: Buffer;
+    let contentType: string;
+    let uploadFilename = image.filename || `image_${image.id}.jpg`;
+    if (fitsPath) {
+      imageBuffer = await cachedFitsPreview(fitsPath, { stretch: 'asinh', backgroundNeutralization: true });
+      contentType = 'image/png';
+      uploadFilename = `${image.filename || `image_${image.id}`}.png`;
     } else {
-      const cleanHost = this.immichHost.endsWith('/') ? this.immichHost.slice(0, -1) : this.immichHost;
-      const cleanPath = image.fullUrl.startsWith('/') ? image.fullUrl : `/${image.fullUrl}`;
-      fullImageUrl = `${cleanHost}${cleanPath}`;
+      if (!this.immichHost) throw new Error("Immich host not configured");
+      if (!this.immichApiKey) throw new Error("Immich API key not configured");
+      const fullUrl = image.fullUrl as string;
+      const fullImageUrl = fullUrl.startsWith('http')
+        ? fullUrl
+        : `${this.immichHost.endsWith('/') ? this.immichHost.slice(0, -1) : this.immichHost}${fullUrl.startsWith('/') ? fullUrl : `/${fullUrl}`}`;
+      const imageResponse = await fetch(fullImageUrl, {
+        headers: { 'X-API-Key': this.immichApiKey },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!imageResponse.ok) throw new Error(`Failed to download image from Immich: ${imageResponse.status}`);
+      imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
     }
-
-    // Download image from Immich
-    const imageResponse = await fetch(fullImageUrl, {
-      headers: { 'X-API-Key': this.immichApiKey },
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!imageResponse.ok) {
-      throw new Error(`Failed to download image from Immich: ${imageResponse.status}`);
-    }
-    const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-    const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
 
     // Submit image to Astrometry.net via file upload
     const form = new FormData();
     form.append('request-json', JSON.stringify({ session: sessionKey, apikey: this.astrometryApiKey }));
-    form.append('file', new Blob([imageBuffer], { type: contentType }), image.filename || `image_${image.id}.jpg`);
+    const blobData = imageBuffer.buffer.slice(imageBuffer.byteOffset, imageBuffer.byteOffset + imageBuffer.byteLength) as ArrayBuffer;
+    form.append('file', new Blob([blobData], { type: contentType }), uploadFilename);
 
     const uploadResponse = await fetch('https://nova.astrometry.net/api/upload', {
       method: 'POST',
@@ -349,7 +345,7 @@ export class AstrometryService {
     }
   }
 
-  async completePlateSolvingWorkflow(image: { id: number; fullUrl?: string | null; immichId?: string | null; title?: string | null; filename?: string | null }): Promise<PlateSolvingWorkflowOutcome> {
+  async completePlateSolvingWorkflow(image: { id: number; fullUrl?: string | null; immichId?: string | null; originalPath?: string | null; title?: string | null; filename?: string | null }): Promise<PlateSolvingWorkflowOutcome> {
     const { submissionId, jobId } = await this.submitImageForPlateSolving(image);
     const outcome = await this.pollForPlateSolvingResult(submissionId, async remoteJobId => {
       await storage.updatePlateSolvingJob(jobId, { astrometryJobId: remoteJobId });

@@ -29,6 +29,11 @@ function validRemoteId(value: string | null): boolean {
   return value !== null && /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
 }
 
+const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
+const isSolarSystemImage = (image: AstroImage) => Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TAGS.has(tag.trim().toLowerCase())));
+const isDeepSkyImage = (image: AstroImage) => Boolean(image.tags?.some(tag => tag.trim().toLowerCase() === 'deep sky'));
+const isPlateSolvingEligible = (image: AstroImage) => isDeepSkyImage(image) && !isSolarSystemImage(image);
+
 interface PlateSolvingStats {
   totalJobs: number;
   pendingJobs: number;
@@ -134,6 +139,7 @@ export default function PlateSolvingPage() {
 
   // Filter images
   const filteredImages = images.filter((image) => {
+    if (!isPlateSolvingEligible(image)) return false;
     if (searchTerm && !image.title.toLowerCase().includes(searchTerm.toLowerCase())) {
       return false;
     }
@@ -555,4 +561,4 @@ export default function PlateSolvingPage() {
       </div>
     </div>
   );
-} 
+}

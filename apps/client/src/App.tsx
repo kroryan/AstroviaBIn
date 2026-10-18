@@ -11,6 +11,7 @@ import PlateSolvingPage from "./pages/plate-solving";
 import SkyMapPage from "./pages/sky-map";
 import LocationsPage from "./pages/locations";
 import TargetsPage from "./pages/targets";
+import FitsStackingPage from "./pages/fits-stacking";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/targets" component={TargetsPage} />
       <Route path="/equipment" component={EquipmentCatalog} />
       <Route path="/plate-solving" component={PlateSolvingPage} />
+      <Route path="/fits-stacking" component={FitsStackingPage} />
       <Route path="/sky-map" component={SkyMapPage} />
       <Route path="/locations" component={LocationsPage} />
       <Route path="/admin" component={AdminPage} />

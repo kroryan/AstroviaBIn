@@ -104,10 +104,15 @@ app.post('/albums', async (c) => {
       return c.json({ message: 'Invalid URL format' }, 400);
     }
 
-    const response = await fetch(`${host}/api/albums`, {
-      headers: { 'X-API-Key': apiKey },
+    const normalizedHost = host.replace(/\/+$/, '');
+    const response = await fetch(`${normalizedHost}/api/albums`, {
+      headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(10000),
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      return c.json({ message: `Immich returned ${response.status}${data?.message ? `: ${data.message}` : ''}` }, response.status as 400);
+    }
     if (Array.isArray(data)) {
       const albums = data.map((a: Record<string, unknown>) => ({ id: a.id, albumName: a.albumName }));
       return c.json(albums);

@@ -331,7 +331,7 @@ class ImmichSyncService {
         longitude: exifInfo?.longitude ? Number(exifInfo.longitude) : null,
         altitude: exifInfo?.altitude ? Number(exifInfo.altitude) : null,
         plateSolved: false,
-        tags: ['astrophotography'],
+        tags: ['astrophotography', 'Deep Sky'],
         objectType: 'Deep Sky',
         description: String(exifInfo?.description || ''),
       };

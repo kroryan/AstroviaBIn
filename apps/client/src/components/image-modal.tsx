@@ -7,6 +7,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { X, Crosshair, Loader, Eye } from "lucide-react";
 import type { AstroImage } from "@shared/schema";
 import { DeepZoomViewer } from "./deep-zoom-viewer";
+import { ImageTagsEditor } from "./image-tags-editor";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ImageModalProps {
@@ -14,10 +15,15 @@ interface ImageModalProps {
   onClose: () => void;
 }
 
+const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
+
 export function ImageModal({ image, onClose }: ImageModalProps) {
   const [showAnnotations, setShowAnnotations] = useState(false);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+  const solarSystemFrame = Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TAGS.has(tag.trim().toLowerCase())));
+  const deepSkyFrame = Boolean(image.tags?.some(tag => tag.trim().toLowerCase() === 'deep sky'));
+  const plateSolvingEligible = deepSkyFrame && !solarSystemFrame;
 
   const plateSolveMutation = useMutation({
     mutationFn: async (imageId: number): Promise<{ processing: boolean; message?: string }> => {
@@ -122,7 +128,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
           // MOBILE LAYOUT: image on top, details below
           <div className="flex flex-col gap-4">
             <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden">
-              {image.immichId ? (
+              {image.fullUrl ? (
                 <div className="relative w-full h-full">
                   <DeepZoomViewer
                     imageUrl={image.fullUrl || ""}
@@ -168,7 +174,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-foreground">Plate Solution</h4>
-                  {!image.plateSolved && (
+                  {!image.plateSolved && plateSolvingEligible && (
                     <Button
                       onClick={() => plateSolveMutation.mutate(image.id)}
                       disabled={plateSolveMutation.isPending}
@@ -214,26 +220,11 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     <p>No plate solving data available.</p>
-                    {!plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
+                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
                   </div>
                 )}
               </div>
-              {/* Tags */}
-              {image.tags && image.tags.length > 0 && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-2">Tags</h4>
-                  <div className="flex flex-wrap gap-2">
-                    {image.tags.map((tag) => (
-                      <Badge key={tag} className="sky-tag">
-                        {tag}
-                      </Badge>
-                    ))}
-                    {image.objectType && (
-                      <Badge className="sky-tag">{image.objectType}</Badge>
-                    )}
-                  </div>
-                </div>
-              )}
+              <ImageTagsEditor image={image} />
               {/* Description */}
               {image.description && (
                 <div>
@@ -247,7 +238,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
           // DESKTOP/TABLET LAYOUT (unchanged)
           <div className="bg-card rounded-xl p-4">
             <div className="relative mb-4">
-              {image.immichId ? (
+              {image.fullUrl ? (
                 <div className="relative">
                   <DeepZoomViewer
                     imageUrl={image.fullUrl || ""}
@@ -293,7 +284,7 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-foreground">Plate Solution</h4>
-                  {!image.plateSolved && (
+                  {!image.plateSolved && plateSolvingEligible && (
                     <Button
                       onClick={() => plateSolveMutation.mutate(image.id)}
                       disabled={plateSolveMutation.isPending}
@@ -339,27 +330,14 @@ export function ImageModal({ image, onClose }: ImageModalProps) {
                 ) : (
                   <div className="text-sm text-muted-foreground">
                     <p>No plate solving data available.</p>
-                    {!plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
+                    {!deepSkyFrame ? <p className="mt-2">Add the Deep Sky tag to make this stellar frame available for plate solving.</p> : solarSystemFrame ? <p className="mt-2">Solar System frames are excluded from plate solving.</p> : !plateSolveMutation.data?.processing && <p className="mt-2">Click "Solve" to submit this image to Astrometry.net for plate solving.</p>}
                   </div>
                 )}
               </div>
             </div>
-            {/* Tags */}
-            {image.tags && image.tags.length > 0 && (
-              <div className="mt-4">
-                <h4 className="font-semibold text-foreground mb-2">Tags</h4>
-                <div className="flex flex-wrap gap-2">
-                  {image.tags.map((tag) => (
-                    <Badge key={tag} className="sky-tag">
-                      {tag}
-                    </Badge>
-                  ))}
-                  {image.objectType && (
-                    <Badge className="sky-tag">{image.objectType}</Badge>
-                  )}
-                </div>
-              </div>
-            )}
+            <div className="mt-4">
+              <ImageTagsEditor image={image} />
+            </div>
             {/* Description */}
             {image.description && (
               <div className="mt-4">
