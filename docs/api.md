@@ -1164,8 +1164,58 @@ All error responses include a descriptive message:
 
 Currently, there are no rate limits implemented. However, be mindful of:
 - Bulk operations (like plate solving) can be resource-intensive
-- Image proxy requests are forwarded to Immich
-- Astrometry.net API calls are subject to their rate limits
+- HOTPANTS runs are limited to two at a time to control memory use
+- Automatic SkyView reference lookup sends sky coordinates and field size only
+
+## Private FITS difference analysis
+
+These endpoints operate on a FITS already stored in Sidereal. Science FITS
+files stay local and are not sent to Astrometry.net or Photutils servers.
+A survey reference request sends sky coordinates and field size only; use
+a local FITS reference to avoid that external request.
+
+### Start and list analyses
+
+```http
+GET  /api/fits/:imageId/analyses
+POST /api/fits/:imageId/analyses
+```
+
+The POST body accepts `referenceMode` (`survey` or `local`),
+`referenceImageId`, `survey`, `maxDimension`, `thresholdSigma`,
+`sourceFwhm`, `maxCandidates`, and guarded `hotpantsOptions`.
+Poll the saved report while `status` is `running`.
+
+### Read, download, or delete a saved report
+
+```http
+GET    /api/fits/:imageId/analyses/:runId
+GET    /api/fits/:imageId/analyses/:runId/files/:filename
+DELETE /api/fits/:imageId/analyses/:runId
+```
+
+Deleting removes that run's generated report and FITS outputs. It does not
+remove the original image or other reports. A running report returns
+`409` and cannot be deleted.
+
+### Check a candidate in a second local exposure
+
+```http
+POST /api/fits/:imageId/analyses/:runId/candidates/:candidateIndex/check
+Content-Type: application/json
+
+{ "followupImageId": 52 }
+```
+
+The follow-up is solved locally if needed. A repeat detection is reported
+only when a point source is present at the saved sky coordinate, the
+filter matches, and the observation date differs. This is supporting
+evidence, not an automatic discovery confirmation.
+
+Auxiliary files and HOTPANTS utilities are also available under
+`/api/fits/:imageId/analysis-inputs` and
+`/api/fits/:imageId/analyses/:runId/utilities`. See
+[`docs/hotpants.md`](hotpants.md) for scientific limitations and privacy.
 
 ## WebSocket Events
 
@@ -1203,10 +1253,8 @@ const plateSolveResult = await result.json();
 
 Some API behavior can be configured via environment variables:
 
-- `ASTROMETRY_API_KEY` - Default Astrometry.net API key
-- `IMMICH_URL` - Default Immich server URL
-- `IMMICH_API_KEY` - Default Immich API key
 - `ENABLE_PLATE_SOLVING` - Enable/disable plate solving worker
+- `FITS_ANALYSIS_DIR` - Persistent location for private analysis reports and intermediate FITS layers
 
 Note: Admin settings take precedence over environment variables.
 
@@ -1222,6 +1270,5 @@ Note: Admin settings take precedence over environment variables.
 ## Support
 
 For API support and questions:
-- Check the [GitHub Issues](https://github.com/sidereal-io/sidereal/issues)
+- Check the [GitHub Issues](https://github.com/kroryan/sidereal/issues)
 - Review the [Contributing Guide](../CONTRIBUTING.md)
-- Join discussions in [GitHub Discussions](https://github.com/sidereal-io/sidereal/discussions)

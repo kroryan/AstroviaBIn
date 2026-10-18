@@ -11,16 +11,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sidereal-io/sidereal/actions/workflows/docker-build-push.yml"><img src="https://github.com/sidereal-io/sidereal/actions/workflows/docker-build-push.yml/badge.svg" alt="Build Status" /></a>
-  <a href="https://github.com/sidereal-io/sidereal/actions/workflows/release.yml"><img src="https://github.com/sidereal-io/sidereal/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
-  <a href="https://github.com/sidereal-io/sidereal/security"><img src="https://img.shields.io/badge/Security-Trivy%20Scanned-brightgreen" alt="Security Scan" /></a>
+  <a href="https://github.com/kroryan/sidereal/actions/workflows/docker-build-test.yml"><img src="https://github.com/kroryan/sidereal/actions/workflows/docker-build-test.yml/badge.svg" alt="Build Status" /></a>
+  <a href="https://github.com/kroryan/sidereal/actions/workflows/release.yml"><img src="https://github.com/kroryan/sidereal/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
 </p>
 
-**Sidereal** is a self-hosted photo gallery and management system designed specifically for astrophotographers. Built to integrate seamlessly with your [Immich](https://immich.app/) photo library, it provides intelligent plate solving, equipment tracking, and comprehensive metadata management tailored for deep-sky imaging workflows.
+**Sidereal** is a self-hosted photo and FITS library for astrophotographers. It stores uploads in its own database and local media directories, solves image fields with local Astrometry.net software, and provides saved FITS difference analyses with HOTPANTS and Photutils.
 
 Perfect for organizing, analyzing, and showcasing your astrophotography collection with full control over your data and infrastructure.
 
-> **Disclaimer**: Sidereal is an independent project and is not affiliated with, endorsed by, or officially connected to Immich or its developers. Sidereal is a third-party application that integrates with Immich's public API.
+This fork does **not** require Immich or an Astrometry.net account. Existing Immich assets can be migrated, but new uploads go directly to Sidereal. The original photos and FITS are never submitted to an external plate-solving service.
 
 <div align="center">
   <img width="80%" src="assets/images/demo.gif" />
@@ -31,14 +30,14 @@ Perfect for organizing, analyzing, and showcasing your astrophotography collecti
 ## Features
 
 ### **Self-Hosted Image Management**
-- **Immich Integration**: Seamless synchronization with your self-hosted Immich photo library
+- **Private local library**: Upload and manage photos and FITS directly in Sidereal
 - **Interactive Sky Map**: Explore your collection on a high-fidelity celestial atlas powered by Aladin Lite v3
 - **Astrophotography Filtering**: Filter by telescopes, cameras, targets, constellations, and acquisition details
 - **Deep Zoom Viewer**: High-resolution exploration of your deep-sky images with OpenSeaDragon
 - **Metadata Preservation**: Automatic EXIF handling for astrophotography workflows
-  > **Note**: XMP sidecar generation is currently experimental and may not work as intended in all configurations. Configure `IMMICH_MAPPING_PATH` and `LOCAL_MAPPING_PATH` environment variables to map Immich volume paths to local paths for sidecar file placement.
-- **Zero Duplication**: View images directly from Immich without storage overhead
-- **Location Editing**: Save and reuse observing sites with map picker; coordinate changes sync back to the original Immich asset automatically
+  > **Note**: XMP sidecar generation is experimental. Keep backups of originals and metadata.
+- **Expansion-friendly storage**: Mount library, FITS originals, derivatives, cache, and analysis directories independently
+- **Location Editing**: Save and reuse observing sites with a map picker
 
 ### **DSO Catalog & Target Tracking**
 - **Built-in OpenNGC Catalog**: Browse, search, and filter thousands of deep-sky objects by type, constellation, magnitude, and angular size
@@ -51,11 +50,12 @@ Perfect for organizing, analyzing, and showcasing your astrophotography collecti
 - **Integration Summary**: Automatic calculation of total frames, total integration time, and filter breakdown per image
 
 ### **Plate Solving**
-- **Astrometry.net Integration**: Automatic coordinate solving for your images
+- **Local Astrometry.net solver**: Automatic coordinate solving without uploading photos or FITS
 - **Background Processing**: Non-blocking worker processes with job queuing
 - **Real-time Updates**: Live progress tracking via WebSocket connections
 - **Batch Processing**: Handle multiple images simultaneously
 - **Results Storage**: Persistent RA/Dec coordinates and field information
+- **FITS difference analysis**: HOTPANTS subtraction followed by Photutils point-source checks, saved evidence, and optional second-exposure verification
 
 ### **Astrophotography Equipment Tracking**
 - **Telescope Catalog**: Manage your telescopes, mounts, and accessories with specifications
@@ -64,15 +64,13 @@ Perfect for organizing, analyzing, and showcasing your astrophotography collecti
 - **Session Logging**: Automatic equipment association from EXIF metadata and manual tagging
 
 ### **Admin Interface**
-- **Configuration Management**: Secure API key and integration settings
-- **Automated Sync**: Cron jobs automatically sync images from Immich and clean up old notifications on a configurable schedule
+- **Configuration Management**: Library, catalog, worker, and local solver settings
 - **Worker Supervisor**: Background plate-solving workers automatically restart on failure with exponential backoff when Auto mode is enabled
 - **Database Backup**: One-click SQLite database download from the admin panel (PostgreSQL users should use `pg_dump`)
 - **Catalog Management**: Load, reload, and check for OpenNGC catalog updates; backfill target names for existing images
 
 ### **Real-Time Notifications**
-- **Live Updates**: WebSocket-powered notifications for plate-solving results, Immich sync completions, and other events
-- **Manual Sync**: Trigger an Immich sync at any time from the header bar
+- **Live Updates**: WebSocket-powered notifications for plate-solving results and other events
 - **Notification Badge**: Unacknowledged notification count displayed in the navigation
 
 ### **Security & Deployment**
@@ -82,90 +80,78 @@ Perfect for organizing, analyzing, and showcasing your astrophotography collecti
 
 ## Quick Start
 
-> **Prerequisites**: Sidereal requires a running [Immich](https://immich.app/) instance for photo management. Ensure you have Immich set up and accessible before proceeding.
+> **Prerequisites**: Docker Compose and sufficient disk space for your own media. The source-build image includes the local solver, index files, HOTPANTS, and Photutils. No Immich server or remote Astrometry.net API key is needed.
 
-### Option 1: Docker Compose (Recommended)
+### Option 1: Build this fork with Docker Compose (recommended)
 
-Single container setup with built-in SQLite database — no external database needed:
+This branch is not the upstream GHCR image. Build it from source so the local-only astrometry and FITS analysis dependencies are included:
 
 ```bash
-# Download production compose file
-curl -o docker-compose.prod.yml https://raw.githubusercontent.com/sidereal-io/sidereal/main/docker-compose.prod.yml
-
-# Start Sidereal
-docker compose -f docker-compose.prod.yml up -d
-
-# Access the application
-open http://localhost:5000
+git clone --branch v0.x https://github.com/kroryan/sidereal.git
+cd sidereal
+mkdir -p /mnt/Expansion/Sidereal/AppData /mnt/Expansion/Sidereal/Media
+mkdir -p /mnt/Expansion/Sidereal/FITS/{library,derivatives,uploads,analysis}
+docker compose up -d --build
 ```
 
-**What this includes:**
-- Sidereal application from GitHub Container Registry
-- Built-in SQLite database with persistent storage
-- Health checks and automatic restarts
-- Volume mounts for configuration, logs, and database
+Open `http://localhost:5000`. The default Compose file uses `/mnt/Expansion/Sidereal`; set `SIDEREAL_HOST_DATA`, `SIDEREAL_HOST_LIBRARY`, and `FITS_HOST_*` before starting if your disk is mounted elsewhere. The SQLite database lives in `AppData`; original media lives under `Media` and `FITS`, not inside the container. Back up both the database and those directories together.
 
 > **PostgreSQL option**: If you prefer PostgreSQL, download [`docker-compose.postgres.yml`](docker-compose.postgres.yml) and layer it on:
 > ```bash
 > echo "POSTGRES_PASSWORD=your_secure_password" > .env
-> docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up -d
+> docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 > ```
 
-### Option 2: Docker Container
+### Option 2: Standalone Docker container
 
-Single container deployment using GitHub Container Registry:
+Build the same source locally and bind-mount persistent directories:
 
 ```bash
-# Pull the latest image
-docker pull ghcr.io/sidereal-io/sidereal:latest
-
-# Run with Docker (uses built-in SQLite database)
+docker build -t sidereal:local .
 docker run -d \
   --name sidereal \
   -p 5000:5000 \
   -e NODE_ENV=production \
-  -v sidereal-config:/app/config \
-  -v sidereal-cache:/app/cache \
-  ghcr.io/sidereal-io/sidereal:latest
-
-# Access the application
-open http://localhost:5000
+  -e FITS_ANALYSIS_DIR=/app/fits-analysis \
+  -v /mnt/Expansion/Sidereal/AppData:/app/config \
+  -v /mnt/Expansion/Sidereal/Media:/app/library \
+  -v /mnt/Expansion/Sidereal/FITS/library:/app/fits:ro \
+  -v /mnt/Expansion/Sidereal/FITS/uploads:/app/fits-upload \
+  -v /mnt/Expansion/Sidereal/FITS/derivatives:/app/fits-derived \
+  -v /mnt/Expansion/Sidereal/FITS/analysis:/app/fits-analysis \
+  sidereal:local
 ```
 
 > To use PostgreSQL instead, add `-e DATABASE_URL="postgresql://user:password@host:5432/sidereal"` to the command above.
 
-### Option 3: UnRAID Template
+### Option 3: UnRAID
 
-> **Coming Soon**: Sidereal will be available in UnRAID Community Applications for easy one-click installation.
-
-For now, manual installation:
-
-1. **Install Sidereal**: Add container using template URL `https://raw.githubusercontent.com/sidereal-io/sidereal/main/docker/unraid-templates/sidereal.xml`
-2. **Configure**: Optionally set Immich URL and API keys (can also be done via admin UI)
-3. **Access**: Navigate to `http://your-server:2284`
-
-> No external database needed — Sidereal uses a built-in SQLite database stored in the config directory. To use PostgreSQL instead, set the `DATABASE_URL` field in the template.
+The historical UnRAID template targets an upstream container and is not
+configured for this fork's local science stack. Build the repository
+locally and map AppData, Media, and each FITS directory to persistent
+UnRAID shares as described in the [Docker guide](docker/README.md).
 
 ### Option 4: Development Setup
 
 ```bash
 # Clone and install dependencies
-git clone https://github.com/sidereal-io/sidereal.git
-cd Sidereal
+git clone --branch v0.x https://github.com/kroryan/sidereal.git
+cd sidereal
 npm install
 
 # Option A: Build and run with Docker Compose (builds from source)
-# Edit docker-compose.yml environment section with your settings
+# Configure host storage paths before starting
 docker compose up -d
 
 # Option B: Local development server
 cp .env.example .env.local
-# Edit .env.local with your development settings (uses SQLite by default)
+# Node development alone does not install the local Python/CFITSIO analysis stack.
+# Use the Docker image for end-to-end FITS analyses.
 npm run dev
 
 # Option C: Worker-only deployment (standalone)
 cp .env.worker.example .env.worker
-# Edit .env.worker with database and API settings
+# Edit .env.worker with database settings if running a separate worker
 npm run dev:worker:standalone
 
 # Access at http://localhost:5000 (Docker) or http://localhost:5173 (local)
@@ -174,7 +160,6 @@ npm run dev:worker:standalone
 ## Requirements
 
 ### Core Requirements
-- **Immich Server**: Self-hosted photo management server (currently the only supported photo source)
 - **Docker**: 20.10+ (for containerized deployment)
 - **Database**: Built-in SQLite (default, no setup required). PostgreSQL 15+ optionally supported.
   - Automatic schema management with Drizzle ORM
@@ -184,9 +169,7 @@ npm run dev:worker:standalone
 - **Node.js**: 20+ (for building from source)
 
 ### Optional Integrations
-- **Astrometry.net API Key**: For automated plate solving capabilities
-
-> **Note**: Support for additional photo sources beyond Immich is planned for future releases, but Immich is currently required as the primary photo library.
+- **Historical survey reference**: SkyView access is optional. This sends field coordinates and requested survey parameters, never your FITS pixels. Choose another local FITS to avoid even that network request.
 
 ## Configuration
 
@@ -197,9 +180,6 @@ npm run dev:worker:standalone
 | `DATABASE_URL` | _(empty)_ | Optional PostgreSQL connection string. Leave empty to use built-in SQLite. |
 | `PORT` | `5000` | HTTP server port |
 | `NODE_ENV` | `development` | Application environment |
-| `IMMICH_URL` | _(optional)_ | Immich server base URL |
-| `IMMICH_API_KEY` | _(optional)_ | Immich API authentication key |
-| `ASTROMETRY_API_KEY` | _(optional)_ | Astrometry.net API key |
 | `ENABLE_PLATE_SOLVING` | `true` | Enable background worker |
 | `PLATE_SOLVE_MAX_CONCURRENT` | `3` | Max simultaneous jobs |
 | `XMP_SIDECAR_PATH` | `/app/sidecars` | Directory for XMP sidecar files |
@@ -207,22 +187,27 @@ npm run dev:worker:standalone
 | `FITS_DERIVATIVES_DIR` | `data/fits-derived` | Local directory where processed FITS derivatives are written |
 | `FITS_UPLOAD_DIR` | `data/fits-upload` | Local directory used by Sidereal's direct FITS upload button |
 | `FITS_CACHE_DIR` | `data/fits-cache` | PNG preview cache for FITS files |
+| `FITS_ANALYSIS_DIR` | `data/fits-analysis` | Private HOTPANTS runs, evidence, and follow-up checks; put this on spacious persistent storage |
+| `SIDEREAL_MAX_UPLOAD_BYTES` | `21474836480` | Maximum direct upload size (20 GiB) |
 | `FITS_MAX_PROCESS_BYTES` | `1073741824` | Maximum uncompressed primary FITS image size processed in memory |
 
 ### FITS in the main gallery
 
-FITS is a local source in the existing gallery, not a separate gallery. Use **Upload FITS** in the header to send a frame straight to Sidereal, or mount/configure a source folder and use **Scan FITS**. Direct uploads are stored in `FITS_UPLOAD_DIR`; mounted source files stay read-only. Imported FITS frames receive a red `FITS` badge and keep the normal Sidereal features: metadata, target association, sky map, and plate solving. For plate solving Sidereal creates a local stretched PNG preview and sends that preview to Astrometry.net; the original FITS never leaves the server.
+FITS is a local source in the existing gallery, not a separate gallery. Use **Upload** in the header to send a frame straight to Sidereal, or mount/configure a source folder and use **Scan FITS**. Direct uploads are stored in `FITS_UPLOAD_DIR`; mounted source files stay read-only. Plate solving uses bundled Astrometry.net binaries and index files locally; no FITS or preview is submitted to the public Astrometry.net site.
 
 The FITS panel offers linear, asinh, logarithmic, and gamma stretches plus background neutralization. **Save processed FITS** writes a new 32-bit floating-point derivative to `FITS_DERIVATIVES_DIR`; it never overwrites the original. The current reader supports uncompressed primary-HDU mono and RGB FITS with `BITPIX` 8, 16, 32, 64, -32, or -64. Set `FITS_MAX_PROCESS_BYTES` according to available RAM for large frames.
 
 Tags are editable from every image sheet: create your own, remove them, or use the `Deep Sky`, `Solar System`, Sun, Moon, and planet presets. `Solar System` and each planet tag exclude an image from manual, bulk, and automatic plate solving, because Astrometry.net solves stellar fields rather than planetary images.
 
-With Docker Compose, configure host folders in `.env.local` before starting:
+Open a FITS and expand **HOTPANTS** above **FITS processing** to save a difference analysis. The pipeline uses the unmodified HOTPANTS binary and Photutils point-source detection. A historical DSS survey is useful for exploration but is often a different band, resolution, and epoch; its residuals are **not** supernova confirmations. A second, locally stored FITS from a different exposure in the same filter can provide repeat-detection evidence. You can delete any finished report and all of its generated files without deleting the original FITS. See [FITS difference analysis](docs/hotpants.md) for validation limits, privacy, advanced options, and licenses.
+
+With Docker Compose, configure host folders in a Compose `.env` file or your shell before starting:
 
 ```bash
-FITS_HOST_LIBRARY=/absolute/path/to/fits
-FITS_HOST_DERIVATIVES=/absolute/path/to/fits-derived
-FITS_HOST_UPLOADS=/absolute/path/to/fits-upload
+FITS_HOST_LIBRARY=/mnt/Expansion/Sidereal/FITS/library
+FITS_HOST_DERIVATIVES=/mnt/Expansion/Sidereal/FITS/derivatives
+FITS_HOST_UPLOADS=/mnt/Expansion/Sidereal/FITS/uploads
+FITS_HOST_ANALYSIS=/mnt/Expansion/Sidereal/FITS/analysis
 # Optional; default is 1 GiB
 FITS_MAX_PROCESS_BYTES=1073741824
 ```
@@ -231,10 +216,9 @@ FITS_MAX_PROCESS_BYTES=1073741824
 
 After startup, access the admin interface at `/admin` to configure:
 
-- **Immich Integration**: Server URL, API keys, album picker, sync schedules
-- **Astrometry Settings**: API credentials, job limits, auto-processing
+- **Library**: Local storage and catalog controls
+- **Astrometry Settings**: Local solver and background processing
 - **Worker Management**: Enable/disable background processing
-- **Sync Scheduling**: Automated Immich synchronization frequency
 
 > **Tip**: Configuration via admin interface takes precedence over environment variables and persists across container restarts.
 
@@ -264,53 +248,22 @@ To avoid running the command manually inside the container, set the `AUTO_DB_MIG
 
 The script handles all type conversions (timestamps, booleans, JSON, arrays) and respects foreign key ordering automatically. SQLite targets run the bundled Drizzle migrations during the copy; PostgreSQL targets should be initialized once beforehand so the schema exists.
 
-## Container Images
+## Container images
 
-Sidereal provides ready-to-use container images through GitHub Container Registry:
-
-### Available Images
-- **Latest Release**: `ghcr.io/sidereal-io/sidereal:latest`
-- **Specific Version**: `ghcr.io/sidereal-io/sidereal:0.10.1` (tags have no `v` prefix; `0.10` and `0` track the latest patch and minor)
-- **Development**: `ghcr.io/sidereal-io/sidereal:main`
-
-### Supported Architectures
-- `linux/amd64` (x86_64)
-- `linux/arm64` (ARM64/Apple Silicon)
-
-### Image Tags
-- `latest` - Latest stable release
-- `v*.*.*` - Semantic version tags (e.g., `v1.0.0`)
-- `main` - Latest development build from main branch
-- `sha-*` - Specific commit builds
-
-All images are automatically built, tested, and scanned for vulnerabilities using GitHub Actions.
+Build this fork's `v0.x` branch locally with `docker compose up -d --build`.
+The upstream `ghcr.io/sidereal-io/sidereal` images are a different project
+line and must not be used as a substitute for this fork's private FITS workflow.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│        Sidereal Container           │
-├─────────────────────────────────────┤
-│  Frontend (React + TypeScript)      │
-│  ├─ Vite build system               │    ┌─────────────────────┐
-│  ├─ Tailwind CSS + shadcn/ui        │    │   External APIs     │
-│  └─ Real-time WebSocket client      │    ├─────────────────────┤
-├─────────────────────────────────────┤◄──►│  Immich Server      │
-│  Backend (Hono + Node.js)           │    │  Astrometry.net     │
-│  ├─ RESTful API endpoints           │    │  Image Sources      │
-│  ├─ WebSocket server (ws)           │    └─────────────────────┘
-│  ├─ Image proxy & thumbnails        │
-│  └─ Session management              │    ┌─────────────────────┐
-├─────────────────────────────────────┤    │  PostgreSQL         │
-│  Worker Manager                     │    │  (optional)         │
-│  ├─ Background job processing       │◄──►│  External database  │
-│  ├─ Plate solving automation        │    │  for advanced use   │
-│  ├─ Crash recovery & monitoring     │    └─────────────────────┘
-│  └─ Graceful shutdown handling      │
-├─────────────────────────────────────┤
-│  SQLite (built-in, default)         │
-│  └─ /app/config/sidereal.db         │
-└─────────────────────────────────────┘
+Browser ──► Sidereal (React + Hono/Node)
+                ├──► local SQLite or optional PostgreSQL
+                ├──► mounted private photo/FITS/analysis directories
+                ├──► local Astrometry.net solver + index files
+                └──► local HOTPANTS + Photutils
+
+Optional historical reference request ──► NASA SkyView (coordinates only)
 ```
 
 ## Project Structure
@@ -339,13 +292,14 @@ Sidereal/
 │       │   ├── schemas/        # Zod validation schemas
 │       │   └── types/          # TypeScript type definitions
 ├── docker/                     # Containerization files
-│   ├── Dockerfile              # Multi-stage container build
-│   ├── docker-compose.yml      # Service orchestration
 │   ├── startup.sh              # Container entry point
 │   └── unraid-templates/       # UnRAID deployment templates
 ├── tools/                      # Development and migration tools
 │   ├── scripts/                # Utility scripts
 │   └── migrations/             # Database migration files
+├── vendor/hotpants/            # Unmodified upstream HOTPANTS source and licenses
+├── Dockerfile                  # Multi-stage local-science build
+├── docker-compose.yml          # Persistent local storage mounts
 ├── docs/                       # Documentation
 └── assets/                     # Static assets and examples
 ```
@@ -360,8 +314,8 @@ node --version  # v20+
 npm --version   # 10+
 
 # Clone repository
-git clone https://github.com/sidereal-io/sidereal.git
-cd Sidereal
+git clone --branch v0.x https://github.com/kroryan/sidereal.git
+cd sidereal
 ```
 
 ### Setup
@@ -426,23 +380,11 @@ npm run test:e2e:headed # Run tests in headed browser mode
 npm run check          # TypeScript compilation check
 ```
 
-## CI/CD & Deployment
+## Deployment checks
 
-Sidereal uses GitHub Actions for continuous integration and deployment. All builds are automatically tested, scanned for vulnerabilities, and containerized.
-
-### Automated Workflows
-
-- **Build & Push**: Automatic Docker image builds on main branch commits
-- **PR Testing**: Validates all pull requests with build tests and security scans
-- **Release**: Semantic versioning releases with tagged Docker images
-
-### Security
-
-- All images are scanned with Trivy for vulnerabilities
-- Critical vulnerabilities block deployments
-- SBOM (Software Bill of Materials) generated for each build
-
-For detailed CI/CD documentation, see [docs/CI_CD.md](docs/CI_CD.md).
+Run `npm run check`, `npm run build`, and `docker compose build` after
+changes. Check `http://localhost:5000/api/health` after deployment. This
+fork's source build is the supported path for local FITS analysis.
 
 ## Upgrading from Skymmich
 
@@ -455,7 +397,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## Roadmap
 
 ### Core Features
-- [ ] **Additional Photo Sources**: Support for photo libraries beyond Immich (direct uploads, other self-hosted solutions)
+- [x] **Direct photo and FITS uploads**: Sidereal owns its local library
 - [x] **Interactive Sky Map**: Celestial atlas visualization for plate-solved image collections
 - [ ] Advanced image statistics and analytics for astrophotography sessions
 - [ ] Equipment usage reporting and session tracking
@@ -464,7 +406,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 ### Integrations
 - [ ] **NINA Plugin**: Sync session data (targets, equipment, acquisition details) directly from N.I.N.A. to Sidereal
-- [ ] **Local Plate Solving**: Integration with local solvers (ASTAP, PixInsight) for offline solving without Astrometry.net
+- [x] **Local Plate Solving**: Bundled Astrometry.net binaries and index files; no remote submission
+- [x] **FITS Difference Analysis**: HOTPANTS with local Photutils validation and second-exposure checks
 
 ### Advanced Features
 - [ ] Advanced search and filtering with saved queries
@@ -475,8 +418,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - [ ] Community features (sharing, public galleries)
 
 ### Community & Help
-- **Bug Reports**: [GitHub Issues](https://github.com/sidereal-io/sidereal/issues)
-- **Feature Requests**: [GitHub Discussions](https://github.com/sidereal-io/sidereal/discussions)
+- **Bug Reports**: [GitHub Issues](https://github.com/kroryan/sidereal/issues)
 
 ## License
 
@@ -484,8 +426,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- **[Immich](https://immich.app/)** - Inspiration and integration for photo management
-- **[Astrometry.net](https://astrometry.net/)** - Plate solving service and algorithms
+- **[Immich](https://immich.app/)** - Original inspiration for photo management; not a runtime dependency
+- **[Astrometry.net](https://astrometry.net/)** - Locally installed plate-solving technology
+- **[HOTPANTS](https://github.com/acbecker/hotpants)** - Image subtraction (see bundled notices)
+- **[Photutils](https://github.com/astropy/photutils)** - Local point-source detection (BSD-3-Clause)
 - **[shadcn/ui](https://ui.shadcn.com/)** - Beautiful and accessible React components
 - **[Drizzle ORM](https://orm.drizzle.team/)** - Type-safe database toolkit
 
@@ -495,6 +439,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Built for the astrophotography community**
 
-[Star this repo](https://github.com/sidereal-io/sidereal) | [Report bug](https://github.com/sidereal-io/sidereal/issues) | [Request feature](https://github.com/sidereal-io/sidereal/discussions)
+[Star this repo](https://github.com/kroryan/sidereal) | [Report bug](https://github.com/kroryan/sidereal/issues)
 
 </div>

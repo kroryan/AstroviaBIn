@@ -72,8 +72,13 @@ RUN apt-get update && \
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       astrometry.net astrometry-data-2mass-08-19 ca-certificates curl gosu passwd \
-      python3-astropy python3-scipy python3-numpy libcfitsio10t64 && \
+      python3-astropy python3-scipy python3-numpy python3-venv libcfitsio10t64 && \
     rm -rf /var/lib/apt/lists/*
+
+# Photutils is an independent, BSD-3-Clause source-detection and photometry
+# library. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
+RUN /usr/bin/python3 -m venv --system-site-packages /opt/sidereal-python && \
+    /opt/sidereal-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1
 
 COPY --from=hotpants-builder /opt/hotpants/hotpants /usr/local/bin/hotpants
 COPY --from=hotpants-builder /opt/hotpants/extractkern /usr/local/bin/extractkern

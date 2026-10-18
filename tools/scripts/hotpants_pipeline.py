@@ -12,12 +12,14 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+import warnings
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
-from scipy.ndimage import map_coordinates, maximum_filter, zoom
+from photutils.detection import DAOStarFinder
+from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter, zoom
 
 
 def write_state(work, stage, **extra):
@@ -147,17 +149,72 @@ def align_reference(reference_path, science_wcs, shape, output):
     return coverage, mask
 
 
-def detect_candidates(difference_path, noise_path, bad_mask_path, mask, wcs, threshold, max_candidates):
+def local_point_source(data, x, y, fwhm, detection_sigma=5):
+    """Use Photutils' DAOFIND shape test around one proposed position."""
+    radius = max(16, math.ceil(fwhm * 4))
+    left, right = max(0, x - radius), min(data.shape[1], x + radius + 1)
+    top, bottom = max(0, y - radius), min(data.shape[0], y + radius + 1)
+    if left != x - radius or right != x + radius + 1 or top != y - radius or bottom != y + radius + 1:
+        return None
+    patch = np.asarray(data[top:bottom, left:right], dtype=np.float64)
+    if not np.all(np.isfinite(patch)):
+        return None
+    yy, xx = np.ogrid[:patch.shape[0], :patch.shape[1]]
+    distance = np.hypot(xx - radius, yy - radius)
+    annulus = patch[(distance >= radius * 0.65) & (distance <= radius)]
+    background = float(np.median(annulus))
+    sigma = float(1.4826 * np.median(np.abs(annulus - background)))
+    if not np.isfinite(sigma) or sigma <= 0:
+        return None
+    finder = DAOStarFinder(threshold=detection_sigma * sigma, fwhm=fwhm,
+                           sharpness_range=(0.1, 1.2), roundness_range=(-0.65, 0.65),
+                           scale_threshold=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sources = finder(patch - background)
+    if sources is None:
+        return None
+    nearest = min(sources, key=lambda source: math.hypot(
+        float(source['x_centroid']) - radius, float(source['y_centroid']) - radius))
+    offset = math.hypot(float(nearest['x_centroid']) - radius, float(nearest['y_centroid']) - radius)
+    if offset > max(2.5, fwhm * 0.6):
+        return None
+    return {'x': float(nearest['x_centroid']) + left,
+            'y': float(nearest['y_centroid']) + top,
+            'localContrast': round(float((patch[radius, radius] - background) / sigma), 2),
+            'sharpness': round(float(nearest['sharpness']), 3),
+            'roundness': round(float(nearest['roundness2']), 3)}
+
+
+def has_subtraction_dipole(difference, x, y, fwhm):
+    radius = max(8, math.ceil(fwhm * 3))
+    patch = difference[y - radius:y + radius + 1, x - radius:x + radius + 1]
+    if patch.shape != (2 * radius + 1, 2 * radius + 1):
+        return True
+    yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
+    distance = np.hypot(xx, yy)
+    sky = float(np.median(patch[distance >= radius * 0.75]))
+    core = float(patch[radius, radius] - sky)
+    opposite = float(np.min(patch[(distance >= max(2, fwhm * 0.8)) & (distance <= radius)] - sky))
+    return core <= 0 or opposite < -0.45 * core
+
+
+def detect_candidates(difference_path, noise_path, bad_mask_path, mask, science_path,
+                      reference_path, wcs, threshold, max_candidates, fwhm):
     difference, _ = mono_data(difference_path)
     noise, _ = mono_data(noise_path)
     bad_mask, _ = mono_data(bad_mask_path)
+    science, _ = mono_data(science_path)
+    reference, _ = mono_data(reference_path)
     if noise.shape != difference.shape or bad_mask.shape != difference.shape:
         raise ValueError('HOTPANTS output layers do not match the difference image')
     valid = (mask == 0) & (bad_mask == 0) & np.isfinite(difference) & np.isfinite(noise) & (noise > 0)
+    valid &= np.isfinite(science) & np.isfinite(reference)
+    valid &= ~binary_dilation(~valid, iterations=max(3, math.ceil(fwhm)))
     significance = np.zeros_like(difference)
     significance[valid] = difference[valid] / noise[valid]
     significance = np.clip(significance, -1e5, 1e5)
-    edge = max(16, int(min(difference.shape) * 0.01))
+    edge = max(20, math.ceil(fwhm * 5), int(min(difference.shape) * 0.01))
     valid[:edge] = False
     valid[-edge:] = False
     valid[:, :edge] = False
@@ -166,22 +223,83 @@ def detect_candidates(difference_path, noise_path, bad_mask_path, mask, wcs, thr
     positions = np.argwhere(peaks)
     count = len(positions)
     found = []
+    rejected = {'notPointSourceInDifference': 0, 'notPointSourceInScience': 0,
+                'presentInReference': 0, 'subtractionDipole': 0, 'duplicate': 0}
     if count:
         ranks = np.argsort(significance[positions[:, 0], positions[:, 1]])[::-1]
     else:
         ranks = []
-    for index in ranks:
-        if len(found) >= max_candidates:
-            break
+    for index in ranks[:5000]:
         y, x = positions[index]
         neighborhood = significance[y - 2:y + 3, x - 2:x + 3]
         if np.count_nonzero(neighborhood >= threshold * 0.5) < 3:
-            continue  # isolated one-pixel defects are not plausible point sources
-        ra, dec = wcs.pixel_to_world_values(float(x), float(y))
+            rejected['notPointSourceInDifference'] += 1
+            continue
+        difference_source = local_point_source(difference, int(x), int(y), fwhm)
+        if difference_source is None:
+            rejected['notPointSourceInDifference'] += 1
+            continue
+        science_source = local_point_source(science, int(x), int(y), fwhm)
+        if science_source is None:
+            rejected['notPointSourceInScience'] += 1
+            continue
+        if local_point_source(reference, int(x), int(y), fwhm):
+            rejected['presentInReference'] += 1
+            continue
+        if has_subtraction_dipole(difference, int(x), int(y), fwhm):
+            rejected['subtractionDipole'] += 1
+            continue
+        if any(math.hypot(x - previous['x'], y - previous['y']) < 2 * fwhm for previous in found):
+            rejected['duplicate'] += 1
+            continue
+        ra, dec = wcs.pixel_to_world_values(difference_source['x'], difference_source['y'])
         found.append({'x': int(x), 'y': int(y), 'ra': float(ra), 'dec': float(dec),
                       'snr': round(float(significance[y, x]), 2), 'difference': float(difference[y, x]),
-                      'status': 'unconfirmed'})
-    return found, count
+                      'scienceContrast': science_source['localContrast'],
+                      'shape': {'sharpness': difference_source['sharpness'],
+                                'roundness': difference_source['roundness']},
+                      'status': 'needs_followup'})
+        if len(found) >= max_candidates:
+            break
+    return found, count, rejected
+
+
+def check_candidate(config):
+    """Check a saved candidate against an independent local FITS exposure."""
+    work = Path(config['work']).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+    followup = work / 'followup.fits'
+    reduced_image(config['comparison'], followup, int(config['maxDimension']))
+    followup_wcs = ensure_wcs(followup, config['comparison'], config.get('comparisonHint'),
+                              work / 'solve')
+    data, header = mono_data(followup)
+    x, y = followup_wcs.world_to_pixel_values(float(config['ra']), float(config['dec']))
+    if not np.isfinite(x) or not np.isfinite(y):
+        raise ValueError('Candidate coordinates are outside the follow-up WCS')
+    px, py = int(round(float(x))), int(round(float(y)))
+    if px < 20 or py < 20 or px >= data.shape[1] - 20 or py >= data.shape[0] - 20:
+        raise ValueError('Candidate is outside the usable follow-up field')
+    source = local_point_source(data, px, py, float(config['sourceFwhm']))
+    first_filter = str(config.get('sourceFilter') or '').strip().lower()
+    second_filter = str(header.get('FILTER', '')).strip().lower()
+    first_date = str(config.get('sourceDate') or '').strip()
+    second_date = str(header.get('DATE-OBS', '')).strip()
+    comparable = bool(first_filter and second_filter and first_filter == second_filter)
+    independent_epoch = bool(first_date and second_date and first_date != second_date)
+    if not comparable or not independent_epoch:
+        status = 'inconclusive'
+    elif source:
+        status = 'repeat_detection'
+    else:
+        status = 'not_detected'
+    return {'status': status, 'sourceFound': bool(source), 'source': source,
+            'followupImageId': int(config['comparisonImageId']),
+            'pixel': {'x': round(float(x), 2), 'y': round(float(y), 2)},
+            'sourceFilter': first_filter or None, 'followupFilter': second_filter or None,
+            'sourceDate': first_date or None, 'followupDate': second_date or None,
+            'comparableFilter': comparable, 'independentEpoch': independent_epoch,
+            'note': 'Repeat detection supports a candidate but does not prove a supernova. '
+                    'Check moving objects, artifacts, cataloged variables, and additional epochs.'}
 
 
 def main(config_path):
@@ -199,7 +317,7 @@ def main(config_path):
     factor = reduced_image(config['science'], science, int(config['maxDimension']))
     hint = dict(config.get('scienceHint') or {}, factor=factor)
     science_wcs = ensure_wcs(science, config['science'], hint, work / 'science-solve')
-    science_data, _ = mono_data(science)
+    science_data, science_header = mono_data(science)
     write_state(work, 'reference')
     if config['referenceMode'] == 'survey':
         provenance = fetch_reference(science_wcs, science_data.shape, reference, config['survey'])
@@ -214,29 +332,45 @@ def main(config_path):
     write_state(work, 'subtracting')
     command = ['hotpants', '-inim', str(science), '-tmplim', str(aligned), '-outim', str(difference),
                '-oni', str(noise), '-oci', str(convolved), '-omi', str(bad_mask),
-               '-tmi', str(work / 'reference-mask.fits'), '-hki'] + config.get('hotpantsArgs', [])
+               '-tmi', str(work / 'reference-mask.fits'), '-hki', '-n', 'i'] + config.get('hotpantsArgs', [])
     result = subprocess.run(command, capture_output=True, text=True, timeout=int(config.get('timeoutSeconds', 900)), check=False)
     (work / 'hotpants.log').write_text((result.stdout + '\n' + result.stderr)[-300000:])
     if result.returncode or not difference.exists():
         raise RuntimeError('HOTPANTS failed: ' + (result.stderr or result.stdout)[-1200:])
     write_state(work, 'detecting')
-    candidates, detected_total = detect_candidates(difference, noise, bad_mask, mask, science_wcs,
-                                                     float(config['thresholdSigma']), int(config['maxCandidates']))
+    candidates, detected_total, rejected = detect_candidates(
+        difference, noise, bad_mask, mask, science, aligned, science_wcs,
+        float(config['thresholdSigma']), int(config['maxCandidates']), float(config.get('sourceFwhm', 3)))
+    science_filter = str(science_header.get('FILTER', '')).strip()
+    comparison_warning = ('Historical survey references can have a different bandpass, resolution, epoch, '
+                          'and photometric calibration. Candidate detections require an independent '
+                          'same-band observation before they can be trusted.'
+                          if config['referenceMode'] == 'survey' else
+                          'A second local FITS is not independent confirmation unless it is from a '
+                          'different exposure or observing epoch with a compatible filter.')
     return {'reference': provenance, 'coverage': coverage, 'scaleFactor': factor,
+            'analysisVersion': 2, 'sourceFilter': science_filter,
+            'sourceDate': str(science_header.get('DATE-OBS', '')).strip(),
             'width': science_data.shape[1], 'height': science_data.shape[0],
             'candidates': candidates, 'detectedTotal': detected_total,
+            'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,
             'files': ['science.fits', 'reference.fits', 'reference-aligned.fits', 'difference.fits',
                       'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log'],
-            'note': 'Candidates are unconfirmed. Survey differences, registration, saturation, and artifacts can imitate transients.'}
+            'note': 'Candidates passed local point-source, reference-absence, mask, and dipole checks, but remain unconfirmed.'}
 
 
 if __name__ == '__main__':
     try:
-        result = main(sys.argv[1])
-        result_path = Path(sys.argv[1]).with_name('result.json')
-        temporary = result_path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(result))
-        temporary.replace(result_path)
+        config_path = Path(sys.argv[1])
+        config = json.loads(config_path.read_text())
+        if config.get('mode') == 'candidate-check':
+            result = check_candidate(config)
+        else:
+            result = main(config_path)
+            result_path = config_path.with_name('result.json')
+            temporary = result_path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(result))
+            temporary.replace(result_path)
         print(json.dumps(result), flush=True)
     except Exception as error:
         print(str(error), file=sys.stderr, flush=True)

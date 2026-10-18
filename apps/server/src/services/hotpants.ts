@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
@@ -17,6 +17,7 @@ export const analysisRequestSchema = z.object({
   survey: z.enum(['DSS2 Red', 'DSS2 Blue', 'DSS2 IR']).default('DSS2 Red'),
   maxDimension: z.union([z.literal(1024), z.literal(2048), z.literal(4096), z.literal(8192)]).default(2048),
   thresholdSigma: z.number().min(3).max(30).default(6),
+  sourceFwhm: z.number().min(1.5).max(12).default(3),
   maxCandidates: z.number().int().min(1).max(500).default(100),
   hotpantsOptions: z.string().max(3000).default(''),
 });
@@ -35,6 +36,7 @@ const NUMERIC_FLAGS = new Set('tu tuk tl tg tr tp iu iuk il ig ir ip r kcs ft sf
 const BOOLEAN_FLAGS = new Set('sconv okn convvar nim ndm cim allm nc hki sht nsht'.split(' ').map(value => `-${value}`));
 const CHOICE_FLAGS: Record<string, string[]> = { '-c': ['t', 'i'], '-n': ['t', 'i', 'u'], '-fom': ['v', 's', 'h'] };
 const running = new Map<string, string>();
+const verifying = new Set<string>();
 
 type Candidate = { ra: number; dec: number; [key: string]: unknown };
 type PipelineResult = { candidates?: Candidate[]; [key: string]: unknown };
@@ -184,19 +186,20 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
     work: directory, science, scienceHint: hint(image), referenceMode: request.referenceMode,
     reference, referenceHint, referenceImageId: request.referenceImageId,
     survey: request.survey, maxDimension: request.maxDimension, thresholdSigma: request.thresholdSigma,
+    sourceFwhm: request.sourceFwhm,
     maxCandidates: request.maxCandidates, hotpantsArgs: args, timeoutSeconds: 900,
   };
   await writeJson(path.join(directory, 'config.json'), config);
   running.set(activeKey, runId);
   const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
-  const child = spawn('/usr/bin/python3', [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python',
+    [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   let errors = '';
   child.stdout.on('data', chunk => { output = (output + String(chunk)).slice(-2_000_000); });
   child.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-100_000); });
   child.on('error', error => { errors = String(error); });
   child.on('close', async code => {
-    running.delete(activeKey);
     try {
       if (code === 0) {
         const resultPath = path.join(directory, 'result.json');
@@ -214,6 +217,8 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
       await writeJson(path.join(directory, 'report.json'), { ...report, status: 'failed',
         completedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error),
         pipelineOutput: output.slice(-1000) }).catch(writeError => console.error('Could not record HOTPANTS failure:', writeError));
+    } finally {
+      running.delete(activeKey);
     }
   });
   return report;
@@ -240,6 +245,75 @@ export async function listHotpantsReports(imageId: number) {
     try { return await getHotpantsReport(imageId, entry.name); } catch { return null; }
   }));
   return reports.filter(Boolean).sort((left: any, right: any) => String(right.startedAt).localeCompare(String(left.startedAt)));
+}
+
+export async function deleteHotpantsReport(imageId: number, runId: string): Promise<void> {
+  const directory = runDirectory(imageId, runId);
+  if (running.get(String(imageId)) === runId || verifying.has(`${imageId}/${runId}`)) {
+    throw new Error('A running analysis cannot be deleted');
+  }
+  const image = await storage.getAstroImage(imageId);
+  if (!image) throw new Error('FITS image not found');
+  const entry = await lstat(directory);
+  if (!entry.isDirectory() || entry.isSymbolicLink()) throw new Error('Invalid analysis directory');
+  await readFile(path.join(directory, 'report.json'), 'utf8');
+  await rm(directory, { recursive: true });
+}
+
+export const candidateCheckSchema = z.object({ followupImageId: z.number().int().positive() });
+
+export async function checkHotpantsCandidate(
+  imageId: number, runId: string, candidateIndex: number, followupImageId: number,
+) {
+  const directory = runDirectory(imageId, runId);
+  const key = `${imageId}/${runId}`;
+  if (verifying.has(key)) throw new Error('A candidate check is already running for this analysis');
+  const report = await getHotpantsReport(imageId, runId);
+  if (report.status !== 'complete' || report.analysisVersion !== 2) throw new Error('Run the improved analysis before checking candidates');
+  if (!Number.isSafeInteger(candidateIndex) || candidateIndex < 0 || candidateIndex >= report.candidates.length) {
+    throw new Error('Invalid candidate');
+  }
+  if (followupImageId === imageId) throw new Error('Choose a different FITS exposure');
+  const followup = await storage.getAstroImage(followupImageId);
+  const comparison = resolveFitsFile(followup?.originalPath || null);
+  if (!followup || !comparison) throw new Error('Follow-up FITS is unavailable');
+  const candidate = report.candidates[candidateIndex];
+  if (!Number.isFinite(candidate.ra) || !Number.isFinite(candidate.dec)) throw new Error('Candidate has invalid coordinates');
+  const work = path.join(directory, 'verification', `${candidateIndex}-${followupImageId}-${randomUUID()}`);
+  await mkdir(work, { recursive: true, mode: 0o700 });
+  await writeJson(path.join(work, 'config.json'), {
+    mode: 'candidate-check', work, comparison, comparisonHint: hint(followup),
+    comparisonImageId: followupImageId, ra: candidate.ra, dec: candidate.dec,
+    maxDimension: report.settings.maxDimension, sourceFwhm: report.settings.sourceFwhm || 3,
+    sourceFilter: report.sourceFilter, sourceDate: report.sourceDate,
+  });
+  verifying.add(key);
+  try {
+    const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
+      const child = spawn(process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python',
+        [script, path.join(work, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', chunk => { stdout = (stdout + String(chunk)).slice(-100_000); });
+      child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-10_000); });
+      child.on('error', reject);
+      const timer = setTimeout(() => child.kill('SIGKILL'), 360_000);
+      child.on('close', code => {
+        clearTimeout(timer);
+        if (code !== 0) return reject(new Error(stderr || `Candidate check exited ${code}`));
+        try { resolve(JSON.parse(stdout)); } catch { reject(new Error('Candidate check returned invalid data')); }
+      });
+    });
+    const updated = await getHotpantsReport(imageId, runId);
+    const checks = { ...(updated.candidateChecks || {}), [candidateIndex]: {
+      ...result, checkedAt: new Date().toISOString(),
+    } };
+    await writeJson(path.join(directory, 'report.json'), { ...updated, candidateChecks: checks });
+    return checks[candidateIndex];
+  } finally {
+    verifying.delete(key);
+  }
 }
 
 export async function analysisFile(imageId: number, runId: string, filename: string, preview: boolean) {

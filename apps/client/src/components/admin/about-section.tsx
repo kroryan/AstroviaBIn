@@ -12,7 +12,15 @@ export function AboutSection() {
         <p className="text-muted-foreground">Local-first astronomy image library and FITS analysis. Sidereal is distributed under the MIT license; the application source and full license are available in the project repository.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="/api/licenses/sidereal" target="_blank" rel="noreferrer">Sidereal MIT license</a>
-          <a className="text-primary underline" href="https://github.com/sidereal-io/sidereal" target="_blank" rel="noreferrer">Sidereal source code</a>
+          <a className="text-primary underline" href="https://github.com/kroryan/sidereal/tree/v0.x" target="_blank" rel="noreferrer">This fork's source code</a>
+        </div>
+      </div>
+      <div>
+        <h3 className="font-semibold">Photutils</h3>
+        <p className="text-muted-foreground">Sidereal uses the independent Photutils project for local point-source shape checks and second-exposure follow-up. Photutils is distributed under the BSD 3-Clause license. Its checks reduce false positives but do not confirm an astrophysical discovery.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://photutils.readthedocs.io/en/stable/development/license.html" target="_blank" rel="noreferrer">Photutils license</a>
+          <a className="text-primary underline" href="https://github.com/astropy/photutils" target="_blank" rel="noreferrer">Photutils source and documentation</a>
         </div>
       </div>
       <div>
