@@ -37,8 +37,12 @@ export function checkSelection(frames: StackFrame[], albumOf: (id: number) => st
   if (frames.some(isDerived)) notes.push({ level: 'warning', text: 'The selection includes earlier stacks: re-stacking a stack with its own frames counts their signal twice. Stack raw frames, or stacks of different frames only.' });
   const sizes = [...new Set(frames.map(size).filter(Boolean))];
   if (sizes.length > 1) notes.push({ level: 'info', text: `Different frame sizes (${sizes.join(', ')}) — different binning or cameras. They are aligned through their plate solutions, but mixing pixel scales and PSFs costs sharpness; prefer one setup.` });
-  const exposures = [...new Set(frames.map(seconds).filter(Number.isFinite))];
-  if (exposures.length > 1) notes.push({ level: 'info', text: `Different exposure times (${exposures.map(value => `${value}s`).join(', ')}): values are normalized to the reference exposure, but long frames may saturate stars the short ones do not.` });
+  // Headers record e.g. 120.099 s for a 120 s exposure: only differences above 5% matter.
+  const exposures = [...new Set(frames.map(seconds).filter(Number.isFinite))].sort((a, b) => a - b);
+  if (exposures.length > 1 && exposures[exposures.length - 1] > 1.05 * exposures[0]) {
+    const shown = exposures.filter((value, index) => index === 0 || value > 1.05 * exposures[index - 1]);
+    notes.push({ level: 'info', text: `Different exposure times (${shown.map(value => `${Math.round(value * 10) / 10}s`).join(', ')}): values are normalized to the reference exposure, but long frames may saturate stars the short ones do not.` });
+  }
   const nights = [...new Set(frames.map(frame => observationDate(frame.captureDate)).filter(Boolean))];
   if (nights.length > 1) notes.push({ level: 'info', text: `Frames from ${nights.length} different nights: fine for a deep image, wrong for photometry, variable stars or finding changes between those nights.` });
   if (frames.some(movingTarget)) notes.push({ level: 'warning', text: 'The target is an asteroid or comet: stacking aligns the stars, so the moving object is smeared or rejected by sigma-clipping. Measure it in single frames (or use a track-and-stack on its motion).' });

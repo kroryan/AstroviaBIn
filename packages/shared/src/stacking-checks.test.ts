@@ -10,7 +10,7 @@ const album = () => 'M 42';
 const levels = (notes: ReturnType<typeof checkSelection>) => notes.map(note => note.level);
 
 test('three Slooh L frames of one night are a consistent stack', () => {
-  const notes = checkSelection([frame(1), frame(2), frame(3)], album);
+  const notes = checkSelection([frame(1), frame(2, { exposureTime: '60.099s' }), frame(3, { exposureTime: '60.2s' })], album);
   assert.deepEqual(levels(notes), ['ok']);
 });
 
