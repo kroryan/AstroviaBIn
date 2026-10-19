@@ -5,9 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage } from "@shared/schema";
+import { isPlateSolvingEligible } from "@shared/solar-system";
 import { useCurrentUser } from "@/hooks/use-current-user";
-
-const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
 
 interface PlateSolveControlsProps {
   image: AstroImage;
@@ -26,8 +25,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
   const [radius, setRadius] = useState("3");
   const [scaleLow, setScaleLow] = useState("");
   const [scaleHigh, setScaleHigh] = useState("");
-  const tags = image.tags?.map(tag => tag.trim().toLowerCase()) || [];
-  const eligible = (tags.includes('deep sky') || Boolean(image.plateSolved)) && !tags.some(tag => SOLAR_SYSTEM_TAGS.has(tag));
+  const eligible = isPlateSolvingEligible(image.tags, Boolean(image.plateSolved));
   const processing = job?.status === 'processing' || job?.status === 'pending';
   const { canEdit } = useCurrentUser();
 

@@ -8,7 +8,7 @@ import { storage } from '../services/storage';
 import { xmpSidecarService } from '../services/xmp-sidecar';
 import { configService } from '../services/config';
 import { handleRouteError } from './route-utils';
-import { SOLAR_SYSTEM_TAGS } from '../services/solar-system';
+import { isPlateSolvingEligible, isSolarSystemTagged, shouldShowInNotSolvedFilter, SOLAR_SYSTEM_TAGS } from '../services/solar-system';
 import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
 import { resolveLibraryAssetPath } from '../services/library';
 import { readFitsMetadata, resolveFitsFile } from '../services/fits';
@@ -56,10 +56,10 @@ function normalizeTags(value: unknown): string[] {
     }
     return tags;
   }, []);
-  const hasSolarSystem = tags.some(tag => SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+  const hasSolarSystem = isSolarSystemTagged(tags);
   const hasDeepSky = tags.some(tag => tag.toLocaleLowerCase() === 'deep sky');
   if (hasSolarSystem) return tags.filter(tag => tag.toLocaleLowerCase() !== 'deep sky');
-  if (hasDeepSky) return tags.filter(tag => !SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+  if (hasDeepSky) return tags;
   return tags;
 }
 
@@ -82,7 +82,9 @@ app.get('/', async (c) => {
     if (galleryCatalogId) filters.galleryCatalogId = parseInt(galleryCatalogId);
 
     const images = await storage.getAstroImages(filters);
-    return c.json(images);
+    // Keep ordinary/untagged images visible, while excluding Solar System frames
+    // unless explicitly tagged Deep Sky (and always excluding planets from solving).
+    return c.json(filters.plateSolved === false ? images.filter(image => shouldShowInNotSolvedFilter(image.tags)) : images);
   } catch (error) {
     return handleRouteError(c, error, 'Failed to fetch images');
   }
@@ -220,10 +222,10 @@ app.patch('/:id', async (c) => {
     if (!existing) return c.json({ message: 'Image not found' }, 404);
     if (updates.tags !== undefined) {
       updates.tags = normalizeTags(updates.tags);
-      const hasSolarSystem = updates.tags.some((tag: string) => SOLAR_SYSTEM_TAG_SET.has(tag.toLocaleLowerCase()));
+      const hasSolarSystem = isSolarSystemTagged(updates.tags);
       const hasDeepSky = updates.tags.some((tag: string) => tag.toLocaleLowerCase() === 'deep sky');
       const currentType = existing.objectType?.toLocaleLowerCase();
-      if ((hasSolarSystem && currentType === 'deep sky') || (hasDeepSky && currentType && SOLAR_SYSTEM_TAG_SET.has(currentType))) updates.objectType = null;
+      if ((hasSolarSystem && currentType === 'deep sky') || (hasDeepSky && currentType && isSolarSystemTagged([currentType]))) updates.objectType = null;
     }
     if (updates.captureDate !== undefined) {
       const parsed = updates.captureDate ? new Date(updates.captureDate) : null;

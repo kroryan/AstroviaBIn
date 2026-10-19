@@ -9,7 +9,7 @@ import type { AstroImage } from '@shared/schema';
 
 const PRESET_TAGS = [
   'Deep Sky', 'Solar System', 'Sun', 'Moon', 'Mercury', 'Venus', 'Earth',
-  'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+  'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Comet', 'Asteroid',
 ];
 
 function normalizedTags(tags: string[]): string[] {
@@ -136,7 +136,7 @@ export function ImageTagsEditor({ image, dark = false, onDeleted }: { image: Ast
         <div className="flex flex-wrap gap-1 mt-2">
           {PRESET_TAGS.filter(tag => !tags.some(existing => existing.toLowerCase() === tag.toLowerCase())).map(tag => <button type="button" key={tag} onClick={() => addTag(tag)} disabled={saving} className={`text-xs px-2 py-0.5 rounded-full border border-dashed transition-colors disabled:opacity-50 ${dark ? 'border-gray-600 text-gray-400 hover:border-blue-400 hover:text-blue-300' : 'border-muted-foreground/30 text-muted-foreground hover:border-primary hover:text-primary'}`}>+ {tag}</button>)}
         </div>
-        <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-muted-foreground'}`}>Deep Sky and Solar System are mutually exclusive. Solar System and planet tags are excluded from plate solving.</p>
+        <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-muted-foreground'}`}>Only Deep Sky images are plate-solved. Sun, Moon and planet tags are excluded; comets and asteroids may be tagged Deep Sky to plate-solve their stellar field.</p>
       </>}
       <div className="mt-4 border-t border-border/60 pt-3">
         <Button type="button" variant="destructive" size="sm" className="w-full" onClick={() => void deleteImage()} disabled={deleting || saving}>

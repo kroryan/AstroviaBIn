@@ -19,6 +19,7 @@ import { GalleryCatalogPicker } from "./gallery-catalog-picker";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage, Equipment, ImageAcquisitionRow } from "@shared/schema";
+import { isDeepSkyTagged } from "@shared/solar-system";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface ImageOverlayProps {
@@ -376,7 +377,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 </div>
               ) : (
                 <div className="text-xs text-gray-400">
-                  <p>No plate solving data available.</p>
+                  {isDeepSkyTagged(currentImage.tags) && <p>No plate solving data available.</p>}
                 </div>
               )}
               <PlateSolveControls image={currentImage} job={plateSolvingJob} annotationsSource={annotationsData?.source} annotationsMessage={annotationsData?.message} />
@@ -525,7 +526,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                     </div>
                   ) : (
                     <div className="text-xs text-gray-400">
-                      <p>No plate solving data available.</p>
+                      {isDeepSkyTagged(currentImage.tags) && <p>No plate solving data available.</p>}
                     </div>
                   )}
                   <PlateSolveControls image={currentImage} job={plateSolvingJob} annotationsSource={annotationsData?.source} annotationsMessage={annotationsData?.message} dark />

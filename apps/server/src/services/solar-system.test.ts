@@ -18,3 +18,11 @@ test('requires the editable Deep Sky tag for plate solving', () => {
   assert.equal(isPlateSolvingEligible(['M 42'], true), true);
   assert.equal(isPlateSolvingEligible(['Saturn'], true), false);
 });
+
+test('allows comets and asteroids only when explicitly tagged Deep Sky', () => {
+  assert.equal(isSolarSystemTagged(['Solar System', 'Comet']), false);
+  assert.equal(isPlateSolvingEligible(['Comet']), false);
+  assert.equal(isPlateSolvingEligible(['Deep Sky', 'Comet']), true);
+  assert.equal(isPlateSolvingEligible(['Deep Sky', 'Solar System', 'Asteroid']), true);
+  assert.equal(isPlateSolvingEligible(['Deep Sky', 'Mars', 'Comet']), false);
+});

@@ -23,11 +23,10 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/header";
 import type { AstroImage, PlateSolvingJob } from "@shared/schema";
+import { isDeepSkyTagged, isPlateSolvingEligible } from "@shared/solar-system";
 
-const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
-const isSolarSystemImage = (image: AstroImage) => Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TAGS.has(tag.trim().toLowerCase())));
-const isDeepSkyImage = (image: AstroImage) => Boolean(image.tags?.some(tag => tag.trim().toLowerCase() === 'deep sky'));
-const isPlateSolvingEligible = (image: AstroImage) => isDeepSkyImage(image) && !isSolarSystemImage(image);
+const isDeepSkyImage = (image: AstroImage) => isDeepSkyTagged(image.tags);
+const canPlateSolve = (image: AstroImage) => isPlateSolvingEligible(image.tags, Boolean(image.plateSolved));
 
 interface PlateSolvingStats {
   totalJobs: number;
@@ -148,7 +147,7 @@ export default function PlateSolvingPage() {
 
   // Filter images
   const filteredImages = images.filter((image) => {
-    if (!image.plateSolved && !isPlateSolvingEligible(image)) return false;
+    if (!image.plateSolved && !canPlateSolve(image)) return false;
     if (searchTerm && !image.title.toLowerCase().includes(searchTerm.toLowerCase())) {
       return false;
     }
@@ -159,7 +158,7 @@ export default function PlateSolvingPage() {
   });
   const selectableImages = filteredImages.filter(image =>
     !image.plateSolved &&
-    isPlateSolvingEligible(image) &&
+    canPlateSolve(image) &&
     !jobs.some(job => job.imageId === image.id && (job.status === "pending" || job.status === "processing"))
   );
   const selectableImageIds = new Set(selectableImages.map(image => image.id));

@@ -9,6 +9,26 @@ process.env.SQLITE_DB_PATH = ':memory:';
 const { default: routes } = await import('./images');
 const { storage } = await import('../services/storage');
 
+it('keeps ordinary and untagged images in Not Solved but hides non-Deep-Sky Solar System frames', async t => {
+  t.mock.method(storage, 'getAstroImages', async () => [
+    { id: 1, tags: ['Solar System', 'Mars'], plateSolved: false },
+    { id: 2, tags: ['Comet'], plateSolved: false },
+    { id: 3, tags: ['Deep Sky', 'Comet'], plateSolved: false },
+    { id: 4, tags: ['Deep Sky', 'M 42'], plateSolved: false },
+    { id: 5, tags: [], plateSolved: false },
+    { id: 6, tags: ['M 31'], plateSolved: false },
+    { id: 7, tags: ['Asteroid'], plateSolved: false },
+    { id: 8, tags: ['Deep Sky', 'Asteroid'], plateSolved: false },
+    { id: 9, tags: ['Deep Sky', 'Jupiter'], plateSolved: false },
+    { id: 10, tags: undefined, plateSolved: false },
+    { id: 11, tags: null, plateSolved: false },
+  ] as never);
+  const app = new Hono().route('/api/images', routes);
+  const response = await app.request('/api/images?plateSolved=false');
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json() as Array<{ id: number }>).map(image => image.id), [3, 4, 5, 6, 8, 10, 11]);
+});
+
 it('coerces a captureDate update into a Date and marks its source as manual', async t => {
   t.mock.method(storage, 'getAstroImage', async () => ({ id: 1, tags: [], objectType: null }));
   let received: Record<string, unknown> | undefined;
@@ -44,6 +64,31 @@ it('clears captureDateSource when captureDate is cleared', async t => {
   assert.equal(response.status, 200);
   assert.equal(received?.captureDate, null);
   assert.equal(received?.captureDateSource, null);
+});
+
+it('keeps Deep Sky compatible with comet and asteroid tags but not planet tags', async t => {
+  t.mock.method(storage, 'getAstroImage', async () => ({ id: 1, tags: [], objectType: null }));
+  let receivedTags: string[] | undefined;
+  t.mock.method(storage, 'updateAstroImage', async (_id: number, updates: Record<string, unknown>) => {
+    receivedTags = updates.tags as string[];
+    return { id: 1, ...updates };
+  });
+  const app = new Hono().route('/api/images', routes);
+  const compatible = await app.request('/api/images/1', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tags: ['Deep Sky', 'Comet', 'Solar System'] }),
+  });
+  assert.equal(compatible.status, 200);
+  assert.deepEqual(receivedTags, ['Deep Sky', 'Comet', 'Solar System']);
+
+  const incompatible = await app.request('/api/images/1', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ tags: ['Deep Sky', 'Comet', 'Mars'] }),
+  });
+  assert.equal(incompatible.status, 200);
+  assert.deepEqual(receivedTags, ['Comet', 'Mars']);
 });
 
 it('rejects an unparsable captureDate', async t => {

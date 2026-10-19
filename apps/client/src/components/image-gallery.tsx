@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Heart, Share, Plus, Settings } from "lucide-react";
 import type { AstroImage, Equipment } from "@shared/schema";
+import { isDeepSkyTagged } from "@shared/solar-system";
 import { RemoteImage } from "./remote-image";
 
 interface ImageGalleryProps {
@@ -30,11 +31,14 @@ export function ImageGallery({
     const isFits = image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://');
     if (isFits) return <div className="flex items-center gap-1.5">
       <Badge className="bg-red-700 text-white border-red-500 text-xs px-1.5 py-0.5 text-[10px]">FITS</Badge>
-      {image.plateSolved && <Badge className="status-plate-solved text-xs px-1.5 py-0.5 text-[10px]">Plate Solved</Badge>}
+      {image.plateSolved
+        ? <Badge className="status-plate-solved text-xs px-1.5 py-0.5 text-[10px]">Plate Solved</Badge>
+        : isDeepSkyTagged(image.tags) && <Badge className="status-no-data text-xs px-1.5 py-0.5 text-[10px]">No Plate Data</Badge>}
     </div>;
     if (image.plateSolved) {
       return <Badge className="status-plate-solved text-xs px-1.5 py-0.5 text-[10px]">Plate Solved</Badge>;
     }
+    if (!isDeepSkyTagged(image.tags)) return null;
     return <Badge className="status-no-data text-xs px-1.5 py-0.5 text-[10px]">No Plate Data</Badge>;
   };
 

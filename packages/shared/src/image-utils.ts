@@ -2,6 +2,7 @@
  * Pure functions for computing image summaries and target grouping.
  * Extracted from storage service for testability.
  */
+import { isSolarSystemTagged } from './solar-system';
 
 export interface AcquisitionInput {
   frameCount: number;
@@ -79,10 +80,9 @@ export interface ImageInput {
 
 /** Name of the single target that groups every Sun, Moon and planet image. */
 export const SOLAR_SYSTEM_TARGET = 'Solar System';
-const SOLAR_SYSTEM_TARGET_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
 
 function isSolarSystemImage(image: ImageInput): boolean {
-  return Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TARGET_TAGS.has(tag.trim().toLowerCase())));
+  return isSolarSystemTagged(image.tags);
 }
 
 const FITS_PATH_PREFIXES = ['fits://', 'fits-derived://', 'fits-upload://'];
