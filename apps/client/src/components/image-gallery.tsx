@@ -64,10 +64,6 @@ export function ImageGallery({
     return parts.join(' • ');
   };
 
-  const formatDate = (date: Date | null) => {
-    if (!date) return "Unknown date";
-    return formatDate(date);
-  };
 
   if (isLoading) {
     return (
@@ -112,7 +108,7 @@ export function ImageGallery({
               <h3 className="truncate text-[11px] font-semibold leading-tight text-foreground">
                 {image.title || "Untitled"}
               </h3>
-              <p className="truncate text-[10px] text-muted-foreground">{formatDate(image.captureDate)}</p>
+              <p className="truncate text-[10px] text-muted-foreground">{formatDate(image.captureDate, "Unknown date")}</p>
             </CardContent>
           </Card>
         ))}
