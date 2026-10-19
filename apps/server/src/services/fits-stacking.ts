@@ -38,46 +38,60 @@ function luminancePlane(pixels: Float64Array, metadata: FitsMetadata): Float32Ar
   return plane;
 }
 
-/** Area-average downsample, used only to make registration search affordable on large frames. */
-function downsample(plane: Float32Array, width: number, height: number, maxDimension: number): { plane: Float32Array; width: number; height: number; scale: number } {
-  const scale = Math.min(1, maxDimension / Math.max(width, height));
-  if (scale >= 1) return { plane, width, height, scale: 1 };
-  const outWidth = Math.max(1, Math.round(width * scale));
-  const outHeight = Math.max(1, Math.round(height * scale));
+/** Anti-aliased block-average downsample, used only to make registration affordable. */
+function downsample(plane: Float32Array, width: number, height: number, maxDimension: number): { plane: Float32Array; width: number; height: number; factor: number } {
+  const factor = Math.max(1, Math.ceil(Math.max(width, height) / maxDimension));
+  if (factor === 1) return { plane, width, height, factor };
+  const outWidth = Math.floor(width / factor);
+  const outHeight = Math.floor(height / factor);
   const result = new Float32Array(outWidth * outHeight);
   for (let y = 0; y < outHeight; y++) {
-    const sourceY = Math.min(height - 1, Math.floor(y / scale));
     for (let x = 0; x < outWidth; x++) {
-      const sourceX = Math.min(width - 1, Math.floor(x / scale));
-      result[y * outWidth + x] = plane[sourceY * width + sourceX];
+      let sum = 0;
+      for (let dy = 0; dy < factor; dy++) {
+        for (let dx = 0; dx < factor; dx++) sum += plane[(y * factor + dy) * width + x * factor + dx];
+      }
+      result[y * outWidth + x] = sum / (factor * factor);
     }
   }
-  return { plane: result, width: outWidth, height: outHeight, scale: outWidth / width };
+  return { plane: result, width: outWidth, height: outHeight, factor };
 }
 
 /** Cross-correlation score between `reference` and `target` shifted by (dx, dy), sampled on a grid for speed. */
 /** Subtracts the plane's own mean, so correlation lines up structure rather than overall brightness. */
 function zeroMean(plane: Float32Array): Float32Array {
   let sum = 0;
-  for (let index = 0; index < plane.length; index++) sum += plane[index];
-  const mean = sum / plane.length;
+  let finiteCount = 0;
+  for (let index = 0; index < plane.length; index++) {
+    if (!Number.isFinite(plane[index])) continue;
+    sum += plane[index];
+    finiteCount++;
+  }
+  const mean = finiteCount ? sum / finiteCount : 0;
   const result = new Float32Array(plane.length);
-  for (let index = 0; index < plane.length; index++) result[index] = plane[index] - mean;
+  for (let index = 0; index < plane.length; index++) result[index] = Number.isFinite(plane[index]) ? plane[index] - mean : 0;
   return result;
 }
 
 function correlationScore(reference: Float32Array, target: Float32Array, width: number, height: number, dx: number, dy: number, margin: number, step: number): number {
   let sum = 0;
+  let referencePower = 0;
+  let targetPower = 0;
   let count = 0;
   for (let y = margin; y < height - margin; y += step) {
     const targetY = y + dy;
     for (let x = margin; x < width - margin; x += step) {
       const targetX = x + dx;
-      sum += reference[y * width + x] * target[targetY * width + targetX];
+      const referenceValue = reference[y * width + x];
+      const targetValue = target[targetY * width + targetX];
+      sum += referenceValue * targetValue;
+      referencePower += referenceValue * referenceValue;
+      targetPower += targetValue * targetValue;
       count++;
     }
   }
-  return count > 0 ? sum / count : -Infinity;
+  const denominator = Math.sqrt(referencePower * targetPower);
+  return count > 0 && denominator > Number.EPSILON ? sum / denominator : -Infinity;
 }
 
 /**
@@ -89,8 +103,17 @@ function correlationScore(reference: Float32Array, target: Float32Array, width: 
  * full astrometric registration already exists through the Astrometry.net plate-solving workflow.
  */
 function estimateTranslation(rawReference: Float32Array, rawTarget: Float32Array, width: number, height: number): { dx: number; dy: number } {
+  if (Math.min(width, height) < 16) return { dx: 0, dy: 0 };
   const reference = zeroMean(rawReference);
   const target = zeroMean(rawTarget);
+  const referenceEnergy = reference.reduce((sum, value) => sum + value * value, 0);
+  const targetEnergy = target.reduce((sum, value) => sum + value * value, 0);
+  // A flat frame contains no registration information. Do not invent an offset from
+  // numerical ties: keeping its original grid is safer than moving it arbitrarily.
+  if (referenceEnergy <= Number.EPSILON && targetEnergy <= Number.EPSILON) return { dx: 0, dy: 0 };
+  if (referenceEnergy <= Number.EPSILON || targetEnergy <= Number.EPSILON) {
+    throw new Error('Could not reliably register FITS frame: one frame has no image structure');
+  }
   const coarseMax = 192;
   const coarseReference = downsample(reference, width, height, coarseMax);
   const coarseTarget = downsample(target, width, height, coarseMax);
@@ -104,9 +127,12 @@ function estimateTranslation(rawReference: Float32Array, rawTarget: Float32Array
       if (score > best.score) best = { dx, dy, score };
     }
   }
-  const scale = coarseReference.scale;
-  const roughDx = Math.round(best.dx / scale);
-  const roughDy = Math.round(best.dy / scale);
+  if (!Number.isFinite(best.score) || best.score < 0.05) {
+    throw new Error('Could not reliably register FITS frame: insufficient shared image structure');
+  }
+  const scale = coarseReference.factor;
+  const roughDx = best.dx * scale;
+  const roughDy = best.dy * scale;
 
   const refineRadius = Math.max(2, Math.round(2 / scale));
   const refineMargin = Math.max(refineRadius, Math.round(Math.min(width, height) * 0.1));
@@ -176,6 +202,26 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
     }
   }
 
+  const normalizedHeaderValue = (value: unknown) => String(value ?? '').trim().toLowerCase();
+  for (const key of ['FILTER', 'BUNIT']) {
+    const values = frames.map(frame => normalizedHeaderValue(frame.metadata.headers[key]));
+    if (values.some(Boolean) && values.some(value => !value || value !== values[0])) {
+      throw new Error(`All frames must have the same ${key} to stack scientifically`);
+    }
+  }
+  const exposureValues = frames.map(frame => {
+    const value = frame.metadata.headers.EXPTIME;
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  });
+  if (exposureValues.some(Boolean) && exposureValues.some(value => value == null)) {
+    throw new Error('Either every frame must have a valid EXPTIME or none may specify one');
+  }
+  const referenceExposure = exposureValues[0];
+  const brightnessUnit = normalizedHeaderValue(reference.headers.BUNIT);
+  const alreadyRateCalibrated = /(?:\/s|s\^-1|s-1|\/sec|sec\^-1|sec-1)$/.test(brightnessUnit);
+  const fluxScales = exposureValues.map(exposure =>
+    !alreadyRateCalibrated && referenceExposure && exposure ? referenceExposure / exposure : 1);
+
   const { width, height, channels } = reference;
   const planeSize = width * height;
   const referenceLuminance = luminancePlane(frames[0].pixels, reference);
@@ -195,9 +241,12 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
           const sourceX = x - offsets[frameIndex].dx;
           const sourceY = y - offsets[frameIndex].dy;
           if (sourceX < 0 || sourceX >= width || sourceY < 0 || sourceY >= height) continue;
-          samples[count++] = frames[frameIndex].pixels[base + sourceY * width + sourceX];
+          const pixel = frames[frameIndex].pixels[base + sourceY * width + sourceX] * fluxScales[frameIndex];
+          if (Number.isFinite(pixel)) samples[count++] = pixel;
         }
-        stacked[base + y * width + x] = combineSamples(samples.slice(0, count), method, sigmaClipThreshold);
+        stacked[base + y * width + x] = count > 0
+          ? combineSamples(samples.slice(0, count), method, sigmaClipThreshold)
+          : Number.NaN;
       }
     }
   }
@@ -213,6 +262,15 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
   for (const key of ['OBJECT', 'DATE-OBS', 'INSTRUME', 'TELESCOP', 'FILTER', 'FOCALLEN', 'XPIXSZ', 'YPIXSZ']) {
     const value = copyHeaderValue(reference.headers, key);
     if (value !== undefined) cards.push(fitsCard(key, value));
+  }
+  if (referenceExposure) cards.push(fitsCard('EXPTIME', String(referenceExposure)));
+  // The output grid is the first frame's pixel grid. Preserve its complete celestial
+  // WCS (including distortion terms), not just a handful of display metadata.
+  for (const rawCard of reference.cards) {
+    const key = rawCard.slice(0, 8).trim();
+    if (/^(CTYPE|CRPIX|CRVAL|CUNIT|CDELT|CROTA|CD\d|PC\d|WCSAXES|RADESYS|EQUINOX|LONPOLE|LATPOLE|PV\d|PS\d|A_|B_|AP_|BP_|A_ORDER|B_ORDER|AP_ORDER|BP_ORDER)/.test(key)) {
+      cards.push(rawCard);
+    }
   }
   cards.push(fitsCard('HISTORY', `AstroviaBin stack of ${frames.length} frames (method=${method})`));
   for (let index = 0; index < offsets.length; index++) {

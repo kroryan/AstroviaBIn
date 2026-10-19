@@ -14,7 +14,7 @@ import { sanitizedUploadFilename, writeUploadBody } from './upload-stream';
 export const analysisRequestSchema = z.object({
   referenceMode: z.enum(['survey', 'local']).default('survey'),
   referenceImageId: z.number().int().positive().optional(),
-  survey: z.enum(['DSS2 Red', 'DSS2 Blue', 'DSS2 IR']).default('DSS2 Red'),
+  survey: z.enum(['DSS2 Red', 'DSS2 Blue', 'DSS2 IR', 'Pan-STARRS1 r stack']).default('DSS2 Red'),
   maxDimension: z.union([z.literal(1024), z.literal(2048), z.literal(4096), z.literal(8192)]).default(2048),
   thresholdSigma: z.number().min(3).max(30).default(6),
   sourceFwhm: z.number().min(1.5).max(12).default(3),
@@ -25,7 +25,7 @@ export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
 
 const root = () => path.resolve(process.env.FITS_ANALYSIS_DIR || (process.env.NODE_ENV === 'production' ? '/app/fits-analysis' : './data/fits-analysis'));
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const FILES = new Set(['science.fits', 'reference.fits', 'reference-aligned.fits', 'reference-mask.fits', 'difference.fits', 'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log', 'kernel.fits', 'kernel-stamps.txt', 'noise-scaled.fits']);
+const FILES = new Set(['science.fits', 'reference.fits', 'reference-aligned.fits', 'reference-mask.fits', 'difference.fits', 'difference-candidates.fits', 'difference-candidates.reg', 'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log', 'kernel.fits', 'kernel-stamps.txt', 'noise-scaled.fits']);
 const GENERATED_FILE = /^(kernel|masked)-[0-9a-f-]{36}\.fits$/i;
 const INPUT_FILE_FLAGS = new Set(['-tni', '-tmi', '-ini', '-imi', '-ki', '-rf', '-ssf', '-cmp']);
 const OUTPUT_FILE_FLAGS: Record<string, string> = {

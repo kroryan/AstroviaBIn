@@ -13,13 +13,15 @@ import sys
 import urllib.parse
 import urllib.request
 import warnings
+import csv
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 from photutils.detection import DAOStarFinder
-from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter, zoom
+from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter
 
 
 def write_state(work, stage, **extra):
@@ -49,18 +51,54 @@ def reduced_image(source, output, max_dimension):
     data, header = mono_data(source)
     height, width = data.shape
     factor = max(1, math.ceil(max(height, width) / max_dimension))
+    valid = np.isfinite(data)
     if factor > 1:
-        data = zoom(data, (1 / factor, 1 / factor), order=1, prefilter=False)
+        # Exact non-overlapping block integration is an anti-aliasing box filter.
+        # Use sums for per-pixel flux units and means for surface-brightness units.
+        block_height, block_width = height // factor, width // factor
+        if not block_height or not block_width:
+            raise ValueError('The FITS dimensions are too small for the requested analysis resolution')
+        crop = data[:block_height * factor, :block_width * factor]
+        valid_crop = valid[:block_height * factor, :block_width * factor]
+        safe = np.where(valid_crop, crop, 0).reshape(block_height, factor, block_width, factor)
+        block_sum = safe.sum(axis=(1, 3), dtype=np.float64).astype(np.float32)
+        valid_count = valid_crop.reshape(block_height, factor, block_width, factor).sum(axis=(1, 3))
+        if _surface_brightness_units(header):
+            data = np.divide(block_sum, valid_count, out=np.zeros_like(block_sum), where=valid_count > 0)
+        else:
+            data = block_sum
+        invalid = valid_count != factor ** 2
         if WCS(header).has_celestial:
-            wcs = WCS(header).celestial.slice((slice(None, None, factor), slice(None, None, factor)))
+            block_center = (factor - 1) / 2
+            slice_start = math.floor(block_center)
+            # These slices follow the NumPy array's (y, x) order.
+            source_wcs = WCS(header).celestial
+            source_crpix = source_wcs.wcs.crpix.copy()
+            source_sip_crpix = source_wcs.sip.crpix.copy() if source_wcs.sip is not None else None
+            wcs = source_wcs.slice((slice(slice_start, slice_start + block_height * factor, factor),
+                                    slice(slice_start, slice_start + block_width * factor, factor)),
+                                   numpy_order=True)
+            # Derive CRPIX directly from the geometric center of each integration
+            # bin, avoiding slice-origin convention and odd/even half-pixel drift.
+            wcs.wcs.crpix = (source_crpix - block_center - 1 + factor) / factor
+            if wcs.sip is not None:
+                wcs.sip.crpix = (source_sip_crpix - block_center - 1 + factor) / factor
             source_header = header
             header = fits.Header()
             for keyword in ('OBJECT', 'DATE-OBS', 'EXPTIME', 'FILTER', 'INSTRUME', 'TELESCOP', 'GAIN', 'BUNIT'):
                 if keyword in source_header:
                     header[keyword] = source_header[keyword]
             header.update(wcs.to_header(relax=True))
-    data[~np.isfinite(data)] = 0
+        header['DOWNSAMP'] = (factor, 'Integer anti-aliased rebin factor')
+        header['FLXSCALE'] = (factor ** 2 if not _surface_brightness_units(header) else 1,
+                              'Per-pixel integrated-flux scale applied')
+    else:
+        invalid = ~valid
+        replacement = float(np.median(data[valid])) if np.any(valid) else 0.0
+        data = np.where(valid, data, replacement).astype(np.float32)
     fits.writeto(output, data, header=header, overwrite=True)
+    invalid_path = output.with_name(output.stem + '-invalid-mask.fits')
+    fits.writeto(invalid_path, invalid.astype(np.uint8), header=header, overwrite=True)
     return factor
 
 
@@ -94,6 +132,8 @@ def ensure_wcs(image_path, original_path, hint, work):
 
 
 def fetch_reference(wcs, shape, destination, survey):
+    if survey == 'Pan-STARRS1 r stack':
+        return fetch_pan_starrs_reference(wcs, shape, destination)
     if survey not in ('DSS2 Red', 'DSS2 Blue', 'DSS2 IR'):
         raise ValueError('Unsupported survey')
     height, width = shape
@@ -124,11 +164,85 @@ def fetch_reference(wcs, shape, destination, survey):
     return {'survey': survey, 'url': url, 'ra': float(ra), 'dec': float(dec), 'fieldDegrees': fov}
 
 
-def align_reference(reference_path, science_wcs, shape, output):
+def fetch_pan_starrs_reference(wcs, shape, destination):
+    """Fetch a PS1 DR2 r-band stack cutout; send only WCS coordinates to MAST."""
+    height, width = shape
+    ra, dec = wcs.pixel_to_world_values((width - 1) / 2, (height - 1) / 2)
+    corners = wcs.pixel_to_world_values(np.array([0, width - 1, 0, width - 1]),
+                                       np.array([0, 0, height - 1, height - 1]))
+    offsets = np.hypot((np.mod(corners[0] - ra + 180, 360) - 180) * math.cos(math.radians(dec)), corners[1] - dec)
+    field_degrees = float(max(offsets) * 2.3)
+    if dec < -30:
+        raise ValueError('Pan-STARRS1 stacked reference images cover the sky north of Dec −30°. Choose DSS2 or a local FITS reference.')
+    # PS1 pixels are 0.25 arcsec; its cutout service caps requests at 6000 px.
+    pixels = math.ceil(field_degrees * 3600 / 0.25)
+    if pixels < 1 or pixels > 6000:
+        raise ValueError('Pan-STARRS1 cutouts cover fields up to about 25 arcmin. Choose DSS2 or a local FITS reference for this field.')
+
+    lookup_url = 'https://ps1images.stsci.edu/cgi-bin/ps1filenames.py?' + urllib.parse.urlencode({
+        'ra': f'{ra:.8f}', 'dec': f'{dec:.8f}', 'filters': 'r', 'type': 'stack', 'sep': 'comma'})
+    headers = {'User-Agent': 'AstroviaBin private FITS analysis/1.0'}
+    request = urllib.request.Request(lookup_url, headers=headers)
+    with urllib.request.urlopen(request, timeout=30) as response:
+        rows = list(csv.DictReader(StringIO(response.read(2_000_000).decode('utf-8'))))
+    row = next((item for item in rows if item.get('filter') == 'r' and item.get('filename')), None)
+    if row is None:
+        raise ValueError('Pan-STARRS1 has no r-band stack coverage at this position. Choose DSS2 or a local FITS reference.')
+
+    cutout_url = 'https://ps1images.stsci.edu/cgi-bin/fitscut.cgi?' + urllib.parse.urlencode({
+        'size': str(pixels), 'format': 'fits', 'red': row['filename'],
+        'ra': f'{ra:.8f}', 'dec': f'{dec:.8f}'})
+    request = urllib.request.Request(cutout_url, headers=headers)
+    with urllib.request.urlopen(request, timeout=180) as response, destination.open('wb') as output:
+        total = 0
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 120 * 1024 * 1024:
+                raise ValueError('The Pan-STARRS1 reference exceeds the 120 MB safety limit')
+            output.write(chunk)
+    with destination.open('rb') as reference:
+        if reference.read(9) != b'SIMPLE  =':
+            raise ValueError('Pan-STARRS1 did not return a FITS image cutout')
+    return {'survey': 'Pan-STARRS1 DR2 r stack (MAST)', 'url': cutout_url,
+            'ra': float(ra), 'dec': float(dec), 'fieldDegrees': field_degrees,
+            'pixelScaleArcsec': 0.25, 'referenceEpoch': 'multi-epoch stack'}
+
+
+def _pixel_area(wcs):
+    area = wcs.proj_plane_pixel_area()
+    return float(area.value if hasattr(area, 'value') else area)
+
+
+def _surface_brightness_units(header):
+    unit = str(header.get('BUNIT', '')).lower().replace(' ', '')
+    return any(marker in unit for marker in ('/sr', 'sr-1', 'sr**-1', '/arcsec2', 'arcsec-2', 'deg-2'))
+
+
+def align_reference(reference_path, science_wcs, science_header, shape, output):
     reference, header = mono_data(reference_path)
     reference_wcs = WCS(header).celestial
     if not reference_wcs.has_celestial:
         raise ValueError('Reference FITS has no WCS. Plate solve the reference locally first.')
+    # FITS photometry is normally integrated per pixel; convert the reference to
+    # science-pixel integrated flux before HOTPANTS fits its photometric scale.
+    # Surface-brightness units are already per solid angle and must not be scaled.
+    area_scale = (_pixel_area(science_wcs) / _pixel_area(reference_wcs)
+                  if not (_surface_brightness_units(header) or _surface_brightness_units(science_header)) else 1.0)
+    reference_invalid_path = reference_path.with_name(reference_path.stem + '-invalid-mask.fits')
+    if reference_invalid_path.exists():
+        reference_invalid, _ = mono_data(reference_invalid_path)
+        reference_invalid = binary_dilation(reference_invalid > 0, iterations=1)
+    else:
+        reference_invalid = ~np.isfinite(reference)
+    science_invalid_path = output.with_name('science-invalid-mask.fits')
+    if science_invalid_path.exists():
+        science_invalid, _ = mono_data(science_invalid_path)
+        science_invalid = science_invalid > 0
+    else:
+        science_invalid = np.zeros(shape, dtype=bool)
     height, width = shape
     aligned = np.zeros((height, width), dtype=np.float32)
     mask = np.ones((height, width), dtype=np.uint8)
@@ -138,7 +252,10 @@ def align_reference(reference_path, science_wcs, shape, output):
         ra, dec = science_wcs.pixel_to_world_values(xx, yy)
         rx, ry = reference_wcs.world_to_pixel_values(ra, dec)
         good = np.isfinite(rx) & np.isfinite(ry) & (rx >= 1) & (ry >= 1) & (rx < reference.shape[1] - 2) & (ry < reference.shape[0] - 2)
-        values = map_coordinates(reference, [np.nan_to_num(ry), np.nan_to_num(rx)], order=1, mode='constant', cval=0)
+        safe_rx, safe_ry = np.nan_to_num(rx), np.nan_to_num(ry)
+        reference_bad = map_coordinates(reference_invalid.astype(np.uint8), [safe_ry, safe_rx], order=0, mode='constant', cval=1) > 0
+        good &= ~reference_bad & ~science_invalid[row:stop]
+        values = map_coordinates(reference, [safe_ry, safe_rx], order=1, mode='constant', cval=0) * area_scale
         values[~good] = 0
         aligned[row:stop] = values
         mask[row:stop] = ~good
@@ -146,7 +263,7 @@ def align_reference(reference_path, science_wcs, shape, output):
     if coverage < 0.3:
         raise ValueError(f'Reference overlaps only {coverage:.0%} of the science image; choose a matching field')
     fits.writeto(output, aligned, header=science_wcs.to_header(relax=True), overwrite=True)
-    return coverage, mask
+    return coverage, mask, area_scale
 
 
 def local_point_source(data, x, y, fwhm, detection_sigma=5):
@@ -253,7 +370,9 @@ def detect_candidates(difference_path, noise_path, bad_mask_path, mask, science_
             rejected['duplicate'] += 1
             continue
         ra, dec = wcs.pixel_to_world_values(difference_source['x'], difference_source['y'])
-        found.append({'x': int(x), 'y': int(y), 'ra': float(ra), 'dec': float(dec),
+        found.append({'x': int(x), 'y': int(y),
+                      'centroidX': difference_source['x'], 'centroidY': difference_source['y'],
+                      'ringRadiusPx': max(5.0, fwhm * 3.0), 'ra': float(ra), 'dec': float(dec),
                       'snr': round(float(significance[y, x]), 2), 'difference': float(difference[y, x]),
                       'scienceContrast': science_source['localContrast'],
                       'shape': {'sharpness': difference_source['sharpness'],
@@ -262,6 +381,74 @@ def detect_candidates(difference_path, noise_path, bad_mask_path, mask, science_
         if len(found) >= max_candidates:
             break
     return found, count, rejected
+
+
+def write_candidate_products(difference_path, candidates, output_path, regions_path):
+    """Bundle exact difference data plus lossless marker extensions and DS9 regions."""
+    with fits.open(difference_path, memmap=False) as source_hdus:
+        hdus = fits.HDUList([hdu.copy() for hdu in source_hdus])
+    primary = next((hdu for hdu in hdus if hdu.data is not None and hdu.data.ndim == 2), None)
+    if primary is None:
+        hdus.close()
+        raise ValueError('Difference FITS has no 2D image for candidate annotations')
+    height, width = primary.data.shape
+    mask = np.zeros((height, width), dtype=np.uint16)
+    columns = {name: [] for name in ('ID', 'X_PEAK', 'Y_PEAK', 'X_CENTROID', 'Y_CENTROID',
+                                    'RA_DEG', 'DEC_DEG', 'SNR', 'CONTRAST', 'RADIUS_PX')}
+    region_lines = ['# Region file format: DS9 version 4.1',
+                    'global color=red width=2 font="helvetica 10 normal" select=1 highlite=1',
+                    'image']
+    for index, candidate in enumerate(candidates, start=1):
+        x = float(candidate.get('centroidX', candidate['x']))
+        y = float(candidate.get('centroidY', candidate['y']))
+        radius = float(candidate.get('ringRadiusPx', 5.0))
+        if not all(np.isfinite(value) for value in (x, y, radius)) or radius <= 0:
+            continue
+        x0, x1 = max(0, math.floor(x - radius - 1)), min(width, math.ceil(x + radius + 2))
+        y0, y1 = max(0, math.floor(y - radius - 1)), min(height, math.ceil(y + radius + 2))
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        circle = np.abs(np.hypot(xx - x, yy - y) - radius) <= 0.75
+        region = mask[y0:y1, x0:x1]
+        region[circle] = index
+        columns['ID'].append(index)
+        columns['X_PEAK'].append(int(candidate['x']))
+        columns['Y_PEAK'].append(int(candidate['y']))
+        columns['X_CENTROID'].append(x)
+        columns['Y_CENTROID'].append(y)
+        columns['RA_DEG'].append(float(candidate['ra']))
+        columns['DEC_DEG'].append(float(candidate['dec']))
+        columns['SNR'].append(float(candidate.get('snr', float('nan'))))
+        columns['CONTRAST'].append(float(candidate.get('scienceContrast', float('nan'))))
+        columns['RADIUS_PX'].append(radius)
+        region_lines.append(
+            f'circle({x + 1:.6f},{y + 1:.6f},{radius:.3f}) # text={{Candidate {index} · '
+            f'RA {float(candidate["ra"]):.8f} Dec {float(candidate["dec"]):.8f}}}')
+
+    mask_hdu = fits.ImageHDU(data=mask, name='CANDIDATE_MASK')
+    for key, value in primary.header.items():
+        if key.startswith(('CTYPE', 'CUNIT', 'CRVAL', 'CRPIX', 'CDELT', 'CD', 'PC', 'CROTA', 'RADESYS', 'EQUINOX')):
+            mask_hdu.header[key] = value
+    mask_hdu.header['BUNIT'] = 'candidate ID; zero means no marker'
+    mask_hdu.header['COMMENT'] = 'Thin circular outlines; primary difference image is unmodified.'
+    table_hdu = fits.BinTableHDU.from_columns([
+        fits.Column(name='ID', format='I', array=np.asarray(columns['ID'], dtype=np.int16)),
+        fits.Column(name='X_PEAK', format='J', unit='pix', array=np.asarray(columns['X_PEAK'], dtype=np.int32)),
+        fits.Column(name='Y_PEAK', format='J', unit='pix', array=np.asarray(columns['Y_PEAK'], dtype=np.int32)),
+        fits.Column(name='X_CENTROID', format='D', unit='pix', array=np.asarray(columns['X_CENTROID'], dtype=np.float64)),
+        fits.Column(name='Y_CENTROID', format='D', unit='pix', array=np.asarray(columns['Y_CENTROID'], dtype=np.float64)),
+        fits.Column(name='RA_DEG', format='D', unit='deg', array=np.asarray(columns['RA_DEG'], dtype=np.float64)),
+        fits.Column(name='DEC_DEG', format='D', unit='deg', array=np.asarray(columns['DEC_DEG'], dtype=np.float64)),
+        fits.Column(name='SNR', format='D', array=np.asarray(columns['SNR'], dtype=np.float64)),
+        fits.Column(name='CONTRAST', format='D', array=np.asarray(columns['CONTRAST'], dtype=np.float64)),
+        fits.Column(name='RADIUS_PX', format='D', unit='pixel', array=np.asarray(columns['RADIUS_PX'], dtype=np.float64)),
+    ], name='CANDIDATES')
+    table_hdu.header['COMMENT'] = 'X/Y pixel coordinates are zero-based; centroids are subpixel positions.'
+    table_hdu.header['COMMENT'] = 'Sky positions are ICRS decimal degrees; all detections are unconfirmed.'
+    hdus.append(mask_hdu)
+    hdus.append(table_hdu)
+    hdus.writeto(output_path, overwrite=True, checksum=True)
+    hdus.close()
+    Path(regions_path).write_text('\n'.join(region_lines) + '\n', encoding='utf-8')
 
 
 def check_candidate(config):
@@ -327,7 +514,7 @@ def main(config_path):
         ensure_wcs(reference, config['reference'], ref_hint, work / 'reference-solve')
         provenance = {'localImageId': config['referenceImageId']}
     write_state(work, 'aligning')
-    coverage, mask = align_reference(reference, science_wcs, science_data.shape, aligned)
+    coverage, mask, reference_flux_scale = align_reference(reference, science_wcs, science_header, science_data.shape, aligned)
     fits.writeto(work / 'reference-mask.fits', mask, overwrite=True)
     write_state(work, 'subtracting')
     command = ['hotpants', '-inim', str(science), '-tmplim', str(aligned), '-outim', str(difference),
@@ -341,6 +528,8 @@ def main(config_path):
     candidates, detected_total, rejected = detect_candidates(
         difference, noise, bad_mask, mask, science, aligned, science_wcs,
         float(config['thresholdSigma']), int(config['maxCandidates']), float(config.get('sourceFwhm', 3)))
+    write_candidate_products(difference, candidates, work / 'difference-candidates.fits',
+                             work / 'difference-candidates.reg')
     science_filter = str(science_header.get('FILTER', '')).strip()
     comparison_warning = ('Historical survey references can have a different bandpass, resolution, epoch, '
                           'and photometric calibration. Candidate detections require an independent '
@@ -349,12 +538,14 @@ def main(config_path):
                           'A second local FITS is not independent confirmation unless it is from a '
                           'different exposure or observing epoch with a compatible filter.')
     return {'reference': provenance, 'coverage': coverage, 'scaleFactor': factor,
+            'referencePixelAreaFluxScale': reference_flux_scale,
             'analysisVersion': 2, 'sourceFilter': science_filter,
             'sourceDate': str(science_header.get('DATE-OBS', '')).strip(),
             'width': science_data.shape[1], 'height': science_data.shape[0],
             'candidates': candidates, 'detectedTotal': detected_total,
             'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,
             'files': ['science.fits', 'reference.fits', 'reference-aligned.fits', 'difference.fits',
+                      'difference-candidates.fits', 'difference-candidates.reg',
                       'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log'],
             'note': 'Candidates passed local point-source, reference-absence, mask, and dipole checks, but remain unconfirmed.'}
 

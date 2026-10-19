@@ -8,7 +8,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from hotpants_pipeline import check_candidate, detect_candidates
+from hotpants_pipeline import check_candidate, detect_candidates, reduced_image, write_candidate_products
 
 
 class CandidateValidationTests(unittest.TestCase):
@@ -73,6 +73,62 @@ class CandidateValidationTests(unittest.TestCase):
     def test_masked_source_is_rejected(self):
         candidates, _, _ = self.analyze(bad=True)
         self.assertEqual(candidates, [])
+
+    def test_downsample_conserves_integrated_flux_and_keeps_wcs_pixel_grid_exact(self):
+        header = self.wcs.to_header()
+        header['BUNIT'] = 'adu'
+        source_data = np.zeros((96, 96), dtype=np.float32)
+        source_data[49, 49] = 1000
+        source = self.work / 'large.fits'
+        reduced = self.work / 'reduced.fits'
+        fits.writeto(source, source_data, header)
+        factor = reduced_image(source, reduced, 32)
+        self.assertEqual(factor, 3)
+        output, output_header = fits.getdata(reduced, header=True)
+        self.assertAlmostEqual(float(output.sum()), 1000, delta=1.0)
+        self.assertEqual(output.shape, (32, 32))
+        output_wcs = WCS(output_header).celestial
+        source_world = self.wcs.pixel_to_world_values(49, 49)
+        output_world = output_wcs.pixel_to_world_values(16, 16)
+        self.assertAlmostEqual(float(source_world[0]), float(output_world[0]), places=10)
+        self.assertAlmostEqual(float(source_world[1]), float(output_world[1]), places=10)
+        self.assertEqual(int(fits.getdata(self.work / 'reduced-invalid-mask.fits').sum()), 0)
+
+    def test_even_factor_wcs_points_to_integrated_block_centres(self):
+        header = self.wcs.to_header()
+        header['BUNIT'] = 'adu'
+        source = self.work / 'even-factor.fits'
+        reduced = self.work / 'even-factor-reduced.fits'
+        fits.writeto(source, np.ones((96, 96), dtype=np.float32), header)
+        factor = reduced_image(source, reduced, 48)
+        self.assertEqual(factor, 2)
+        reduced_wcs = WCS(fits.getheader(reduced)).celestial
+        # Reduced pixel (24, 24) is the integrated bin covering source pixels 48..49.
+        expected_world = self.wcs.pixel_to_world_values(48.5, 48.5)
+        actual_world = reduced_wcs.pixel_to_world_values(24, 24)
+        np.testing.assert_allclose(actual_world, expected_world, rtol=0, atol=1e-10)
+
+    def test_candidate_fits_keeps_difference_unchanged_and_exports_precise_circles(self):
+        original = np.zeros((96, 96), dtype=np.float32)
+        original[48, 48] = 19.25
+        difference = self.work / 'difference.fits'
+        marked = self.work / 'difference-candidates.fits'
+        regions = self.work / 'difference-candidates.reg'
+        fits.writeto(difference, original, self.wcs.to_header())
+        candidate = {'x': 48, 'y': 48, 'centroidX': 48.25, 'centroidY': 47.75,
+                     'ringRadiusPx': 9, 'ra': 10.123456789, 'dec': -20.987654321,
+                     'snr': 12.5, 'scienceContrast': 8.25}
+        write_candidate_products(difference, [candidate], marked, regions)
+        with fits.open(marked) as hdus:
+            np.testing.assert_array_equal(hdus[0].data, original)
+            self.assertEqual(hdus['CANDIDATE_MASK'].data.dtype, np.uint16)
+            self.assertEqual(int(hdus['CANDIDATE_MASK'].data[47, 57]), 1)
+            row = hdus['CANDIDATES'].data[0]
+            self.assertAlmostEqual(float(row['X_CENTROID']), 48.25)
+            self.assertAlmostEqual(float(row['Y_CENTROID']), 47.75)
+            self.assertAlmostEqual(float(row['RA_DEG']), 10.123456789)
+        region_text = regions.read_text()
+        self.assertIn('circle(49.250000,48.750000,9.000)', region_text)
 
     def test_independent_same_filter_followup_is_support_not_confirmation(self):
         followup = self.rng.normal(30, 2, (96, 96)) + self.point

@@ -11,9 +11,10 @@ function card(key: string, value?: string): string {
 }
 
 /** Builds a square mono FITS of arbitrary size from a flat row-major array of values. */
-function testFitsMono(size: number, values: number[]): Buffer {
+function testFitsMono(size: number, values: number[], extraHeaders: string[] = []): Buffer {
   const cards = [
-    card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(size)), card('NAXIS2', String(size)), card('END'),
+    card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(size)), card('NAXIS2', String(size)),
+    ...extraHeaders, card('END'),
   ];
   const header = Buffer.from(cards.join(''), 'ascii');
   const paddedHeader = Buffer.concat([header, Buffer.alloc(2880 - header.length, ' ')]);
@@ -54,6 +55,28 @@ test('stacks identical frames back to the same pixel values', async () => {
     const { metadata, pixels } = await readOutputPixels(output);
     assert.equal(metadata.bitpix, -32);
     for (let index = 0; index < values.length; index++) assert.ok(Math.abs(pixels[index] - values[index]) < 1e-3);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('normalizes different exposure times and preserves the reference celestial WCS', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
+  const size = 10;
+  const wcs = [card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"), card('CRPIX1', '5.5'), card('CRPIX2', '5.5'),
+    card('CRVAL1', '83.25'), card('CRVAL2', '-5.2'), card('CDELT1', '-0.001'), card('CDELT2', '0.001')];
+  const first = path.join(directory, 'first.fits');
+  const second = path.join(directory, 'second.fits');
+  await writeFile(first, testFitsMono(size, new Array(size * size).fill(100), [...wcs, card('EXPTIME', '10'), card('FILTER', "'R'"), card('BUNIT', "'adu'")]));
+  await writeFile(second, testFitsMono(size, new Array(size * size).fill(200), [...wcs, card('EXPTIME', '20'), card('FILTER', "'R'"), card('BUNIT', "'adu'")]));
+  const output = path.join(directory, 'stacked.fits');
+  try {
+    await stackFits([first, second], output, { method: 'mean', register: false });
+    const { metadata, pixels } = await readOutputPixels(output);
+    assert.ok(Math.abs(pixels[55] - 100) < 1e-3, `exposure-normalized pixel should be 100, got ${pixels[55]}`);
+    assert.equal(metadata.headers.CRVAL1, 83.25);
+    assert.equal(metadata.headers.CRVAL2, -5.2);
+    assert.equal(metadata.headers.EXPTIME, 10);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -116,6 +139,18 @@ test('registers a shifted frame before stacking', async () => {
     assert.equal(result.offsets[0].dy, 0);
     assert.equal(result.offsets[1].dx, 3);
     assert.equal(result.offsets[1].dy, -2);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('keeps the original grid instead of inventing an offset for textureless frames', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
+  const framePaths = [path.join(directory, 'flat-a.fits'), path.join(directory, 'flat-b.fits')];
+  await Promise.all(framePaths.map(filePath => writeFile(filePath, testFitsMono(40, new Array(40 * 40).fill(100)))));
+  try {
+    const result = await stackFits(framePaths, path.join(directory, 'stacked.fits'), { method: 'mean' });
+    assert.deepEqual(result.offsets, [{ dx: 0, dy: 0 }, { dx: 0, dy: 0 }]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

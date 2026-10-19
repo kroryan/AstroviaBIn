@@ -110,9 +110,10 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">Reference surveys</h3>
-        <p className="text-muted-foreground">Automatic reference lookup for HOTPANTS requests public sky-survey data from NASA SkyView using coordinates only; it does not upload your image or FITS. Reference survey imagery retains its provider's rights and citation requirements. Analysis results are candidates, not verified discoveries.</p>
+        <p className="text-muted-foreground">Automatic HOTPANTS references can use DSS2 through NASA SkyView or Pan-STARRS1 DR2 r-band stacks through STScI/MAST. Only sky coordinates and cutout parameters are sent; your image, FITS, and thumbnails stay local. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25 arcminutes. Survey imagery retains its provider's rights and citation requirements. Analysis results are candidates, not verified discoveries.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://skyview.gsfc.nasa.gov/current/docs/credits.html" target="_blank" rel="noreferrer">SkyView credits and survey acknowledgements</a>
+          <a className="text-primary underline" href="https://outerspace.stsci.edu/pages/viewpage.action?pageId=392364125" target="_blank" rel="noreferrer">Pan-STARRS image cutout documentation</a>
         </div>
       </div>
     </CardContent>

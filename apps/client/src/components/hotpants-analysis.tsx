@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import type { AstroImage } from '@shared/schema';
 
 type Candidate = { x: number; y: number; ra: number; dec: number; snr: number; status: string;
+  centroidX?: number; centroidY?: number; ringRadiusPx?: number;
   scienceContrast?: number; shape?: { sharpness: number; roundness: number };
   nearbyCatalogObjects?: { name: string; separationArcsec: number }[] };
 type CandidateCheck = { status: 'repeat_detection' | 'not_detected' | 'inconclusive'; sourceFound: boolean;
@@ -112,9 +113,10 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           <option value="survey">Historical sky survey (DSS2)</option><option value="local">Another local FITS</option>
         </select>
       </label>
-      {referenceMode === 'survey' ? <label className="text-sm space-y-1">Survey band
+      {referenceMode === 'survey' ? <label className="text-sm space-y-1">Survey / band
         <select className="w-full rounded-md border bg-background p-2" value={survey} onChange={event => setSurvey(event.target.value)}>
-          {['DSS2 Red', 'DSS2 Blue', 'DSS2 IR'].map(value => <option key={value}>{value}</option>)}
+          <option>DSS2 Red</option><option>DSS2 Blue</option><option>DSS2 IR</option>
+          <option value="Pan-STARRS1 r stack">Pan-STARRS1 DR2 · r stack (≤25′, Dec &gt; −30°)</option>
         </select>
       </label> : <label className="text-sm space-y-1">Reference FITS
         <select className="w-full rounded-md border bg-background p-2" value={referenceImageId} onChange={event => setReferenceImageId(event.target.value)}>
@@ -173,11 +175,22 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           {(['science.fits', 'reference-aligned.fits', 'difference.fits'] as const).map(name => <div key={name}>
             <p className="mb-1 text-xs font-medium">{name === 'science.fits' ? 'Science' : name === 'reference-aligned.fits' ? 'Aligned reference' : 'Difference · candidates'}</p>
             <div className="relative"><img src={file(name, true)} alt={name} className="w-full rounded border" loading="lazy" />
-              {name === 'difference.fits' && report.analysisVersion === 2 && report.candidates?.map((candidate, index) => <span key={`${candidate.x}-${candidate.y}`} title={`Candidate ${index + 1}: model S/N ${candidate.snr}, RA ${candidate.ra.toFixed(5)}, Dec ${candidate.dec.toFixed(5)}`} className="absolute h-4 w-4 rounded-full border-2 border-red-500 bg-red-500/20" style={{ left: `${candidate.x / (report.width || 1) * 100}%`, top: `${candidate.y / (report.height || 1) * 100}%`, transform: 'translate(-50%, -50%)' }} />)}
+              {name === 'difference.fits' && report.analysisVersion === 2 && report.candidates?.map((candidate, index) => {
+                const radius = candidate.ringRadiusPx || 5;
+                return <span key={`${candidate.x}-${candidate.y}`} title={`Candidate ${index + 1}: S/N ${candidate.snr}, RA ${candidate.ra.toFixed(7)}, Dec ${candidate.dec.toFixed(7)}`} className="absolute rounded-full border-2 border-red-500 bg-red-500/10" style={{ left: `${(candidate.centroidX ?? candidate.x) / (report.width || 1) * 100}%`, top: `${(candidate.centroidY ?? candidate.y) / (report.height || 1) * 100}%`, width: `${2 * radius / (report.width || 1) * 100}%`, height: `${2 * radius / (report.height || 1) * 100}%`, transform: 'translate(-50%, -50%)', boxSizing: 'border-box' }} />;
+              })}
             </div>
           </div>)}
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{report.files?.map(name => <a key={name} href={file(name)} className="text-primary underline" download>{name}</a>)}</div>
+        {report.files?.includes('difference-candidates.fits') && <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+          <p className="font-medium">Candidate-marked difference export</p>
+          <p className="text-xs text-muted-foreground">The primary FITS difference plane is preserved unchanged. Candidate circles are in the <code>CANDIDATE_MASK</code> extension; <code>CANDIDATES</code> contains subpixel centroids and sky coordinates. Open the DS9 region file to overlay precise vector circles.</p>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <a href={file('difference-candidates.fits')} className="text-primary underline" download>Download candidate-marked FITS</a>
+            <a href={file('difference-candidates.reg')} className="text-primary underline" download>Download DS9 candidate circles</a>
+          </div>
+        </div>}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{report.files?.filter(name => name !== 'difference-candidates.fits' && name !== 'difference-candidates.reg').map(name => <a key={name} href={file(name)} className="text-primary underline" download>{name}</a>)}</div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" disabled={utility.isPending} onClick={() => utility.mutate({ tool: 'maskim', imageLayer: 'difference.fits' })}>Create masked difference</Button>
           <Button type="button" size="sm" variant="outline" disabled={utility.isPending} onClick={() => utility.mutate({ tool: 'extractkern', mode: 'full', kernelWidths: 2 })}>Extract full kernel map</Button>

@@ -179,7 +179,12 @@ npm run dev:worker:standalone
 - **Node.js**: 20+ (for building from source)
 
 ### Optional Integrations
-- **Historical survey reference**: SkyView access is optional. This sends field coordinates and requested survey parameters, never your FITS pixels. Choose another local FITS to avoid even that network request.
+- **Historical survey reference**: Optional DSS2 images via NASA SkyView or Pan-STARRS1 DR2 r-band stacks via STScI/MAST. Only field coordinates and cutout parameters leave the server, never image/FITS pixels. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25′. Choose another local FITS to avoid external requests.
+
+FITS stacking aligns images by integer-pixel translation, normalizes differing
+exposure times when all frames provide `EXPTIME`, rejects one-frame outliers
+with sigma clipping, and retains the first frame's WCS. It does not correct
+rotation or scale. See [FITS stacking notes](docs/fits-stacking.md).
 
 ## Configuration
 
@@ -292,7 +297,7 @@ Browser ──► AstroviaBin (React + Hono/Node)
                 ├──► local Astrometry.net solver + index files
                 └──► local HOTPANTS + Photutils
 
-Optional historical reference request ──► NASA SkyView (coordinates only)
+Optional historical reference request ──► NASA SkyView / STScI MAST (coordinates only)
 ```
 
 ## Project Structure

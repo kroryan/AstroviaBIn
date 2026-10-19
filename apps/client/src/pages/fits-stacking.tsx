@@ -114,6 +114,12 @@ export default function FitsStackingPage() {
             (the first one you pick, marked ★), then combined pixel by pixel — sigma-clipping rejects one-frame outliers like
             satellite trails or cosmic ray hits. Pick frames one by one, or load a gallery catalog you prepared for this stack.
           </p>
+          <p className="text-xs text-muted-foreground">
+            Registration uses integer-pixel shifts and needs shared image structure; flat frames stay unshifted instead of
+            receiving a guessed offset. Rotation and scale are not corrected. Frames must use the same filter and BUNIT.
+            When every frame has EXPTIME, values are normalized to the first frame's exposure; the output keeps its WCS.
+            Pixels with no frame coverage are marked NaN.
+          </p>
         </div>
 
         <Card>
