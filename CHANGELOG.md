@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - User management in Admin settings: create accounts, assign admin / editor / viewer roles, change passwords, delete users (scrypt hashes, role checked on every request, sessions revoked on password change or deletion).
+- Stack FITS frames: load a gallery catalog, filter frames, see each frame's size/filter/exposure, pick the alignment reference, flag size mismatches, and save the selection as a catalog.
 - Sun, Moon and planet images are grouped under one "Solar System" target.
 - Login page and signed session cookies protecting every page, API route and the WebSocket (`SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD`, default admin / admin), with login throttling and sign-out.
 - Gallery catalogs: named groups of photos and FITS, gallery filter, per-image picker, bulk "add shown images".
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sparse or noisy frames failing to solve because the built-in extractor found too few stars.
 - `preview=full` FITS renders are bounded (`FITS_FULL_PREVIEW_MAX`) instead of allocating the whole frame.
 - `/api/health` reports the real version; the worker no longer logs the auto-solve-disabled message every cycle.
+- Queued plate solves show as "Queued" and only the frame being solved as "Solving"; the sidebar no longer shows a fixed "~3 min" and fake progress bar.
 - The app shell no longer loads a third-party Replit script.
 - Stale route tests after the move away from Immich and multipart uploads.
 
