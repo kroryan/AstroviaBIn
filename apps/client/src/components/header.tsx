@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
 import { UPLOAD_ACCEPT, UploadQueuePanel, useFileDrop, useUploadQueue } from "@/components/upload-queue";
+import { createPortal } from "react-dom";
 import type { Notification } from '@shared/types';
 
 const NAV_LINKS = [
@@ -223,15 +224,18 @@ export function Header() {
           </div>
         </div>
       </div>
-      <UploadQueuePanel items={uploads.items} busy={uploads.busy} onClose={uploads.clear} />
-      {dragging && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="rounded-xl border-2 border-dashed border-primary px-8 py-6 text-center">
-            <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
-            <p className="font-display uppercase tracking-wider text-foreground">Drop photos and FITS to upload</p>
+      {/* Portaled: the header's backdrop filter would otherwise make these fixed layers header-relative. */}
+      {createPortal(<>
+        <UploadQueuePanel items={uploads.items} busy={uploads.busy} onClose={uploads.clear} />
+        {dragging && (
+          <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="rounded-xl border-2 border-dashed border-primary px-8 py-6 text-center">
+              <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
+              <p className="font-display uppercase tracking-wider text-foreground">Drop photos and FITS to upload</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </>, document.body)}
     </header>
   );
 }
