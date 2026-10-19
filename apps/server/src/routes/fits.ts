@@ -18,7 +18,8 @@ import {
   type FitsSource,
   type FitsProcessingSettings,
 } from '../services/fits';
-import { stackFits, type StackMethod } from '../services/fits-stacking';
+import { runStackInThread, type StackMethod } from '../services/fits-stacking';
+import { wcsFromStored } from '../services/wcs';
 import { tileInfo } from '../services/tiles';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
 import { handleRouteError } from './route-utils';
@@ -350,9 +351,16 @@ app.post('/stack', async (c) => {
       return c.json({ message: 'A FITS derivative with that name already exists. Choose another name.' }, 409);
     } catch { /* a missing output is expected */ }
 
-    const result = await stackFits(framePaths, outputPath, { method, sigmaClipThreshold, register });
+    // Frames without a WCS in their header can still be aligned through their stored plate solve.
+    const frameWcs = await Promise.all(imageIds.map(async (id: number) => {
+      const job = await storage.getLatestPlateSolvingJob(id, 'success');
+      return wcsFromStored((job?.result as Record<string, unknown> | undefined)?.wcs) ?? null;
+    }));
+    const frameNames = images.map((image, index) => image?.title ? `${image.title} (#${imageIds[index]})` : `#${imageIds[index]}`);
+    const result = await runStackInThread(framePaths, outputPath, { method, sigmaClipThreshold, register, frameWcs, frameNames });
     const stacked = await importFits(outputPath, fitsDerivedDirectory(), 'derived');
-    return c.json({ image: stacked, output: outputName, frameCount: result.frameCount, offsets: result.offsets });
+    return c.json({ image: stacked, output: outputName, frameCount: result.frameCount, offsets: result.offsets,
+      frames: result.frames, warnings: result.warnings });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to stack FITS frames');
   }

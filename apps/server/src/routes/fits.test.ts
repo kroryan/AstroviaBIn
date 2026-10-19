@@ -14,13 +14,13 @@ function card(key: string, value?: string): string {
   return (value === undefined ? key : `${key.padEnd(8, ' ')}= ${value}`).padEnd(80, ' ').slice(0, 80);
 }
 
-function testFits(): Buffer {
+function testFits(values = [0, 100, 500, 1000]): Buffer {
   const header = Buffer.from([
     card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', '2'), card('NAXIS2', '2'),
     card('OBJECT', "'M 42'"), card('EXPTIME', '120'), card('END'),
   ].join(''), 'ascii');
   const data = Buffer.alloc(8);
-  [0, 100, 500, 1000].forEach((value, index) => data.writeInt16BE(value, index * 2));
+  values.forEach((value, index) => data.writeInt16BE(value, index * 2));
   return Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), data, Buffer.alloc(2880 - data.length)]);
 }
 
@@ -124,7 +124,8 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     });
     assert.equal(duplicate.status, 409);
 
-    await writeFile(path.join(sourceDirectory, 'm42-b.fits'), testFits());
+    // A second, different exposure (identical frames are skipped as duplicates).
+    await writeFile(path.join(sourceDirectory, 'm42-b.fits'), testFits([2, 98, 502, 1001]));
     await app.request('/api/fits/scan', { method: 'POST' });
     const allImages = await (await app.request('/api/fits')).json() as Array<{ id: number; originalPath: string }>;
     const secondFrame = allImages.find(item => item.originalPath === 'fits://m42-b.fits');

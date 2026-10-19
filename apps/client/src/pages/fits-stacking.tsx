@@ -12,6 +12,9 @@ import { Header } from '@/components/header';
 import { apiRequest, queryClient as sharedQueryClient } from '@/lib/queryClient';
 import type { AstroImage } from '@shared/schema';
 import type { GalleryCatalogSummary } from '@/components/gallery-catalog-picker';
+
+type StackFrameReport = { name: string; used: boolean; method?: string; matchedStars?: number; rmsPx?: number | null; dx?: number; dy?: number; reason?: string };
+type StackResponse = { frameCount: number; frames?: StackFrameReport[]; warnings?: string[] };
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 /** Frame size as written by the FITS importer into the description ("FITS 9576×6388 · mono · 16-bit"). */
@@ -75,10 +78,10 @@ export default function FitsStackingPage() {
   const makeReference = (id: number) => setSelected(previous => [id, ...previous.filter(item => item !== id)]);
   const addAll = (ids: number[]) => setSelected(previous => [...previous, ...ids.filter(id => !previous.includes(id))]);
 
-  const stackMutation = useMutation({
+  const stackMutation = useMutation<StackResponse>({
     mutationFn: async () => {
       const response = await apiRequest('POST', '/api/fits/stack', { imageIds: selected, method, register, outputName });
-      return response.json();
+      return response.json() as Promise<StackResponse>;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/fits'] });
@@ -110,15 +113,16 @@ export default function FitsStackingPage() {
         <div>
           <h1 className="text-3xl font-bold text-foreground mb-2 flex items-center gap-2"><Layers className="h-7 w-7" /> Stack FITS frames</h1>
           <p className="text-muted-foreground">
-            Combine several same-sized exposures into one. Frames are aligned (translation only) against the reference frame
-            (the first one you pick, marked ★), then combined pixel by pixel — sigma-clipping rejects one-frame outliers like
-            satellite trails or cosmic ray hits. Pick frames one by one, or load a gallery catalog you prepared for this stack.
+            Combine several exposures into one. Every frame is resampled onto the reference frame (the first one you pick,
+            marked ★) with sub-pixel accuracy, then combined pixel by pixel — sigma-clipping rejects one-frame outliers like
+            satellite trails, cosmic rays and moving asteroids. Pick frames one by one, or load a gallery catalog you prepared for this stack.
           </p>
           <p className="text-xs text-muted-foreground">
-            Registration uses integer-pixel shifts and needs shared image structure; flat frames stay unshifted instead of
-            receiving a guessed offset. Rotation and scale are not corrected. Frames must use the same filter and BUNIT.
-            When every frame has EXPTIME, values are normalized to the first frame's exposure; the output keeps its WCS.
-            Pixels with no frame coverage are marked NaN.
+            Alignment uses each frame's plate solution (rotation, scale and lens distortion included) refined with stars
+            matched to the reference; frames without a plate solution are aligned from their stars. Each frame's residual is
+            reported, frames whose stars do not line up are left out with the reason, and exact duplicates are skipped.
+            Frames must use the same filter and BUNIT. When every frame has EXPTIME, values are normalized to the reference
+            exposure; the output keeps the reference WCS. Pixels with no frame coverage are marked NaN.
           </p>
         </div>
 
@@ -168,9 +172,9 @@ export default function FitsStackingPage() {
               </div>
             )}
             {mismatched.length > 0 && (
-              <Alert variant="destructive">
+              <Alert>
                 <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{mismatched.length} selected frame(s) differ in size from the reference ({referenceSize}). Only same-sized frames can be stacked.</AlertDescription>
+                <AlertDescription>{mismatched.length} selected frame(s) differ in size from the reference ({referenceSize}). They are aligned through their plate solution, so plate-solve them first (otherwise they are left out).</AlertDescription>
               </Alert>
             )}
           </CardContent>
@@ -209,14 +213,24 @@ export default function FitsStackingPage() {
             {stackMutation.isSuccess && (
               <Alert>
                 <CheckCircle className="h-4 w-4" />
-                <AlertDescription>Stack saved to the gallery as a new FITS derivative.</AlertDescription>
+                <AlertDescription>
+                  <p>Stack of {stackMutation.data?.frameCount} frame{stackMutation.data?.frameCount === 1 ? '' : 's'} saved to the gallery as a new FITS derivative.</p>
+                  {stackMutation.data?.frames && <ul className="mt-2 space-y-0.5 font-mono text-xs">
+                    {stackMutation.data.frames.map((frame: StackFrameReport, index: number) => <li key={index} className={frame.used ? '' : 'text-amber-500'}>
+                      {index === 0 ? '★ ' : `${index + 1}. `}{frame.name}: {frame.used
+                        ? frame.method === 'reference' ? 'reference' : `${frame.method}${frame.matchedStars ? `, ${frame.matchedStars} stars` : ''}${frame.rmsPx != null ? `, residual ${frame.rmsPx} px` : ''}${frame.dx !== undefined ? ` (Δ ${frame.dx}, ${frame.dy} px)` : ''}`
+                        : frame.reason}
+                    </li>)}
+                  </ul>}
+                  {stackMutation.data?.warnings?.length ? <p className="mt-2 text-xs text-amber-500">{stackMutation.data.warnings.length} warning(s): see the frames marked above.</p> : null}
+                </AlertDescription>
               </Alert>
             )}
 
             <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
               <Button
                 onClick={() => stackMutation.mutate()}
-                disabled={!canEdit || selected.length < 2 || mismatched.length > 0 || stackMutation.isPending || !outputName.trim()}
+                disabled={!canEdit || selected.length < 2 || (mismatched.length > 0 && !register) || stackMutation.isPending || !outputName.trim()}
                 className="sky-button-primary"
               >
                 {stackMutation.isPending ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : <Layers className="mr-2 h-4 w-4" />}

@@ -8,7 +8,10 @@ import {
   readPixels,
   type FitsMetadata,
 } from './fits';
-import { parseWcsHeaders, pixelToSky, skyToPixel, type WcsSolution } from './wcs';
+import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
+import { bicubic, detectStars, registerFrame, type Registration } from './fits-registration';
+import { parseWcsHeaders, type WcsSolution } from './wcs';
 
 export type StackMethod = 'mean' | 'median' | 'sigma-clip';
 
@@ -16,14 +19,33 @@ export interface StackSettings {
   method?: StackMethod;
   /** Standard deviations from the mean beyond which a sample is rejected, for the 'sigma-clip' method. */
   sigmaClipThreshold?: number;
-  /** Align frames to the first one before combining (translation only). Defaults to true. */
+  /** Align frames to the first one before combining. Defaults to true. */
   register?: boolean;
+  /** Plate solutions to use instead of (or when missing from) each frame's FITS header, e.g. the latest local solve. */
+  frameWcs?: Array<WcsSolution | null | undefined>;
+  /** Display names for the per-frame report. */
+  frameNames?: string[];
+}
+
+export interface FrameReport {
+  name: string;
+  used: boolean;
+  method?: Registration['method'] | 'reference' | 'none';
+  matchedStars?: number;
+  rmsPx?: number | null;
+  /** Displacement of the frame relative to the reference, at the reference centre. */
+  dx?: number;
+  dy?: number;
+  reason?: string;
 }
 
 export interface StackResult {
   metadata: FitsMetadata;
+  /** Frames actually combined. */
   frameCount: number;
   offsets: { dx: number; dy: number }[];
+  frames: FrameReport[];
+  warnings: string[];
 }
 
 function luminancePlane(pixels: Float64Array, metadata: FitsMetadata): Float32Array {
@@ -100,8 +122,8 @@ function correlationScore(reference: Float32Array, target: Float32Array, width: 
  * coarse-to-fine: a wide search on a downsampled plane, refined with a small local search at
  * full resolution. Subtracting each plane's own mean before correlating lines frames up on
  * structure rather than overall brightness, so a different sky background or exposure between
- * frames doesn't bias the match. This purposefully stops at translation (no rotation/scale) —
- * full astrometric registration already exists through the Astrometry.net plate-solving workflow.
+ * frames doesn't bias the match. Only the starting point for frames without a plate solution:
+ * registerFrame adds rotation (and any residual) from matched stars.
  */
 function estimateTranslation(rawReference: Float32Array, rawTarget: Float32Array, width: number, height: number): { dx: number; dy: number } {
   if (Math.min(width, height) < 16) return { dx: 0, dy: 0 };
@@ -157,24 +179,6 @@ function headerWcs(metadata: FitsMetadata): WcsSolution | null {
   }
 }
 
-/**
- * Translation that maps the reference frame onto a target frame using both frames' WCS: the sky
- * position at the reference centre, located in the target. Returns null when the frames' scales
- * or rotations differ (a pure translation would not register them).
- */
-function wcsTranslation(reference: WcsSolution, target: WcsSolution | null): { dx: number; dy: number } | null {
-  if (!target) return null;
-  const scaleRatio = Math.sqrt(Math.abs((target.cd11 * target.cd22 - target.cd12 * target.cd21) / (reference.cd11 * reference.cd22 - reference.cd12 * reference.cd21)));
-  const rotation = Math.atan2(target.cd21, target.cd11) - Math.atan2(reference.cd21, reference.cd11);
-  if (Math.abs(scaleRatio - 1) > 0.002 || Math.abs(Math.sin(rotation)) > 0.002) return null;
-  const centerX = (reference.imageWidth + 1) / 2;
-  const centerY = (reference.imageHeight + 1) / 2;
-  const sky = pixelToSky(reference, centerX, centerY);
-  const pixel = skyToPixel(target, sky.ra, sky.dec);
-  if (!pixel) return null;
-  return { dx: Math.round(pixel.x - centerX), dy: Math.round(pixel.y - centerY) };
-}
-
 function medianOf(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -205,79 +209,166 @@ function combineSamples(samples: number[], method: StackMethod, sigmaClipThresho
 }
 
 /**
- * Stacks several same-sized FITS frames into one, aligning them (translation only) against the
- * first frame and combining each pixel with mean / median / sigma-clipped mean, the same
- * rejection idea Siril's stacking tool uses to reject satellite trails, cosmic rays, and other
- * one-frame outliers.
+ * Stacks FITS frames onto the first frame's pixel grid and combines each pixel with mean, median or
+ * sigma-clipped mean (the rejection Siril uses against satellite trails, cosmic rays and other
+ * one-frame outliers).
+ *
+ * Registration is sub-pixel and geometric: every frame is resampled (Catmull-Rom bicubic) through
+ * its own WCS — rotation, scale and SIP distortion included — refined with stars matched to the
+ * reference; frames without a plate solution start from a cross-correlation translation and the
+ * star fit adds rotation. Exact duplicate frames are skipped, frames whose stars cannot be lined up
+ * are rejected with a reason, and the residual of every frame is written to the header.
  */
 export async function stackFits(filePaths: string[], outputPath: string, settings: StackSettings = {}): Promise<StackResult> {
   if (filePaths.length < 2) throw new Error('Stacking requires at least two FITS frames');
   const method = settings.method ?? 'sigma-clip';
   const sigmaClipThreshold = Math.max(0.5, settings.sigmaClipThreshold ?? 3);
   const register = settings.register ?? true;
+  const names = filePaths.map((filePath, index) => settings.frameNames?.[index] || path.basename(filePath));
 
-  const frames = await Promise.all(filePaths.map(async filePath => {
+  const loaded = await Promise.all(filePaths.map(async filePath => {
     const metadata = await readFitsMetadata(filePath);
     const file = await readFile(filePath);
-    return { metadata, pixels: readPixels(file, metadata) };
+    const pixels = readPixels(file, metadata);
+    const hash = createHash('sha1').update(new Uint8Array(pixels.buffer)).digest('hex');
+    return { metadata, pixels, hash };
   }));
 
-  const reference = frames[0].metadata;
-  for (const frame of frames) {
-    if (frame.metadata.width !== reference.width || frame.metadata.height !== reference.height || frame.metadata.channels !== reference.channels) {
-      throw new Error('All frames must share the same dimensions and channel count to stack');
+  const reference = loaded[0].metadata;
+  const warnings: string[] = [];
+  const reports: FrameReport[] = names.map(name => ({ name, used: false }));
+  const seen = new Map<string, number>();
+  const candidates: number[] = [];
+  loaded.forEach((frame, index) => {
+    if (frame.metadata.channels !== reference.channels) throw new Error('All frames must have the same number of colour channels to stack');
+    if (!register && (frame.metadata.width !== reference.width || frame.metadata.height !== reference.height)) {
+      throw new Error('All frames must share the same dimensions to stack without alignment');
     }
-  }
+    const duplicate = seen.get(frame.hash);
+    if (duplicate !== undefined) {
+      reports[index].reason = `identical pixels to frame ${duplicate + 1} (${names[duplicate]}): duplicate skipped`;
+      reports[index].method = 'none';
+      warnings.push(`${names[index]}: ${reports[index].reason}`);
+      return;
+    }
+    seen.set(frame.hash, index);
+    candidates.push(index);
+  });
+  if (candidates.length < 2) throw new Error('Stacking needs at least two different frames: the selection only contains duplicates');
 
   const normalizedHeaderValue = (value: unknown) => String(value ?? '').trim().toLowerCase();
+  const frames = candidates.map(index => loaded[index]);
   for (const key of ['FILTER', 'BUNIT']) {
     const values = frames.map(frame => normalizedHeaderValue(frame.metadata.headers[key]));
     if (values.some(Boolean) && values.some(value => !value || value !== values[0])) {
       throw new Error(`All frames must have the same ${key} to stack scientifically`);
     }
   }
-  const exposureValues = frames.map(frame => {
-    const value = frame.metadata.headers.EXPTIME;
+  const exposureOf = (metadata: FitsMetadata) => {
+    const value = metadata.headers.EXPTIME;
     return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-  });
+  };
+  const exposureValues = frames.map(frame => exposureOf(frame.metadata));
   if (exposureValues.some(Boolean) && exposureValues.some(value => value == null)) {
     throw new Error('Either every frame must have a valid EXPTIME or none may specify one');
   }
   const referenceExposure = exposureValues[0];
   const brightnessUnit = normalizedHeaderValue(reference.headers.BUNIT);
   const alreadyRateCalibrated = /(?:\/s|s\^-1|s-1|\/sec|sec\^-1|sec-1)$/.test(brightnessUnit);
-  const fluxScales = exposureValues.map(exposure =>
-    !alreadyRateCalibrated && referenceExposure && exposure ? referenceExposure / exposure : 1);
+  const surfaceBrightness = /(\/sr|sr-1|sr\*\*-1|\/arcsec2|arcsec-2|deg-2)/.test(brightnessUnit.replace(/\s/g, ''));
 
   const { width, height, channels } = reference;
   const planeSize = width * height;
-  const referenceLuminance = luminancePlane(frames[0].pixels, reference);
-  const referenceWcs = headerWcs(reference);
-  const offsets = frames.map((frame, index) => {
-    if (!register || index === 0) return { dx: 0, dy: 0 };
-    // Frames with their own astrometric solution (e.g. observatory pipelines) align exactly
-    // through it; cross-correlation is the fallback for frames without one.
-    const fromWcs = referenceWcs ? wcsTranslation(referenceWcs, headerWcs(frame.metadata)) : null;
-    return fromWcs ?? estimateTranslation(referenceLuminance, luminancePlane(frame.pixels, frame.metadata), width, height);
-  });
+  // The FITS header's own solution first; otherwise the latest stored plate solve of that frame.
+  const wcsOf = (index: number) => {
+    const fromHeader = headerWcs(loaded[index].metadata);
+    if (fromHeader) return fromHeader;
+    const stored = settings.frameWcs?.[index];
+    const { width: frameWidth, height: frameHeight } = loaded[index].metadata;
+    return stored && stored.imageWidth === frameWidth && stored.imageHeight === frameHeight ? stored : null;
+  };
+  const referenceWcs = wcsOf(0);
+  const saturationOf = (metadata: FitsMetadata) => {
+    const value = metadata.headers.SATURATE ?? metadata.headers.SATLEVEL;
+    return typeof value === 'number' && value > 0 ? value : undefined;
+  };
+  const referenceLuminance = luminancePlane(loaded[0].pixels, reference);
+  const referenceStars = register ? detectStars(referenceLuminance, width, height, 400, saturationOf(reference)) : [];
+
+  interface Source { pixels: Float64Array; width: number; height: number; scale: number; registration: Registration | null }
+  const sources: Source[] = [];
+  const offsets: { dx: number; dy: number }[] = [];
+  for (const index of candidates) {
+    const frame = loaded[index];
+    const exposure = exposureOf(frame.metadata);
+    const fluxScale = !alreadyRateCalibrated && referenceExposure && exposure ? referenceExposure / exposure : 1;
+    if (index === 0 || !register) {
+      sources.push({ pixels: frame.pixels, width: frame.metadata.width, height: frame.metadata.height, scale: fluxScale, registration: null });
+      reports[index] = { ...reports[index], used: true, method: index === 0 ? 'reference' : 'none', dx: 0, dy: 0 };
+      offsets.push({ dx: 0, dy: 0 });
+      continue;
+    }
+    try {
+      const frameLuminance = luminancePlane(frame.pixels, frame.metadata);
+      const registration = registerFrame({
+        width, height, referenceStars,
+        frameStars: detectStars(frameLuminance, frame.metadata.width, frame.metadata.height, 400, saturationOf(frame.metadata)),
+        referenceWcs, frameWcs: wcsOf(index),
+        translation: () => {
+          if (frame.metadata.width !== width || frame.metadata.height !== height) {
+            throw new Error('it has a different size and no plate solution; plate-solve it to align it');
+          }
+          return estimateTranslation(referenceLuminance, frameLuminance, width, height);
+        },
+      });
+      const [cx, cy] = registration.map((width - 1) / 2, (height - 1) / 2);
+      const dx = Math.round((cx - (width - 1) / 2) * 100) / 100;
+      const dy = Math.round((cy - (height - 1) / 2) * 100) / 100;
+      // Flux per output pixel: a reference pixel covers `areaRatio` frame pixels (≈1 for one camera).
+      const area = surfaceBrightness ? 1 : registration.areaRatio((width - 1) / 2, (height - 1) / 2);
+      sources.push({ pixels: frame.pixels, width: frame.metadata.width, height: frame.metadata.height, scale: fluxScale * area, registration });
+      reports[index] = { ...reports[index], used: true, method: registration.method, matchedStars: registration.matchedStars, rmsPx: registration.rmsPx, dx, dy };
+      offsets.push({ dx, dy });
+      if (registration.rmsPx === null) {
+        warnings.push(`${names[index]}: too few stars to verify the alignment; used its ${registration.method === 'wcs' ? 'plate solution' : 'cross-correlation shift'} only`);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      reports[index] = { ...reports[index], used: false, method: 'none', reason: `not aligned: ${reason}` };
+      warnings.push(`${names[index]}: excluded, ${reason}`);
+    }
+  }
+  if (sources.length < 2) {
+    throw new Error(`Fewer than two frames could be aligned. ${warnings.join(' · ')}`);
+  }
 
   const stacked = new Float64Array(planeSize * channels);
-  const samples: number[] = new Array(frames.length);
-  for (let channel = 0; channel < channels; channel++) {
-    const base = channel * planeSize;
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        let count = 0;
-        for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
-          // An offset means the frame's content sits at reference + (dx, dy), so the frame pixel
-          // that lines up with output pixel (x, y) is at (x + dx, y + dy).
-          const sourceX = x + offsets[frameIndex].dx;
-          const sourceY = y + offsets[frameIndex].dy;
-          if (sourceX < 0 || sourceX >= width || sourceY < 0 || sourceY >= height) continue;
-          const pixel = frames[frameIndex].pixels[base + sourceY * width + sourceX] * fluxScales[frameIndex];
-          if (Number.isFinite(pixel)) samples[count++] = pixel;
+  const samples: number[] = new Array(sources.length);
+  const mapped = new Float64Array(sources.length * 2);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      for (let s = 0; s < sources.length; s++) {
+        const registration = sources[s].registration;
+        if (registration) {
+          const [fx, fy] = registration.map(x, y);
+          mapped[2 * s] = fx;
+          mapped[2 * s + 1] = fy;
+        } else {
+          mapped[2 * s] = x;
+          mapped[2 * s + 1] = y;
         }
-        stacked[base + y * width + x] = count > 0
+      }
+      for (let channel = 0; channel < channels; channel++) {
+        let count = 0;
+        for (let s = 0; s < sources.length; s++) {
+          const source = sources[s];
+          const sourcePlane = source.width * source.height;
+          const value = source.registration
+            ? bicubic(source.pixels, channel * sourcePlane, source.width, source.height, mapped[2 * s], mapped[2 * s + 1])
+            : source.pixels[channel * sourcePlane + y * source.width + x];
+          if (Number.isFinite(value)) samples[count++] = value * source.scale;
+        }
+        stacked[channel * planeSize + y * width + x] = count > 0
           ? combineSamples(samples.slice(0, count), method, sigmaClipThreshold)
           : Number.NaN;
       }
@@ -299,19 +390,27 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
     if (value !== undefined) cards.push(fitsCard(key, value));
   }
   if (referenceExposure) cards.push(fitsCard('EXPTIME', String(referenceExposure)));
-  // The output grid is the first frame's pixel grid. Preserve its complete celestial
-  // WCS (including distortion terms), not just a handful of display metadata.
-  for (const rawCard of reference.cards) {
-    const key = rawCard.slice(0, 8).trim();
-    if (/^(CTYPE|CRPIX|CRVAL|CUNIT|CDELT|CROTA|CD\d|PC\d|WCSAXES|RADESYS|EQUINOX|LONPOLE|LATPOLE|PV\d|PS\d|A_|B_|AP_|BP_|A_ORDER|B_ORDER|AP_ORDER|BP_ORDER)/.test(key)) {
-      cards.push(rawCard);
+  // Every frame is resampled onto the reference frame's pixel grid, so the reference's complete
+  // celestial WCS (including distortion terms) describes the stack.
+  if (!headerWcs(reference) && referenceWcs) {
+    for (const card of wcsCards(referenceWcs)) cards.push(card);
+  } else {
+    for (const rawCard of reference.cards) {
+      const key = rawCard.slice(0, 8).trim();
+      if (/^(CTYPE|CRPIX|CRVAL|CUNIT|CDELT|CROTA|CD\d|PC\d|WCSAXES|RADESYS|EQUINOX|LONPOLE|LATPOLE|PV\d|PS\d|A_|B_|AP_|BP_|A_ORDER|B_ORDER|AP_ORDER|BP_ORDER)/.test(key)) {
+        cards.push(rawCard);
+      }
     }
   }
-  cards.push(fitsCard('NCOMBINE', String(frames.length)));
-  cards.push(fitsCard('HISTORY', `AstroviaBin stack of ${frames.length} frames (method=${method})`));
-  for (let index = 0; index < offsets.length; index++) {
-    cards.push(fitsCard('HISTORY', `frame ${index}: dx=${offsets[index].dx} dy=${offsets[index].dy}`));
-  }
+  cards.push(fitsCard('NCOMBINE', String(sources.length)));
+  cards.push(fitsCard('HISTORY', `AstroviaBin stack of ${sources.length} frames (method=${method})`));
+  cards.push(fitsCard('HISTORY', 'Sub-pixel registration: WCS (TAN-SIP) + matched-star polynomial, bicubic'));
+  reports.forEach((report, index) => {
+    const detail = report.used
+      ? `${report.method}${report.matchedStars ? ` ${report.matchedStars} stars` : ''}${report.rmsPx != null ? ` rms ${report.rmsPx} px` : ''}${report.dx !== undefined ? ` dx=${report.dx} dy=${report.dy}` : ''}`
+      : `excluded: ${report.reason ?? ''}`;
+    cards.push(fitsCard('HISTORY', `frame ${index}: ${detail}`.slice(0, 72)));
+  });
   cards.push(fitsCard('END'));
   const header = Buffer.from(cards.join(''), 'ascii');
   const paddedHeader = Buffer.concat([header, Buffer.alloc(Math.ceil(header.length / FITS_BLOCK_SIZE) * FITS_BLOCK_SIZE - header.length, ' ')]);
@@ -322,5 +421,44 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
 
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, Buffer.concat([paddedHeader, paddedData]));
-  return { metadata: await readFitsMetadata(outputPath), frameCount: frames.length, offsets };
+  return { metadata: await readFitsMetadata(outputPath), frameCount: sources.length, offsets, frames: reports, warnings };
+}
+
+/** FITS cards for a stored WCS solution (TAN, plus SIP when present). */
+function wcsCards(wcs: WcsSolution): string[] {
+  const number = (value: number) => value.toExponential(12).toUpperCase();
+  const cards = [
+    fitsCard('CTYPE1', wcs.sip ? "'RA---TAN-SIP'" : "'RA---TAN'"), fitsCard('CTYPE2', wcs.sip ? "'DEC--TAN-SIP'" : "'DEC--TAN'"),
+    fitsCard('CRPIX1', number(wcs.crpix1)), fitsCard('CRPIX2', number(wcs.crpix2)),
+    fitsCard('CRVAL1', number(wcs.crval1)), fitsCard('CRVAL2', number(wcs.crval2)),
+    fitsCard('CD1_1', number(wcs.cd11)), fitsCard('CD1_2', number(wcs.cd12)),
+    fitsCard('CD2_1', number(wcs.cd21)), fitsCard('CD2_2', number(wcs.cd22)),
+  ];
+  if (wcs.sip) {
+    for (const [prefix, poly] of [['A', wcs.sip.a], ['B', wcs.sip.b], ['AP', wcs.sip.ap], ['BP', wcs.sip.bp]] as const) {
+      if (!poly) continue;
+      cards.push(fitsCard(`${prefix}_ORDER`, String(poly.order)));
+      for (const [key, value] of Object.entries(poly.terms)) cards.push(fitsCard(`${prefix}_${key}`, number(value)));
+    }
+  }
+  return cards;
+}
+
+/**
+ * stackFits in a worker thread: resampling millions of pixels per frame takes tens of seconds,
+ * which must not freeze the web server. Uses dist/stack-thread.js in production and the
+ * TypeScript source under tsx in development.
+ */
+export function runStackInThread(filePaths: string[], outputPath: string, settings: StackSettings = {}): Promise<StackResult> {
+  const source = import.meta.url.endsWith('.ts');
+  const url = source ? new URL('../workers/stack-thread.ts', import.meta.url) : new URL('./stack-thread.js', import.meta.url);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(url, { workerData: { filePaths, outputPath, settings }, execArgv: source ? ['--import', 'tsx'] : undefined });
+    worker.once('message', (message: { ok: boolean; result?: StackResult; error?: string }) => {
+      if (message.ok && message.result) resolve(message.result);
+      else reject(new Error(message.error || 'Stacking failed'));
+    });
+    worker.once('error', reject);
+    worker.once('exit', code => { if (code !== 0) reject(new Error(`Stacking thread exited with code ${code}`)); });
+  });
 }

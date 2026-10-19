@@ -179,12 +179,14 @@ npm run dev:worker:standalone
 - **Node.js**: 20+ (for building from source)
 
 ### Optional Integrations
-- **Historical survey reference**: Optional DSS2 images via NASA SkyView or Pan-STARRS1 DR2 r-band stacks via STScI/MAST. Only field coordinates and cutout parameters leave the server, never image/FITS pixels. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25′. Choose another local FITS to avoid external requests.
+- **Survey references for HOTPANTS**: "Auto" picks the deepest survey covering the field in the band of the science FILTER — Pan-STARRS1 DR2 (g/r/i/z/y, Dec > −30°, fields ≤ 25′), DESI Legacy Surveys DR10 (g/r/i/z), SDSS (u/g/r/i/z), 2MASS (J/H/K) or DSS1/DSS2 — and any of them can be chosen by hand. Candidate verification cross-matches positions with Gaia DR3, AAVSO VSX and SIMBAD through CDS. Only field or candidate coordinates and cutout parameters leave the server, never image/FITS pixels. Choose another local FITS as the reference to avoid external requests.
 
-FITS stacking aligns images by integer-pixel translation, normalizes differing
-exposure times when all frames provide `EXPTIME`, rejects one-frame outliers
-with sigma clipping, and retains the first frame's WCS. It does not correct
-rotation or scale. See [FITS stacking notes](docs/fits-stacking.md).
+FITS stacking aligns every frame with sub-pixel accuracy through its plate
+solution (rotation, scale and lens distortion) refined with matched stars,
+reports each frame's residual, leaves out frames that do not line up and skips
+duplicates, normalizes differing exposure times when all frames provide
+`EXPTIME`, rejects one-frame outliers with sigma clipping, and retains the
+reference frame's WCS. See [FITS stacking notes](docs/fits-stacking.md).
 
 ## Configuration
 
