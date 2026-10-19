@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Crosshair, Loader, ChevronDown, ChevronRight, AlertTriangle } from "lucide-react";
+import { Crosshair, Loader, ChevronDown, ChevronRight, AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
@@ -45,6 +45,13 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
     },
   });
 
+  // Re-runs the catalogue lookup: online (Gaia DR3 + SIMBAD) when reachable, otherwise offline data.
+  const rescan = useMutation({
+    mutationFn: async () => (await apiRequest("GET", `/api/images/${image.id}/annotations?refresh=1`)).json(),
+    onSuccess: data => queryClient.setQueryData(["/api/images", image.id, "annotations"], data),
+  });
+  const rescanSource = rescan.data ? (rescan.data.overlay?.online ? "online catalogues (Gaia DR3 + SIMBAD)" : "offline catalogues — online lookup unavailable") : null;
+
   const muted = dark ? "text-gray-400" : "text-muted-foreground";
   const inputClass = dark ? "h-8 text-xs bg-black/40 border-white/20 text-white" : "h-8 text-xs";
   const errorText = solve.error instanceof Error ? solve.error.message.replace(/^\d+:\s*/, '') : null;
@@ -72,6 +79,19 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
               {processing || solve.isPending ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : <Crosshair className="mr-2 h-4 w-4" />}
               {job?.status === 'pending' ? "Queued…" : processing ? "Solving…" : image.plateSolved ? "Re-solve locally" : "Solve locally"}
             </Button>
+            {image.plateSolved && !processing && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={rescan.isPending}
+                onClick={() => rescan.mutate()}
+                title="Look up the field again: online catalogues when available, otherwise offline"
+                className={dark ? "bg-black/50 text-white border-white/20 hover:bg-black/70" : undefined}
+              >
+                {rescan.isPending ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                {rescan.isPending ? "Scanning…" : "Rescan annotations"}
+              </Button>
+            )}
             <button type="button" onClick={() => setShowHint(value => !value)} className={`text-xs flex items-center gap-1 ${muted} hover:underline`}>
               {showHint ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               Coordinate hint
@@ -102,6 +122,8 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
             </div>
           )}
           {errorText && <p className="text-xs text-red-400">{errorText}</p>}
+          {rescanSource && <p className={`text-xs ${rescan.data?.overlay?.online ? "text-green-400" : "text-amber-300"}`}>Annotations rescanned with {rescanSource}.</p>}
+          {rescan.isError && <p className="text-xs text-red-400">Rescan failed; try again.</p>}
         </>
       )}
     </div>

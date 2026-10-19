@@ -321,7 +321,7 @@ app.get('/:id/annotations', async (c) => {
           ra: overlay.field.ra, dec: overlay.field.dec,
           radiusDeg: Math.hypot(overlay.field.widthDeg, overlay.field.heightDeg) / 2,
           pixelScale: overlay.field.pixelScale,
-        }).catch(() => null);
+        }, { refresh: c.req.query('refresh') === '1' }).catch(() => null);
         if (online) overlay = mergeOnlineCatalog(overlay, wcs, online, epoch ?? new Date().getUTCFullYear());
       }
       return c.json({

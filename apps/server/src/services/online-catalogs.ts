@@ -72,12 +72,17 @@ async function fetchSimbad(ra: number, dec: number, radiusDeg: number): Promise<
  * Cached online catalogue for an image's solved field; fetched once (in parallel) and stored on
  * disk. Returns null when disabled or offline. Failed lookups are retried after 10 minutes.
  */
-export async function getOnlineCatalog(imageId: number, field: { ra: number; dec: number; radiusDeg: number; pixelScale: number }): Promise<OnlineCatalog | null> {
+export async function getOnlineCatalog(imageId: number, field: { ra: number; dec: number; radiusDeg: number; pixelScale: number }, options: { refresh?: boolean } = {}): Promise<OnlineCatalog | null> {
   if (!onlineCatalogsEnabled()) return null;
   const key = `${imageId}-${createHash('sha1').update(`${field.ra.toFixed(5)},${field.dec.toFixed(5)},${field.radiusDeg.toFixed(4)}`).digest('hex').slice(0, 12)}`;
   const file = path.join(cacheDirectory(), `${key}.json`);
-  try { return JSON.parse(await readFile(file, 'utf8')) as OnlineCatalog; } catch { /* not cached yet */ }
-  if ((failures.get(key) ?? 0) > Date.now()) return null;
+  if (options.refresh) {
+    // Explicit rescan: query again now; the previous cache file is only replaced on success.
+    failures.delete(key);
+  } else {
+    try { return JSON.parse(await readFile(file, 'utf8')) as OnlineCatalog; } catch { /* not cached yet */ }
+    if ((failures.get(key) ?? 0) > Date.now()) return null;
+  }
   const inFlight = pending.get(key);
   if (inFlight) return inFlight;
 

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Online catalogues for annotations when the server has internet: Gaia DR3 stars (VizieR) and named SIMBAD objects, merged without duplicates and cached per image on disk (`AppData/online-catalog-cache`). Only field coordinates are sent; `ASTROVIABIN_ONLINE_CATALOGS=false` disables it.
+- Online catalogues for annotations when the server has internet: Gaia DR3 stars (VizieR) and named SIMBAD objects, merged without duplicates and cached per image on disk (`AppData/online-catalog-cache`); a "Rescan annotations" button next to "Re-solve locally" refreshes them (online when reachable, otherwise offline). Only field coordinates are sent; `ASTROVIABIN_ONLINE_CATALOGS=false` disables it.
 - Astro-style annotations: named stars (proper name, Bayer, Flamsteed), HD/HIP and Tycho-2 stars with magnitudes and proper motion, deep-sky outlines with catalogue size and position angle, constellation figures and names, and an RA/Dec grid — all projected through each image's WCS from an offline bundle built at image build time. Layer toggles, constant on-screen marker size and label decluttering in the viewer.
 
 ### Fixed
