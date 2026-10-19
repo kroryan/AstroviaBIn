@@ -190,6 +190,9 @@ app.post('/upload', async (c) => {
   } catch (error) {
     if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
     if (error instanceof UploadRequestError) return c.json({ message: error.message }, error.status);
+    if (error instanceof Error && error.message.startsWith('Invalid FITS file:')) {
+      return c.json({ message: error.message }, 400);
+    }
     return handleRouteError(c, error, 'Failed to upload FITS image');
   }
 });

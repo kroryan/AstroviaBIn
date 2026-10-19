@@ -109,7 +109,7 @@ async function readFitsHeaderCards(filePath: string, sourceSize: number): Promis
   if (sourceSize > MAX_HEADER_BYTES) {
     throw new Error(`Invalid FITS file: header exceeds the ${MAX_HEADER_BYTES / 1024 / 1024} MiB safety limit without END`);
   }
-  throw new Error('Invalid FITS file: missing END header card');
+  throw new Error(`Invalid FITS file: missing END header card after scanning ${cards.length * FITS_CARD_SIZE} header bytes (${sourceSize} file bytes)`);
 }
 
 export interface FitsPreview {

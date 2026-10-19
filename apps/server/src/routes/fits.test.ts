@@ -91,6 +91,14 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     });
     assert.equal(largeHeaderUpload.status, 201, await largeHeaderUpload.text());
 
+    const missingEndUpload = await app.request('/api/fits/upload?filename=missing-end.fits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: new Uint8Array(Buffer.alloc(2880, 32)),
+    });
+    assert.equal(missingEndUpload.status, 400);
+    assert.match((await missingEndUpload.json() as { message: string }).message, /missing END header card after scanning 2880 header bytes \(2880 file bytes\)/);
+
     const images = await app.request('/api/fits');
     const image = (await images.json() as Array<{ id: number; originalPath: string; targetName: string; tags: string[] }>).find(item => item.originalPath === 'fits://m42.fits');
     assert.ok(image);
