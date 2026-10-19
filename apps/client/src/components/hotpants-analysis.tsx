@@ -7,7 +7,9 @@ import type { AstroImage } from '@shared/schema';
 type Candidate = { x: number; y: number; ra: number; dec: number; snr: number; status: string;
   centroidX?: number; centroidY?: number; ringRadiusPx?: number;
   scienceContrast?: number; shape?: { sharpness: number; roundness: number };
-  nearbyCatalogObjects?: { name: string; separationArcsec: number }[] };
+  nearbyCatalogObjects?: { name: string; separationArcsec: number }[];
+  knownObject?: { name: string; class?: string; vmag?: number | null; separationArcsec: number } };
+type SolarSystemObject = { name: string; class?: string; vmag?: number | null; x: number; y: number; ra: number; dec: number };
 type CandidateCheck = { status: 'repeat_detection' | 'not_detected' | 'inconclusive'; sourceFound: boolean;
   followupImageId: number; followupFilter?: string | null; followupDate?: string | null;
   comparableFilter: boolean; independentEpoch: boolean; checkedAt: string; note: string };
@@ -20,6 +22,7 @@ type Report = {
   candidateChecks?: Record<string, CandidateCheck>;
   files?: string[]; reference?: { survey?: string; localImageId?: number }; catalogCheck?: string;
   settings?: { thresholdSigma: number; maxDimension: number; sourceFwhm?: number };
+  solarSystemObjects?: SolarSystemObject[]; solarSystemCheck?: string;
 };
 
 async function jsonResponse<T>(response: Response): Promise<T> {
@@ -171,13 +174,15 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           <p className="text-xs text-muted-foreground">Rejected raw peaks: {Object.entries(report.rejectedCandidates || {}).map(([reason, count]) => `${reason.replace(/([A-Z])/g, ' $1').toLowerCase()} ${count}`).join(' · ') || 'none'}.</p>
         </>}
         <p className="text-xs text-muted-foreground">Catalog check: {report.catalogCheck || 'not available'}. A nearby catalog object is not a transient identification.</p>
+        {report.solarSystemCheck && <p className="text-xs text-muted-foreground">Known asteroids and comets: {report.solarSystemCheck}{report.solarSystemObjects?.length ? ` ${report.solarSystemObjects.map(item => `${item.name}${item.vmag != null ? ` (V ${item.vmag})` : ''}`).join(', ')}.` : ''}</p>}
         <div className="grid gap-2 sm:grid-cols-3">
           {(['science.fits', 'reference-aligned.fits', 'difference.fits'] as const).map(name => <div key={name}>
             <p className="mb-1 text-xs font-medium">{name === 'science.fits' ? 'Science' : name === 'reference-aligned.fits' ? 'Aligned reference' : 'Difference · candidates'}</p>
             <div className="relative"><img src={file(name, true)} alt={name} className="w-full rounded border" loading="lazy" />
               {name === 'difference.fits' && report.analysisVersion === 2 && report.candidates?.map((candidate, index) => {
                 const radius = candidate.ringRadiusPx || 5;
-                return <span key={`${candidate.x}-${candidate.y}`} title={`Candidate ${index + 1}: S/N ${candidate.snr}, RA ${candidate.ra.toFixed(7)}, Dec ${candidate.dec.toFixed(7)}`} className="absolute rounded-full border-2 border-red-500 bg-red-500/10" style={{ left: `${(candidate.centroidX ?? candidate.x) / (report.width || 1) * 100}%`, top: `${(candidate.centroidY ?? candidate.y) / (report.height || 1) * 100}%`, width: `${2 * radius / (report.width || 1) * 100}%`, height: `${2 * radius / (report.height || 1) * 100}%`, transform: 'translate(-50%, -50%)', boxSizing: 'border-box' }} />;
+                const known = candidate.status === 'known_solar_system_object';
+                return <span key={`${candidate.x}-${candidate.y}`} title={`Candidate ${index + 1}${known ? ` = ${candidate.knownObject?.name}` : ''}: S/N ${candidate.snr}, RA ${candidate.ra.toFixed(7)}, Dec ${candidate.dec.toFixed(7)}`} className={`absolute rounded-full border-2 ${known ? 'border-amber-400 bg-amber-400/10' : 'border-red-500 bg-red-500/10'}`} style={{ left: `${(candidate.centroidX ?? candidate.x) / (report.width || 1) * 100}%`, top: `${(candidate.centroidY ?? candidate.y) / (report.height || 1) * 100}%`, width: `${2 * radius / (report.width || 1) * 100}%`, height: `${2 * radius / (report.height || 1) * 100}%`, transform: 'translate(-50%, -50%)', boxSizing: 'border-box' }} />;
               })}
             </div>
           </div>)}
@@ -211,7 +216,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           <div className="max-h-64 overflow-y-auto text-xs space-y-2">{report.candidates?.map((candidate, index) => {
             const checked = report.candidateChecks?.[index];
             return <div key={`${candidate.x}-${candidate.y}`} className="rounded-md border p-2 space-y-1">
-              <p>#{index + 1} · model S/N {candidate.snr} · science contrast {candidate.scienceContrast} · RA {candidate.ra.toFixed(6)}° · Dec {candidate.dec.toFixed(6)}° · needs follow-up{candidate.nearbyCatalogObjects?.length ? ` · nearby OpenNGC: ${candidate.nearbyCatalogObjects.map(object => `${object.name} (${object.separationArcsec}″)`).join(', ')}` : ''}</p>
+              <p>#{index + 1} · model S/N {candidate.snr} · science contrast {candidate.scienceContrast} · RA {candidate.ra.toFixed(6)}° · Dec {candidate.dec.toFixed(6)}° · {candidate.status === 'known_solar_system_object' && candidate.knownObject ? <span className="text-amber-400">known solar-system object: {candidate.knownObject.name}{candidate.knownObject.class ? ` (${candidate.knownObject.class})` : ''}, {candidate.knownObject.separationArcsec}″ away — not a transient</span> : 'needs follow-up'}{candidate.nearbyCatalogObjects?.length ? ` · nearby OpenNGC: ${candidate.nearbyCatalogObjects.map(object => `${object.name} (${object.separationArcsec}″)`).join(', ')}` : ''}</p>
               {checked && <p className="text-amber-500">Follow-up: {checked.status.replaceAll('_', ' ')} in FITS #{checked.followupImageId} · {checked.comparableFilter ? 'same filter' : 'different/unknown filter'} · {checked.independentEpoch ? 'different observation time' : 'same/unknown observation time'}. {checked.note}</p>}
               <div className="flex gap-3">
                 <button type="button" className="text-primary underline" disabled={utility.isPending} onClick={() => utility.mutate({ tool: 'extractkern', mode: 'position', x: candidate.x, y: candidate.y, kernelWidths: 2 })}>PSF kernel</button>

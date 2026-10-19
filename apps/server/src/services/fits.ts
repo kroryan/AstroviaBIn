@@ -599,9 +599,12 @@ const COMMENTARY_KEYWORDS = new Set(['HISTORY', 'COMMENT', '']);
 export function fitsCard(key: string, value?: string): string {
   // Commentary keywords carry free text after column 8 and must not have the "= " value indicator;
   // CFITSIO-based readers (solve-field among them) reject such files.
+  // Logical and numeric values use the FITS "fixed format" (right-justified to column 30), which
+  // the standard requires for SIMPLE, BITPIX, NAXISn and friends; strings start at column 11.
   const content = value === undefined ? key
     : COMMENTARY_KEYWORDS.has(key) ? `${key.padEnd(8, ' ')}${value}`
-      : `${key.padEnd(8, ' ')}= ${value}`;
+      : value.startsWith("'") ? `${key.padEnd(8, ' ')}= ${value}`
+        : `${key.padEnd(8, ' ')}= ${value.padStart(20, ' ')}`;
   return content.padEnd(FITS_CARD_SIZE, ' ').slice(0, FITS_CARD_SIZE);
 }
 

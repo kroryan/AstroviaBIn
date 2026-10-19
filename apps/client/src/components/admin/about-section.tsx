@@ -109,6 +109,13 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">IMCCE SkyBoT</h3>
+        <p className="text-muted-foreground">HOTPANTS reports check the field for known asteroids and comets with the SkyBoT service of IMCCE, Observatoire de Paris (Berthier et al. 2006, ASP Conf. Ser. 351, 367). Only the field centre, radius, observation time and observatory code are sent.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://ssp.imcce.fr/webservices/skybot/" target="_blank" rel="noreferrer">SkyBoT</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">Reference surveys</h3>
         <p className="text-muted-foreground">Automatic HOTPANTS references can use DSS2 through NASA SkyView or Pan-STARRS1 DR2 r-band stacks through STScI/MAST. Only sky coordinates and cutout parameters are sent; your image, FITS, and thumbnails stay local. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25 arcminutes. Survey imagery retains its provider's rights and citation requirements. Analysis results are candidates, not verified discoveries.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from astropy.wcs import WCS
+from astropy.wcs import WCS, Sip
 from photutils.detection import DAOStarFinder
 from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter
 
@@ -47,6 +47,38 @@ def mono_data(source):
         return np.asarray(data, dtype=np.float32), hdu.header.copy()
 
 
+def binned_wcs(source_wcs, factor):
+    """WCS of a factor x factor block-integrated image.
+
+    Each output pixel covers source pixels [j*f, j*f + f - 1] (0-based), so its centre is at
+    source 1-based x = f*(X - 1) + (f - 1)/2 + 1. The linear transform (CD or CDELT) grows by f,
+    and SIP coefficients A_pq/B_pq/AP_pq/BP_pq scale by f**(p + q - 1) because SIP offsets are
+    measured in pixels relative to CRPIX. Built explicitly: WCS.slice() neither rescales a CD
+    matrix nor can move a SIP reference pixel (Sip.crpix is read-only).
+    """
+    wcs = source_wcs.deepcopy()
+    block_center = (factor - 1) / 2
+    crpix = (np.asarray(source_wcs.wcs.crpix, dtype=float) - block_center - 1 + factor) / factor
+    wcs.wcs.crpix = crpix
+    if source_wcs.wcs.has_cd():
+        wcs.wcs.cd = np.asarray(source_wcs.wcs.cd, dtype=float) * factor
+    else:
+        wcs.wcs.cdelt = np.asarray(source_wcs.wcs.cdelt, dtype=float) * factor
+    if source_wcs.sip is not None:
+        def scale(coefficients):
+            if coefficients is None:
+                return None
+            scaled = np.array(coefficients, dtype=float, copy=True)
+            for p in range(scaled.shape[0]):
+                for q in range(scaled.shape[1]):
+                    scaled[p, q] *= float(factor) ** (p + q - 1)
+            return scaled
+        sip = source_wcs.sip
+        wcs.sip = Sip(scale(sip.a), scale(sip.b), scale(sip.ap), scale(sip.bp), crpix)
+    wcs.wcs.set()
+    return wcs
+
+
 def reduced_image(source, output, max_dimension):
     data, header = mono_data(source)
     height, width = data.shape
@@ -69,20 +101,9 @@ def reduced_image(source, output, max_dimension):
             data = block_sum
         invalid = valid_count != factor ** 2
         if WCS(header).has_celestial:
-            block_center = (factor - 1) / 2
-            slice_start = math.floor(block_center)
-            # These slices follow the NumPy array's (y, x) order.
-            source_wcs = WCS(header).celestial
-            source_crpix = source_wcs.wcs.crpix.copy()
-            source_sip_crpix = source_wcs.sip.crpix.copy() if source_wcs.sip is not None else None
-            wcs = source_wcs.slice((slice(slice_start, slice_start + block_height * factor, factor),
-                                    slice(slice_start, slice_start + block_width * factor, factor)),
-                                   numpy_order=True)
-            # Derive CRPIX directly from the geometric center of each integration
-            # bin, avoiding slice-origin convention and odd/even half-pixel drift.
-            wcs.wcs.crpix = (source_crpix - block_center - 1 + factor) / factor
-            if wcs.sip is not None:
-                wcs.sip.crpix = (source_sip_crpix - block_center - 1 + factor) / factor
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                wcs = binned_wcs(WCS(header).celestial, factor)
             source_header = header
             header = fits.Header()
             for keyword in ('OBJECT', 'DATE-OBS', 'EXPTIME', 'FILTER', 'INSTRUME', 'TELESCOP', 'GAIN', 'BUNIT'):
@@ -108,14 +129,25 @@ def ensure_wcs(image_path, original_path, hint, work):
             return WCS(hdus[0].header).celestial
     work.mkdir(parents=True, exist_ok=True)
     config = work / 'backend.cfg'
-    config.write_text('add_path ' + os.environ.get('ASTROMETRY_INDEX_DIR', '/usr/share/astrometry') + '\nautoindex\n')
+    # Same index set as the main solver, including downloaded narrow-field indexes.
+    directories = [os.environ.get('ASTROMETRY_INDEX_DIR', '/usr/share/astrometry')]
+    directories += [d for d in os.environ.get('ASTROMETRY_EXTRA_INDEX_DIRS', '/app/config/astrometry-index').split(':') if d]
+    directories = [d for d in directories if os.path.isdir(d)]
+    config.write_text(''.join(f'add_path {d}\n' for d in directories) + 'autoindex\n')
     wcs_path = work / 'local.wcs'
     base = ['solve-field', '--overwrite', '--no-plots', '--downsample', '1',
             '--backend-config', str(config), '--dir', str(work), '--wcs', str(wcs_path),
             '--cpulimit', '120']
     attempts = []
     if hint and hint.get('ra') is not None and hint.get('dec') is not None:
-        attempts.append(['--ra', str(hint['ra']), '--dec', str(hint['dec']), '--radius', '5'])
+        positional = ['--ra', str(hint['ra']), '--dec', str(hint['dec']), '--radius', '5']
+        # The image was block-integrated by `factor`, so its pixel scale grew by that factor.
+        scale = hint.get('pixelScale')
+        if scale:
+            scale = float(scale) * float(hint.get('factor') or 1)
+            attempts.append(positional + ['--scale-units', 'arcsecperpix',
+                                          '--scale-low', f'{scale * 0.85:.4f}', '--scale-high', f'{scale * 1.15:.4f}'])
+        attempts.append(positional)
     attempts.append([])
     result = None
     for positional_hint in attempts:
@@ -451,6 +483,85 @@ def write_candidate_products(difference_path, candidates, output_path, regions_p
     Path(regions_path).write_text('\n'.join(region_lines) + '\n', encoding='utf-8')
 
 
+# IAU/MPC observatory codes for Las Cumbres Observatory sites (SITEID header), so asteroid
+# positions include the observer's parallax; anything else falls back to the geocentre (500).
+LCO_SITE_CODES = {'lsc': 'W86', 'coj': 'Q63', 'cpt': 'K91', 'elp': 'V37', 'ogg': 'F65', 'tfn': 'Z21', 'tlv': '097'}
+
+
+def _sexagesimal(text, hours):
+    sign = -1 if text.strip().startswith('-') else 1
+    parts = [float(part) for part in text.strip().lstrip('+-').split()]
+    value = parts[0] + parts[1] / 60 + parts[2] / 3600
+    return value * 15 if hours else sign * value
+
+
+def known_solar_system_objects(wcs, shape, header):
+    """Known asteroids and comets in the field at mid-exposure, from IMCCE SkyBoT.
+
+    Only the field centre, radius and epoch are sent. Returns (objects, note).
+    """
+    from astropy.time import Time, TimeDelta
+    date = str(header.get('DATE-OBS', '')).strip()
+    if not date:
+        return [], 'No DATE-OBS: known solar-system objects were not checked.'
+    exposure = float(header.get('EXPTIME') or 0)
+    epoch = Time(date.replace(' ', 'T'), scale='utc') + TimeDelta(exposure / 2, format='sec')
+    height, width = shape
+    ra, dec = wcs.pixel_to_world_values((width - 1) / 2, (height - 1) / 2)
+    corners = wcs.pixel_to_world_values(np.array([0, width - 1, 0, width - 1]), np.array([0, 0, height - 1, height - 1]))
+    radius = float(max(np.hypot((np.mod(corners[0] - ra + 180, 360) - 180) * math.cos(math.radians(dec)), corners[1] - dec)))
+    site = str(header.get('SITEID', '')).strip().lower()
+    location = str(header.get('MPCCODE') or header.get('OBSCODE') or LCO_SITE_CODES.get(site, '500'))
+    query = urllib.parse.urlencode({'-ep': f'{epoch.jd:.6f}', '-ra': f'{float(ra):.6f}', '-dec': f'{float(dec):.6f}',
+                                    '-rd': f'{min(radius * 1.05, 10):.5f}', '-mime': 'json', '-output': 'basic',
+                                    '-loc': location, '-objFilter': '111', '-refsys': 'EQJ2000', '-from': 'AstroviaBin'})
+    url = 'https://ssp.imcce.fr/webservices/skybot/api/conesearch.php?' + query
+    try:
+        request = urllib.request.Request(url, headers={'User-Agent': 'AstroviaBin private FITS analysis/1.0'})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = response.read(5_000_000).decode('utf-8').strip()
+    except Exception as error:  # offline or service down: the analysis itself still completes
+        return [], f'SkyBoT unavailable ({error}); known asteroids and comets were not checked.'
+    if not payload.startswith('['):
+        return [], 'SkyBoT found no known solar-system objects in this field.'
+    objects = []
+    for row in json.loads(payload):
+        try:
+            ora = _sexagesimal(row['RA (hms)'], True)
+            odec = _sexagesimal(row['DEC (dms)'], False)
+        except (KeyError, ValueError, IndexError):
+            continue
+        x, y = wcs.world_to_pixel_values(ora, odec)
+        if not (np.isfinite(x) and np.isfinite(y) and 0 <= x < width and 0 <= y < height):
+            continue
+        name = f"({row['Num']}) {row['Name']}" if row.get('Num') else str(row.get('Name'))
+        objects.append({'name': name, 'class': row.get('Class'), 'vmag': row.get('VMag (mag)'),
+                        'ra': ora, 'dec': odec, 'x': round(float(x), 2), 'y': round(float(y), 2),
+                        'positionErrorArcsec': row.get('Err (arcsec)'),
+                        'rateArcsecPerHour': [row.get('dRA (arcsec/h)'), row.get('dDEC (arcsec/h)')]})
+    return objects, f'SkyBoT ({location}, mid-exposure {epoch.isot}): {len(objects)} known solar-system object(s) in the field.'
+
+
+def flag_known_objects(candidates, objects, wcs, exposure_seconds):
+    """Marks candidates that coincide with a known asteroid or comet."""
+    if not candidates or not objects:
+        return
+    scale = float(np.sqrt(abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600
+    for candidate in candidates:
+        best = None
+        for item in objects:
+            rate = math.hypot(*(float(value or 0) for value in item['rateArcsecPerHour']))
+            # Allow for the positional uncertainty, a few pixels, and motion during the exposure.
+            tolerance = max(10.0, 3 * scale, 3 * float(item.get('positionErrorArcsec') or 0), rate * exposure_seconds / 3600)
+            separation = math.hypot((candidate['ra'] - item['ra']) * math.cos(math.radians(item['dec'])), candidate['dec'] - item['dec']) * 3600
+            if separation <= tolerance and (best is None or separation < best[1]):
+                best = (item, separation)
+        if best:
+            candidate['status'] = 'known_solar_system_object'
+            candidate['knownObject'] = {'name': best[0]['name'], 'class': best[0]['class'],
+                                        'vmag': best[0]['vmag'], 'separationArcsec': round(best[1], 1)}
+
+
 def check_candidate(config):
     """Check a saved candidate against an independent local FITS exposure."""
     work = Path(config['work']).resolve()
@@ -528,6 +639,8 @@ def main(config_path):
     candidates, detected_total, rejected = detect_candidates(
         difference, noise, bad_mask, mask, science, aligned, science_wcs,
         float(config['thresholdSigma']), int(config['maxCandidates']), float(config.get('sourceFwhm', 3)))
+    solar_system_objects, solar_system_note = known_solar_system_objects(science_wcs, science_data.shape, science_header)
+    flag_known_objects(candidates, solar_system_objects, science_wcs, float(science_header.get('EXPTIME') or 0))
     write_candidate_products(difference, candidates, work / 'difference-candidates.fits',
                              work / 'difference-candidates.reg')
     science_filter = str(science_header.get('FILTER', '')).strip()
@@ -543,6 +656,7 @@ def main(config_path):
             'sourceDate': str(science_header.get('DATE-OBS', '')).strip(),
             'width': science_data.shape[1], 'height': science_data.shape[0],
             'candidates': candidates, 'detectedTotal': detected_total,
+            'solarSystemObjects': solar_system_objects, 'solarSystemCheck': solar_system_note,
             'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,
             'files': ['science.fits', 'reference.fits', 'reference-aligned.fits', 'difference.fits',
                       'difference-candidates.fits', 'difference-candidates.reg',

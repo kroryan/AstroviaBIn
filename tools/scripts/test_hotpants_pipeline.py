@@ -8,7 +8,8 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from hotpants_pipeline import check_candidate, detect_candidates, reduced_image, write_candidate_products
+from hotpants_pipeline import (binned_wcs, check_candidate, detect_candidates, flag_known_objects,
+                               reduced_image, write_candidate_products)
 
 
 class CandidateValidationTests(unittest.TestCase):
@@ -147,6 +148,60 @@ class CandidateValidationTests(unittest.TestCase):
         self.assertEqual(result['status'], 'repeat_detection')
         self.assertTrue(result['sourceFound'])
 
+
+
+class BinnedWcsTests(unittest.TestCase):
+    def sip_wcs(self):
+        header = fits.Header({
+            'NAXIS': 2, 'NAXIS1': 2400, 'NAXIS2': 2400,
+            'CTYPE1': 'RA---TAN-SIP', 'CTYPE2': 'DEC--TAN-SIP', 'CRVAL1': 347.6689, 'CRVAL2': 26.7322,
+            'CRPIX1': 1200.5, 'CRPIX2': 1200.5, 'CD1_1': -2.0684735e-4, 'CD1_2': 9.36e-7,
+            'CD2_1': 9.04e-7, 'CD2_2': 2.0682117e-4,
+            'A_ORDER': 2, 'A_0_2': 6.58e-8, 'A_1_1': -7.97e-8, 'A_2_0': 5.73e-8,
+            'B_ORDER': 2, 'B_0_2': -3.50e-8, 'B_1_1': -6.03e-8, 'B_2_0': -1.24e-7,
+        })
+        return WCS(header)
+
+    def test_binned_wcs_with_cd_and_sip_matches_the_source(self):
+        """Regression: WCS.slice() failed on SIP (read-only Sip.crpix) and ignored CD scaling."""
+        source = self.sip_wcs()
+        for factor in (2, 3, 4):
+            binned = binned_wcs(source, factor)
+            for x, y in ((0, 0), (250, 120), (599, 599)):
+                expected = source.all_pix2world([[factor * x + (factor - 1) / 2, factor * y + (factor - 1) / 2]], 0)[0]
+                actual = binned.all_pix2world([[x, y]], 0)[0]
+                self.assertLess(np.hypot((actual[0] - expected[0]) * np.cos(np.radians(expected[1])),
+                                         actual[1] - expected[1]) * 3600, 1e-3)
+
+    def test_reduced_image_keeps_a_sip_wcs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'stack.fits'
+            header = self.sip_wcs().to_header(relax=True)
+            fits.writeto(source, np.ones((2400, 2400), dtype=np.float32), header=header)
+            output = Path(directory) / 'science.fits'
+            factor = reduced_image(source, output, 800)
+            self.assertEqual(factor, 3)
+            reduced = WCS(fits.getheader(output))
+            self.assertIsNotNone(reduced.sip)
+            # astropy may write the linear part as PC+CDELT instead of CD; compare the effective matrix.
+            self.assertAlmostEqual(abs(reduced.pixel_scale_matrix[0, 0]), 3 * 2.0684735e-4, places=10)
+
+
+class KnownObjectTests(unittest.TestCase):
+    def test_candidate_at_a_known_asteroid_is_flagged(self):
+        wcs = WCS(naxis=2)
+        wcs.wcs.crpix = [500, 500]
+        wcs.wcs.cdelt = [-0.0002, 0.0002]
+        wcs.wcs.crval = [347.6, 26.7]
+        wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+        asteroid = {'name': '(1620) Geographos', 'class': 'NEA>Apollo', 'vmag': 14.6, 'ra': 347.6, 'dec': 26.7,
+                    'positionErrorArcsec': 0.02, 'rateArcsecPerHour': [-35.9, -34.1]}
+        candidates = [{'ra': 347.6 + 2 / 3600, 'dec': 26.7, 'status': 'needs_followup'},
+                      {'ra': 347.7, 'dec': 26.75, 'status': 'needs_followup'}]
+        flag_known_objects(candidates, [asteroid], wcs, 120)
+        self.assertEqual(candidates[0]['status'], 'known_solar_system_object')
+        self.assertEqual(candidates[0]['knownObject']['name'], '(1620) Geographos')
+        self.assertEqual(candidates[1]['status'], 'needs_followup')
 
 if __name__ == '__main__':
     unittest.main()

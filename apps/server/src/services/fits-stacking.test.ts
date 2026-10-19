@@ -200,4 +200,7 @@ test('writes standard HISTORY cards that CFITSIO readers accept', async () => {
   const { fitsCard } = await import('./fits');
   assert.equal(fitsCard('HISTORY', 'stack of 7 frames').slice(0, 10), 'HISTORY st');
   assert.equal(fitsCard('EXPTIME', '120').slice(0, 10), 'EXPTIME = ');
+  // Fixed format: logical/numeric values end in column 30.
+  assert.equal(fitsCard('SIMPLE', 'T').slice(0, 30), 'SIMPLE  =                    T');
+  assert.equal(fitsCard('OBJECT', "'M 42'").slice(0, 16), "OBJECT  = 'M 42'");
 });
