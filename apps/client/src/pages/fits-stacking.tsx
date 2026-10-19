@@ -18,6 +18,7 @@ type StackResponse = { frameCount: number; frames?: StackFrameReport[]; warnings
 import { formatDayHeading, formatTime } from "@/lib/datetime";
 import { filterInfo, groupByDateAndFilter } from "@shared/fits-groups";
 import { GALLERY_GRID } from "@/components/image-gallery";
+import { checkSelection, SelectionNotes, StackingGuide } from "@/components/stacking-guide";
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 /** Frame size as written by the FITS importer into the description ("FITS 9576×6388 · mono · 16-bit"). */
@@ -97,8 +98,58 @@ export default function FitsStackingPage() {
     return [...groups.values()].sort((a, b) => Number(a.unsolved) - Number(b.unsolved) || latest(b.frames) - latest(a.frames));
   }, [visible, catalogs]);
 
+  const albumOf = (id: number) => (catalogs.find(item => item.name !== 'Solar System' && item.imageIds?.includes(id))
+    ?? catalogs.find(item => item.imageIds?.includes(id)))?.name ?? null;
+  const selectionNotes = checkSelection(selected.map(id => byId.get(id)).filter((image): image is AstroImage => Boolean(image)), albumOf);
+
   // The server refuses stacks that mix filters; say so before submitting.
   const selectedFilters = [...new Set(selected.map(id => filterInfo(byId.get(id)?.filters).code))];
+
+  const renderFrame = (image: AstroImage) => {
+    const position = selected.indexOf(image.id);
+    const isSelected = position >= 0;
+    const size = frameSize(image);
+    const sizeMismatch = Boolean(referenceSize && size && size !== referenceSize);
+    return (
+      <Card
+        key={image.id}
+        className={`cursor-pointer transition-all hover:shadow-md overflow-hidden ${isSelected ? 'ring-2 ring-primary' : ''} ${sizeMismatch && !isSelected ? 'opacity-50' : ''}`}
+        onClick={() => toggle(image.id)}
+        title={sizeMismatch ? `Different size from the reference (${size} vs ${referenceSize})` : undefined}
+      >
+        <CardContent className="p-0">
+          <div className="relative">
+            <div className="aspect-square bg-muted flex items-center justify-center">
+              {image.thumbnailUrl ? <img src={image.thumbnailUrl} alt={image.title} loading="lazy" className="w-full h-full object-cover" /> : <Info className="h-6 w-6 text-muted-foreground" />}
+            </div>
+            <div className="absolute top-2 left-2 flex items-center gap-1">
+              <Checkbox checked={isSelected} onClick={event => event.stopPropagation()} onCheckedChange={() => toggle(image.id)} className="bg-white/90" />
+              {isSelected && (
+                <span className={`text-xs font-bold rounded px-1 ${position === 0 ? 'bg-yellow-400 text-black' : 'bg-black/70 text-white'}`}>
+                  {position === 0 ? '★ ref' : position + 1}
+                </span>
+              )}
+            </div>
+            {isSelected && position > 0 && (
+              <button
+                className="absolute top-2 right-2 text-[10px] bg-black/70 text-white rounded px-1 hover:bg-black"
+                onClick={event => { event.stopPropagation(); makeReference(image.id); }}
+                title="Use this frame as the alignment reference"
+              >
+                ★ make ref
+              </button>
+            )}
+            <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
+              <p className="text-xs text-white truncate">{image.title}</p>
+              <p className="text-[10px] text-gray-300 truncate">
+                {[image.captureDate ? formatTime(image.captureDate) : null, image.exposureTime, size, image.originalPath?.startsWith('fits-derived://') ? 'stack' : null].filter(Boolean).join(' · ')}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   const GroupButtons = ({ ids }: { ids: number[] }) => (
     <span className="ml-auto flex gap-1" onClick={event => event.preventDefault()}>
@@ -155,6 +206,8 @@ export default function FitsStackingPage() {
           </p>
         </div>
 
+        <StackingGuide />
+
         <Card>
           <CardHeader>
             <CardTitle>Frames</CardTitle>
@@ -200,12 +253,7 @@ export default function FitsStackingPage() {
                 })}
               </div>
             )}
-            {selectedFilters.length > 1 && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>The selection mixes filters ({selectedFilters.join(', ')}). Stack one filter at a time — e.g. use “only these” on a filter group.</AlertDescription>
-              </Alert>
-            )}
+            <SelectionNotes notes={selectionNotes} />
             {mismatched.length > 0 && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
@@ -309,7 +357,7 @@ export default function FitsStackingPage() {
               <GroupButtons ids={field.frames.map(image => image.id)} />
             </summary>
             <div className="mt-3 space-y-3">
-              {groupByDateAndFilter(field.frames).map(day => (
+              {groupByDateAndFilter(field.frames.filter(image => !image.originalPath?.startsWith('fits-derived://'))).map(day => (
                 <div key={day.date ?? 'unknown'} className="border-l-2 border-primary/40 pl-3">
                   <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
                     <span className="font-semibold text-foreground">{formatDayHeading(day.date)}</span>
@@ -323,56 +371,26 @@ export default function FitsStackingPage() {
                         <GroupButtons ids={group.frames.map(image => image.id)} />
                       </div>
                       <div className={GALLERY_GRID}>
-                        {group.frames.map(image => {
-            const position = selected.indexOf(image.id);
-                          const isSelected = position >= 0;
-                          const size = frameSize(image);
-                          const sizeMismatch = Boolean(referenceSize && size && size !== referenceSize);
-                          return (
-                            <Card
-                              key={image.id}
-                              className={`cursor-pointer transition-all hover:shadow-md overflow-hidden ${isSelected ? 'ring-2 ring-primary' : ''} ${sizeMismatch && !isSelected ? 'opacity-50' : ''}`}
-                              onClick={() => toggle(image.id)}
-                              title={sizeMismatch ? `Different size from the reference (${size} vs ${referenceSize})` : undefined}
-                            >
-                              <CardContent className="p-0">
-                                <div className="relative">
-                                  <div className="aspect-square bg-muted flex items-center justify-center">
-                                    {image.thumbnailUrl ? <img src={image.thumbnailUrl} alt={image.title} loading="lazy" className="w-full h-full object-cover" /> : <Info className="h-6 w-6 text-muted-foreground" />}
-                                  </div>
-                                  <div className="absolute top-2 left-2 flex items-center gap-1">
-                                    <Checkbox checked={isSelected} onClick={event => event.stopPropagation()} onCheckedChange={() => toggle(image.id)} className="bg-white/90" />
-                                    {isSelected && (
-                                      <span className={`text-xs font-bold rounded px-1 ${position === 0 ? 'bg-yellow-400 text-black' : 'bg-black/70 text-white'}`}>
-                                        {position === 0 ? '★ ref' : position + 1}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {isSelected && position > 0 && (
-                                    <button
-                                      className="absolute top-2 right-2 text-[10px] bg-black/70 text-white rounded px-1 hover:bg-black"
-                                      onClick={event => { event.stopPropagation(); makeReference(image.id); }}
-                                      title="Use this frame as the alignment reference"
-                                    >
-                                      ★ make ref
-                                    </button>
-                                  )}
-                                  <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
-                                    <p className="text-xs text-white truncate">{image.title}</p>
-                                    <p className="text-[10px] text-gray-300 truncate">
-                                      {[image.captureDate ? formatTime(image.captureDate) : null, image.exposureTime, size, image.originalPath?.startsWith('fits-derived://') ? 'stack' : null].filter(Boolean).join(' · ')}
-                                    </p>
-                                  </div>
-                                </div>
-                              </CardContent>
-                            </Card>
-                          );
-                        })}
+                        {group.frames.map(image => renderFrame(image))}
                       </div>
                     </div>
                   ))}
                 </div>
               ))}
+              {field.frames.some(image => image.originalPath?.startsWith('fits-derived://')) && (() => {
+                const stacks = field.frames.filter(image => image.originalPath?.startsWith('fits-derived://'));
+                return (
+                  <div className="border-l-2 border-amber-500/50 pl-3">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                      <span className="font-semibold text-foreground">Earlier stacks and derivatives</span>
+                      <span className="text-muted-foreground">{stacks.length} · do not re-stack them with the frames they came from</span>
+                    </div>
+                    <div className={GALLERY_GRID}>
+                      {stacks.map(image => renderFrame(image))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </details>
         ))}
