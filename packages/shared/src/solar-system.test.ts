@@ -37,4 +37,6 @@ test('Solar System album categories come from the body tags', async () => {
   assert.equal(solarSystemSection(['Solar System', 'Comet']), 'Comets');
   assert.equal(solarSystemSection(['Solar System']), 'Solar System');
   assert.equal(solarSystemSection([]), 'Solar System');
+  assert.equal(solarSystemSection(['Solar System'], 'sol3.png'), 'Sun', 'the title names the body');
+  assert.equal(solarSystemSection(['Solar System'], 'eclipse'), 'Solar System');
 });

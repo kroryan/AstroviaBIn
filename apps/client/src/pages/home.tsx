@@ -125,7 +125,7 @@ export default function Home() {
   const openCatalog = catalogs.find(catalog => catalog.id === filters.galleryCatalogId);
   const albumSections: Array<{ name: string; images: AstroImage[] }> = !openCatalog ? [] :
     openCatalog.name === "Solar System"
-      ? SOLAR_SYSTEM_SECTIONS.map(name => ({ name, images: filteredImages.filter(image => solarSystemSection(image.tags) === name) }))
+      ? SOLAR_SYSTEM_SECTIONS.map(name => ({ name, images: filteredImages.filter(image => solarSystemSection(image.tags, image.title) === name) }))
       : [{ name: "FITS", images: filteredImages.filter(isFitsImage) }, { name: "Photos", images: filteredImages.filter(image => !isFitsImage(image)) }];
 
   // Get only the visible images based on pagination

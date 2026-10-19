@@ -74,13 +74,17 @@ export function withoutDeepSkyForPlanets(tags: string[], previousTags: string[] 
 /** Album categories inside the Solar System album, in display order. */
 export const SOLAR_SYSTEM_SECTIONS = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Comets', 'Asteroids', 'Solar System'] as const;
 
-/** Which Solar System category an image belongs to, from its tags (falls back to "Solar System"). */
-export function solarSystemSection(tags: string[] | null | undefined): typeof SOLAR_SYSTEM_SECTIONS[number] {
+/**
+ * Which Solar System category an image belongs to: from its body tag, else the body its title
+ * names ("sol3.png" → Sun), else "Solar System".
+ */
+export function solarSystemSection(tags: string[] | null | undefined, title?: string | null): typeof SOLAR_SYSTEM_SECTIONS[number] {
   const normalized = (tags ?? []).map(tag => tag.trim().toLowerCase());
   for (const section of SOLAR_SYSTEM_SECTIONS.slice(0, 10)) {
     if (normalized.includes(section.toLowerCase())) return section;
   }
   if (normalized.some(tag => tag === 'comet' || tag === 'comets')) return 'Comets';
   if (normalized.some(tag => tag === 'asteroid' || tag === 'asteroids')) return 'Asteroids';
-  return 'Solar System';
+  const named = solarSystemBodyIn(title);
+  return (SOLAR_SYSTEM_SECTIONS as readonly string[]).includes(named ?? '') ? named as typeof SOLAR_SYSTEM_SECTIONS[number] : 'Solar System';
 }
