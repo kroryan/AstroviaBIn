@@ -90,6 +90,16 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">Candidate verification (Gaia DR3, AAVSO VSX, SIMBAD)</h3>
+        <p className="text-muted-foreground">HOTPANTS candidate reports tie each position to nearby Gaia DR3 stars, calibrate magnitudes against Gaia, and check the AAVSO International Variable Star Index (VSX) and SIMBAD through VizieR/CDS. Only candidate coordinates are sent. This research made use of the International Variable Star Index (VSX) database, operated at AAVSO, Cambridge, Massachusetts, USA (Watson, Henden &amp; Price 2006). Report links open external services (Aladin Lite, DESI Legacy Surveys viewer, the IAU Transient Name Server, ESASky); their contents belong to their operators.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://www.aavso.org/vsx/" target="_blank" rel="noreferrer">AAVSO VSX</a>
+          <a className="text-primary underline" href="https://www.aavso.org/terms-of-use" target="_blank" rel="noreferrer">AAVSO terms of use</a>
+          <a className="text-primary underline" href="https://www.wis-tns.org/" target="_blank" rel="noreferrer">Transient Name Server</a>
+          <a className="text-primary underline" href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noreferrer">Aladin Lite</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">OpenNGC catalog</h3>
         <p className="text-muted-foreground">Target identification and deep-sky annotations (outlines with catalogue size and position angle) use OpenNGC by Mattia Verga, licensed under CC BY-SA 4.0. Every annotation is projected through each image's own WCS solution (TAN with SIP distortion); outlines are only as accurate as the catalogue's sizes.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
@@ -99,11 +109,13 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">Astropy, NumPy and SciPy</h3>
-        <p className="text-muted-foreground">AstroviaBin's star extractor for plate solving and the HOTPANTS pipeline use Astropy, NumPy and SciPy, all distributed under the BSD 3-Clause license, installed from Debian.</p>
+        <p className="text-muted-foreground">AstroviaBin's star extractor for plate solving and the HOTPANTS pipeline use Astropy, NumPy and SciPy, all distributed under the BSD 3-Clause license, installed from Debian. Verification stamps and PDF reports are drawn with Matplotlib (Matplotlib license, PSF-based) and Pillow (MIT-CMU license), also from Debian.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://www.astropy.org/" target="_blank" rel="noreferrer">Astropy</a>
           <a className="text-primary underline" href="https://numpy.org/" target="_blank" rel="noreferrer">NumPy</a>
           <a className="text-primary underline" href="https://scipy.org/" target="_blank" rel="noreferrer">SciPy</a>
+          <a className="text-primary underline" href="https://matplotlib.org/stable/project/license.html" target="_blank" rel="noreferrer">Matplotlib license</a>
+          <a className="text-primary underline" href="https://github.com/python-pillow/Pillow/blob/main/LICENSE" target="_blank" rel="noreferrer">Pillow license</a>
         </div>
       </div>
       <div>

@@ -33,6 +33,8 @@ const root = () => path.resolve(process.env.FITS_ANALYSIS_DIR || (process.env.NO
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILES = new Set(['science.fits', 'reference.fits', 'reference-aligned.fits', 'reference-mask.fits', 'difference.fits', 'difference-candidates.fits', 'difference-candidates.reg', 'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log', 'kernel.fits', 'kernel-stamps.txt', 'noise-scaled.fits']);
 const GENERATED_FILE = /^(kernel|masked)-[0-9a-f-]{36}\.fits$/i;
+const VERIFICATION_FILE = /^(candidate-\d{1,3}\.png|candidate-\d{1,3}-blink\.gif|report\.pdf|verification\.json)$/;
+const CONTENT_TYPES: Record<string, string> = { '.png': 'image/png', '.gif': 'image/gif', '.pdf': 'application/pdf', '.json': 'application/json' };
 const INPUT_FILE_FLAGS = new Set(['-tni', '-tmi', '-ini', '-imi', '-ki', '-rf', '-ssf', '-cmp']);
 const OUTPUT_FILE_FLAGS: Record<string, string> = {
   '-oni': 'noise.fits', '-ond': 'noise-scaled.fits', '-oci': 'convolved.fits',
@@ -43,6 +45,7 @@ const BOOLEAN_FLAGS = new Set('sconv okn convvar nim ndm cim allm nc hki sht nsh
 const CHOICE_FLAGS: Record<string, string[]> = { '-c': ['t', 'i'], '-n': ['t', 'i', 'u'], '-fom': ['v', 's', 'h'] };
 const running = new Map<string, string>();
 const verifying = new Set<string>();
+const reporting = new Set<string>();
 
 type Candidate = { ra: number; dec: number; [key: string]: unknown };
 type PipelineResult = { candidates?: Candidate[]; [key: string]: unknown };
@@ -215,6 +218,8 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
           return { ...pipelineResult, catalogCheck: 'Unavailable' };
         });
         await writeJson(path.join(directory, 'report.json'), { ...report, ...result, status: 'complete', completedAt: new Date().toISOString() });
+        // Verification products (cross-matches, marked stamps, blink GIFs, PDF) follow in the background.
+        buildVerification(imageId, runId).catch(error => console.warn(`HOTPANTS verification for ${runId} failed:`, error));
       } else {
         await writeJson(path.join(directory, 'report.json'), { ...report, status: 'failed', completedAt: new Date().toISOString(), error: errors.slice(-4000) || `Pipeline exited ${code}` });
       }
@@ -233,6 +238,9 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
 export async function getHotpantsReport(imageId: number, runId: string) {
   const directory = runDirectory(imageId, runId);
   const report = JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8'));
+  if (report.verificationStatus === 'running' && !reporting.has(`${imageId}/${runId}`)) {
+    report.verificationStatus = 'interrupted';
+  }
   if (report.status === 'running') {
     if (running.get(String(imageId)) !== runId) return { ...report, status: 'interrupted', error: 'AstroviaBin restarted during this analysis. Start a new run.' };
     try { return { ...report, progress: JSON.parse(await readFile(path.join(directory, 'progress.json'), 'utf8')) }; }
@@ -255,7 +263,7 @@ export async function listHotpantsReports(imageId: number) {
 
 export async function deleteHotpantsReport(imageId: number, runId: string): Promise<void> {
   const directory = runDirectory(imageId, runId);
-  if (running.get(String(imageId)) === runId || verifying.has(`${imageId}/${runId}`)) {
+  if (running.get(String(imageId)) === runId || verifying.has(`${imageId}/${runId}`) || reporting.has(`${imageId}/${runId}`)) {
     throw new Error('A running analysis cannot be deleted');
   }
   const image = await storage.getAstroImage(imageId);
@@ -323,10 +331,70 @@ export async function checkHotpantsCandidate(
   }
 }
 
+/**
+ * Runs tools/scripts/hotpants_report.py on a completed analysis: Gaia-tied positions, cross-matches,
+ * marked stamps, blink GIFs and a PDF report. Re-run after a follow-up check to include it.
+ */
+export async function buildVerification(imageId: number, runId: string): Promise<void> {
+  const key = `${imageId}/${runId}`;
+  if (reporting.has(key)) throw new Error('Verification is already being generated for this analysis');
+  const directory = runDirectory(imageId, runId);
+  const current = await getHotpantsReport(imageId, runId);
+  if (current.status !== 'complete') throw new Error('Only completed analyses can be verified');
+  reporting.add(key);
+  try {
+    await writeJson(path.join(directory, 'report.json'), { ...current, verificationStatus: 'running', verificationError: undefined });
+    const image = await storage.getAstroImage(imageId);
+    const script = process.env.HOTPANTS_REPORT_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_report.py');
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
+        [script, directory, image?.title || `FITS #${imageId}`], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let errors = '';
+      child.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-6000); });
+      child.on('error', reject);
+      const timer = setTimeout(() => child.kill('SIGKILL'), 900_000);
+      child.on('close', code => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(errors.trim().split('\n').slice(-3).join(' ') || `Verification exited ${code}`));
+      });
+    });
+    const verification = JSON.parse(await readFile(path.join(directory, 'verification.json'), 'utf8'));
+    const latest = await getHotpantsReport(imageId, runId);
+    const files = [...new Set([...(latest.files || []).filter((name: string) => !VERIFICATION_FILE.test(name)), ...verification.files])];
+    await writeJson(path.join(directory, 'report.json'), { ...latest, verification, files, verificationStatus: 'complete', verificationError: undefined });
+  } catch (error) {
+    const latest = await getHotpantsReport(imageId, runId).catch(() => current);
+    await writeJson(path.join(directory, 'report.json'), { ...latest, verificationStatus: 'failed',
+      verificationError: error instanceof Error ? error.message : String(error) }).catch(() => undefined);
+    throw error;
+  } finally {
+    reporting.delete(key);
+  }
+}
+
+export async function startVerification(imageId: number, runId: string): Promise<{ status: string }> {
+  const key = `${imageId}/${runId}`;
+  if (reporting.has(key)) throw new Error('Verification is already being generated for this analysis');
+  const report = await getHotpantsReport(imageId, runId);
+  if (report.status !== 'complete') throw new Error('Only completed analyses can be verified');
+  buildVerification(imageId, runId).catch(error => console.warn(`HOTPANTS verification for ${runId} failed:`, error));
+  return { status: 'running' };
+}
+
 export async function analysisFile(imageId: number, runId: string, filename: string, preview: boolean) {
-  if (!FILES.has(filename) && !GENERATED_FILE.test(filename)) throw new Error('Unknown analysis file');
+  if (!FILES.has(filename) && !GENERATED_FILE.test(filename) && !VERIFICATION_FILE.test(filename)) throw new Error('Unknown analysis file');
   const filePath = path.join(runDirectory(imageId, runId), filename);
   await stat(filePath);
+  if (VERIFICATION_FILE.test(filename)) {
+    const extension = path.extname(filename);
+    const download = extension === '.pdf' ? `hotpants-report-${imageId}-${runId.slice(0, 8)}.pdf` : null;
+    return new Response(Readable.toWeb(createReadStream(filePath)) as ReadableStream, { headers: {
+      'content-type': CONTENT_TYPES[extension] || 'application/octet-stream',
+      'content-disposition': download ? `attachment; filename="${download}"` : 'inline',
+      'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff',
+    } });
+  }
   if (preview) {
     if (!filename.endsWith('.fits')) throw new Error('Only FITS layers have a preview');
     const image = await cachedFitsPreview(filePath, { stretch: 'asinh' }, 2048);

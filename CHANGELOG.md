@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HOTPANTS masks bright, saturated and bleeding stars in the reference (brightness, elongation, and a Legacy-Surveys-style catalogue mask from the offline Tycho-2/HYG data) so they no longer appear as false candidates; reports show the masked fraction.
 - HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT with the observatory's topocentric position, sent as `-observer`) and flag candidates that coincide with one — verified on 1620 Geographos to 0.7".
 
+### Added (HOTPANTS verification)
+- Every completed analysis now gets verification products in the background: a weighted PSF fit on the difference image with formal errors; astrometry tied to the nearest Gaia DR3 stars (proper motions at the observation date, local offset + gradient), with a 1σ uncertainty that includes local systematics; a Gaia-calibrated magnitude; and cross-matches with Gaia DR3, AAVSO VSX, SIMBAD and OpenNGC host-galaxy ellipses, plus the known-asteroid check. Each candidate gets a reasoned verdict (known asteroid, known variable, stellar variability, possible extragalactic transient, unclassified new source).
+- Marked stamps (science, reference, difference, finder chart with exact subpixel crosshair, error circle, N/E compass and scale bar), a science ↔ PSF-matched-reference blink GIF, and links to Aladin Lite, the Legacy Surveys viewer, TNS, SIMBAD, VSX and ESASky.
+- Downloadable PDF report: observation and method summary, the full field with numbered candidates, and one page per candidate with stamps, finder chart, measurements, checks, verdict and clickable links. "Regenerate" includes later second-epoch checks.
+- Validated against Gaia stars withheld from the calibration: median error 0.05" (single frame), 0.15" (3.7"/px wide field) and 0.21" (stack), every one within 2σ of the stated uncertainty; 1620 Geographos lands 0.23" from its IMCCE ephemeris.
+
 ### Fixed (HOTPANTS)
 - New sources were discarded wherever HOTPANTS set the informational FLAG_OK_CONV bit; only FLAG_OUTPUT_ISBAD pixels are excluded now.
 - Survey holes (exact 0.0 pixels where Legacy/PS1 coadds masked saturated star cores) were used as real sky, so those stars appeared as new sources; they are now treated as missing reference data.

@@ -13,6 +13,28 @@ type SolarSystemObject = { name: string; class?: string; vmag?: number | null; x
 type CandidateCheck = { status: 'repeat_detection' | 'not_detected' | 'inconclusive'; sourceFound: boolean;
   followupImageId: number; followupFilter?: string | null; followupDate?: string | null;
   comparableFilter: boolean; independentEpoch: boolean; checkedAt: string; note: string };
+type Verification = {
+  index: number; ra: number; dec: number; raSexagesimal: string; decSexagesimal: string; positionErrorArcsec: number;
+  pixel: { x: number; y: number }; astrometry: string; online: boolean; notes: string[];
+  fit?: { fwhm: number } | null;
+  magnitude?: { value: number; error: number; system: string };
+  gaiaNearest?: { source: string; g: number; separationArcsec: number };
+  vsxNearest?: { name: string; type?: string; separationArcsec: number };
+  host?: { name: string; type: string; separationArcsec: number };
+  simbad?: { name: string; type: string; separationArcsec: number }[];
+  verdictCode: string; verdict: string;
+  checks: { notKnownAsteroid: boolean; noGaiaStar: boolean; noKnownVariable: boolean; secondEpoch?: string | null };
+  links: Record<string, string>; stamp?: string; blink?: string;
+};
+const VERDICT_STYLE: Record<string, string> = {
+  possible_extragalactic_transient: 'border-fuchsia-400 text-fuchsia-300',
+  unclassified_new_source: 'border-cyan-400 text-cyan-300',
+  stellar_variability: 'border-amber-400 text-amber-300',
+  known_variable_star: 'border-amber-400 text-amber-300',
+  known_solar_system_object: 'border-amber-400 text-amber-300',
+  unverified: 'border-gray-400 text-gray-300',
+};
+
 type Report = {
   runId: string; status: string; startedAt: string; completedAt?: string;
   progress?: { stage: string }; error?: string; width?: number; height?: number;
@@ -27,6 +49,8 @@ type Report = {
   cosmicRayPixels?: number | null;
   registration?: { matchedStars?: number; rmsBeforePx?: number; rmsAfterPx?: number; maxCorrectionPx?: number; applied?: boolean; note?: string };
   autoSettings?: { fwhmSciencePx?: number | null; fwhmReferencePx?: number | null; detectionFwhmPx?: number; hotpantsArgs?: string[] };
+  verificationStatus?: 'running' | 'complete' | 'failed' | 'interrupted'; verificationError?: string;
+  verification?: { generatedAt: string; online: boolean; verifiedCount: number; candidates: Verification[] };
 };
 
 async function jsonResponse<T>(response: Response): Promise<T> {
@@ -101,6 +125,11 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     },
     onSuccess: () => { setActiveRun(null); client.invalidateQueries({ queryKey: [base, 'analyses'] }); },
   });
+  const verify = useMutation({
+    mutationFn: () => fetch(`${base}/analyses/${report?.runId}/verification`, { method: 'POST' }).then(jsonResponse<{ status: string }>),
+    onSuccess: () => client.invalidateQueries({ queryKey: [base, 'analyses'] }),
+  });
+  const [blink, setBlink] = useState<Record<number, boolean>>({});
   const checkCandidate = useMutation({
     mutationFn: (index: number) => fetch(`${base}/analyses/${report?.runId}/candidates/${index}/check`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -219,6 +248,21 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
             <a href={file('difference-candidates.reg')} className="text-primary underline" download>Download DS9 candidate circles</a>
           </div>
         </div>}
+        <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium mr-auto">Verification and PDF report</p>
+            {report.files?.includes('report.pdf') && <a href={file('report.pdf')} download className="inline-flex"><Button type="button" size="sm">Download PDF report</Button></a>}
+            <Button type="button" size="sm" variant="outline" disabled={verify.isPending || report.verificationStatus === 'running'} onClick={() => verify.mutate()}>
+              {report.verificationStatus === 'running' ? 'Verifying…' : report.verification ? 'Regenerate' : 'Verify candidates'}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Positions are fitted on the difference image and tied to nearby Gaia DR3 stars (proper motions at the observation date); ± is the 1σ uncertainty including local systematics. Each candidate is cross-matched with Gaia DR3, AAVSO VSX, SIMBAD/OpenNGC host galaxies and known asteroids, and its magnitude is calibrated against Gaia. Only coordinates are sent to CDS; regenerate after a second-epoch check to include it in the PDF.</p>
+          {report.verificationStatus === 'running' && <p role="status" className="text-xs">Cross-matching catalogues and drawing stamps…</p>}
+          {report.verificationStatus === 'failed' && <p role="alert" className="text-xs text-destructive">Verification failed: {report.verificationError}</p>}
+          {report.verificationStatus === 'interrupted' && <p role="alert" className="text-xs text-amber-500">Verification was interrupted by a restart; regenerate it.</p>}
+          {verify.error && <p role="alert" className="text-xs text-destructive">{verify.error.message}</p>}
+          {report.verification && !report.verification.online && <p className="text-xs text-amber-500">Online catalogues were unreachable: positions come from the plate solution only and catalogue checks are missing.</p>}
+        </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">{report.files?.filter(name => name !== 'difference-candidates.fits' && name !== 'difference-candidates.reg').map(name => <a key={name} href={file(name)} className="text-primary underline" download>{name}</a>)}</div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" disabled={utility.isPending} onClick={() => utility.mutate({ tool: 'maskim', imageLayer: 'difference.fits' })}>Create masked difference</Button>
@@ -237,10 +281,37 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
             {!availableFits.data?.some(item => item.id !== image.id) && <p className="text-amber-500">Upload another FITS exposure to enable independent follow-up.</p>}
             {checkCandidate.error && <p role="alert" className="text-destructive">Follow-up failed: {checkCandidate.error.message}</p>}
           </div>
-          <div className="max-h-64 overflow-y-auto text-xs space-y-2">{report.candidates?.map((candidate, index) => {
+          <div className="max-h-[48rem] overflow-y-auto text-xs space-y-2">{report.candidates?.map((candidate, index) => {
             const checked = report.candidateChecks?.[index];
             return <div key={`${candidate.x}-${candidate.y}`} className="rounded-md border p-2 space-y-1">
               <p>#{index + 1} · model S/N {candidate.snr} · science contrast {candidate.scienceContrast} · RA {candidate.ra.toFixed(6)}° · Dec {candidate.dec.toFixed(6)}° · {candidate.status === 'known_solar_system_object' && candidate.knownObject ? <span className="text-amber-400">known solar-system object: {candidate.knownObject.name}{candidate.knownObject.class ? ` (${candidate.knownObject.class})` : ''}, {candidate.knownObject.separationArcsec}″ away — not a transient</span> : 'needs follow-up'}{candidate.nearbyCatalogObjects?.length ? ` · nearby OpenNGC: ${candidate.nearbyCatalogObjects.map(object => `${object.name} (${object.separationArcsec}″)`).join(', ')}` : ''}</p>
+              {(() => {
+                const verified = report.verification?.candidates.find(entry => entry.index === index);
+                if (!verified) return null;
+                return <div className="space-y-1 rounded border border-border/60 bg-background/40 p-2">
+                  <p className="font-mono text-sm text-foreground">{verified.raSexagesimal} {verified.decSexagesimal} <span className="text-muted-foreground">±{verified.positionErrorArcsec}″</span>
+                    {verified.magnitude && <span className="ml-2 text-muted-foreground">mag {verified.magnitude.value.toFixed(2)} ± {verified.magnitude.error.toFixed(2)}</span>}</p>
+                  <p className={`inline-block border px-1.5 py-0.5 font-mono uppercase tracking-wider ${VERDICT_STYLE[verified.verdictCode] || ''}`}>{verified.verdictCode.replaceAll('_', ' ')}</p>
+                  <p className="text-foreground">{verified.verdict}</p>
+                  {verified.stamp && <button type="button" className="block w-full" title="Click to blink science and reference"
+                    onClick={() => setBlink(state => ({ ...state, [index]: !state[index] }))}>
+                    <img src={file(blink[index] && verified.blink ? verified.blink : verified.stamp)} alt={`Candidate ${index + 1} science, reference, difference and finder`}
+                      className={`rounded border bg-white ${blink[index] ? 'mx-auto max-w-xs' : 'w-full'}`} loading="lazy" />
+                  </button>}
+                  {verified.blink && <button type="button" className="text-primary underline" onClick={() => setBlink(state => ({ ...state, [index]: !state[index] }))}>{blink[index] ? 'Show stamps' : 'Blink science ↔ reference'}</button>}
+                  <ul className="text-muted-foreground">
+                    <li>{verified.checks.noGaiaStar ? '✔' : '✘'} Gaia DR3 star at the position{verified.gaiaNearest ? `: nearest ${verified.gaiaNearest.separationArcsec}″ (G ${verified.gaiaNearest.g.toFixed(1)})` : ': none within 10″'}</li>
+                    <li>{verified.checks.noKnownVariable ? '✔' : '✘'} known variable (VSX){verified.vsxNearest ? `: ${verified.vsxNearest.name} ${verified.vsxNearest.separationArcsec}″` : ': none within 30″'}</li>
+                    <li>{verified.checks.notKnownAsteroid ? '✔' : '✘'} known asteroid/comet</li>
+                    <li>• host galaxy: {verified.host ? `${verified.host.name} (${verified.host.type}, ${verified.host.separationArcsec}″)` : 'none catalogued'}</li>
+                    <li>• second epoch: {verified.checks.secondEpoch?.replaceAll('_', ' ') || 'not checked'}</li>
+                    <li>• {verified.astrometry}</li>
+                    {verified.notes.map(note => <li key={note} className="text-amber-500">! {note}</li>)}
+                  </ul>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">{Object.entries(verified.links).map(([name, url]) =>
+                    <a key={name} href={url} target="_blank" rel="noreferrer" className="text-primary underline">{name}</a>)}</div>
+                </div>;
+              })()}
               {checked && <p className="text-amber-500">Follow-up: {checked.status.replaceAll('_', ' ')} in FITS #{checked.followupImageId} · {checked.comparableFilter ? 'same filter' : 'different/unknown filter'} · {checked.independentEpoch ? 'different observation time' : 'same/unknown observation time'}. {checked.note}</p>}
               <div className="flex gap-3">
                 <button type="button" className="text-primary underline" disabled={utility.isPending} onClick={() => utility.mutate({ tool: 'extractkern', mode: 'position', x: candidate.x, y: candidate.y, kernelWidths: 2 })}>PSF kernel</button>

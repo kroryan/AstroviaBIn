@@ -3,7 +3,7 @@ import { ZodError } from 'zod';
 import {
   analysisFile, analysisRequestSchema, getHotpantsReport, listAnalysisInputs,
   listHotpantsReports, saveAnalysisInput, startHotpantsAnalysis, helperRequestSchema, runAnalysisHelper,
-  deleteHotpantsReport, candidateCheckSchema, checkHotpantsCandidate,
+  deleteHotpantsReport, candidateCheckSchema, checkHotpantsCandidate, startVerification,
 } from '../services/hotpants';
 import { rejectDeclaredOversize, UploadRequestError } from '../services/upload-stream';
 
@@ -20,6 +20,7 @@ function failure(c: any, error: unknown) {
   if (error instanceof Error && error.message.startsWith('An analysis is already running')) return c.json({ message: error.message }, 409);
   if (error instanceof Error && error.message === 'A running analysis cannot be deleted') return c.json({ message: error.message }, 409);
   if (error instanceof Error && error.message === 'A candidate check is already running for this analysis') return c.json({ message: error.message }, 409);
+  if (error instanceof Error && error.message === 'Verification is already being generated for this analysis') return c.json({ message: error.message }, 409);
   if (error instanceof Error && /ENOENT/.test(error.message)) return c.json({ message: 'Analysis file not found' }, 404);
   console.error('HOTPANTS analysis:', error);
   return c.json({ message: error instanceof Error ? error.message : 'HOTPANTS analysis failed' }, 400);
@@ -63,6 +64,12 @@ app.post('/:imageId/analyses/:runId/candidates/:candidateIndex/check', async c =
     const { followupImageId } = candidateCheckSchema.parse(await c.req.json());
     return c.json(await checkHotpantsCandidate(id, c.req.param('runId'), candidateIndex, followupImageId), 201);
   } catch (error) { return failure(c, error); }
+});
+
+app.post('/:imageId/analyses/:runId/verification', async c => {
+  const id = imageId(c.req.param('imageId'));
+  if (!id) return c.json({ message: 'Invalid image id' }, 400);
+  try { return c.json(await startVerification(id, c.req.param('runId')), 202); } catch (error) { return failure(c, error); }
 });
 
 app.post('/:imageId/analyses/:runId/utilities', async c => {

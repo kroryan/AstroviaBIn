@@ -72,7 +72,7 @@ RUN apt-get update && \
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       astrometry.net astrometry-data-2mass-08-19 ca-certificates curl gosu passwd \
-      python3-astropy python3-scipy python3-numpy python3-venv libcfitsio10t64 && \
+      python3-astropy python3-scipy python3-numpy python3-matplotlib python3-venv libcfitsio10t64 && \
     rm -rf /var/lib/apt/lists/*
 
 # Offline sky-annotation data (stars, deep-sky outlines, constellations), built once at image
@@ -119,6 +119,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 # Copy built application from builder stage (includes tools, config, and public assets)
 COPY --from=builder /build/dist ./dist
 COPY tools/scripts/hotpants_pipeline.py ./tools/scripts/hotpants_pipeline.py
+COPY tools/scripts/hotpants_report.py ./tools/scripts/hotpants_report.py
 COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
 COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
 COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes
