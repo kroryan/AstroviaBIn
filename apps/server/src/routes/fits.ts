@@ -24,6 +24,7 @@ import { tileInfo } from '../services/tiles';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
 import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
+import { defaultImageTags } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -98,7 +99,9 @@ async function importFits(filePath: string, root: string, source: FitsSource) {
   const focalLength = numericHeader(metadata.headers, 'FOCALLEN');
   const apertureDiameter = numericHeader(metadata.headers, 'APTDIA');
   const derived = source === 'derived';
-  const tags = derived ? ['FITS', 'FITS derived', 'Deep Sky'] : source === 'upload' ? ['FITS', 'FITS uploaded', 'Deep Sky'] : ['FITS', 'Deep Sky'];
+  // Deep Sky (plate-solvable) unless OBJECT or the file name names a planet, the Sun or the Moon.
+  const kind = defaultImageTags(textHeader(metadata.headers, 'OBJECT'), path.basename(filePath, path.extname(filePath)));
+  const tags = [...(derived ? ['FITS', 'FITS derived'] : source === 'upload' ? ['FITS', 'FITS uploaded'] : ['FITS']), ...kind];
   const values = {
     title,
     filename: path.basename(filePath),

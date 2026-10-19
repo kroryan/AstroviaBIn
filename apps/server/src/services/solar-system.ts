@@ -1,1 +1,1 @@
-export { isDeepSkyTagged, isPlateSolvingEligible, isSolarSystemTagged, shouldShowInNotSolvedFilter, SOLAR_SYSTEM_TAGS } from '@shared/solar-system';
+export { defaultImageTags, isDeepSkyTagged, isPlateSolvingEligible, isSolarSystemTagged, shouldShowInNotSolvedFilter, solarSystemBodyIn, SOLAR_SYSTEM_TAGS, withoutDeepSkyForPlanets } from '@shared/solar-system';

@@ -19,6 +19,7 @@ import { AppSettingsSection } from '@/components/admin/app-settings-section';
 import { DatabaseSection } from '@/components/admin/database-section';
 import { AboutSection } from '@/components/admin/about-section';
 import { UsersSection } from '@/components/admin/users-section';
+import { DisplaySection } from '@/components/admin/display-section';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 export interface AdminSettings {
@@ -172,6 +173,8 @@ export default function AdminPage() {
             <p className="text-muted-foreground">Configure your AstroviaBin server</p>
           </div>
         </div>
+
+        <DisplaySection />
 
         {user && user.role !== 'admin' ? (
           <p className="text-muted-foreground">Signed in as <span className="font-medium text-foreground">{user.username}</span> ({user.role}). Only administrators can change settings and accounts.</p>

@@ -11,6 +11,7 @@ import {
   CloudUpload,
   Activity
 } from "lucide-react";
+import { formatDateTime } from "@/lib/datetime";
 import type { PlateSolvingJob } from "@shared/schema";
 
 interface SidebarProps {
@@ -99,7 +100,7 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
                   </p>
                   <p className="text-muted-foreground text-xs">
                     {job.submittedAt 
-                      ? new Date(job.submittedAt).toLocaleString()
+                      ? formatDateTime(job.submittedAt)
                       : "Unknown time"
                     }
                   </p>

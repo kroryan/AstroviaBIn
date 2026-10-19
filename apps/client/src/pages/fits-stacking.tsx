@@ -15,6 +15,7 @@ import type { GalleryCatalogSummary } from '@/components/gallery-catalog-picker'
 
 type StackFrameReport = { name: string; used: boolean; method?: string; matchedStars?: number; rmsPx?: number | null; dx?: number; dy?: number; reason?: string };
 type StackResponse = { frameCount: number; frames?: StackFrameReport[]; warnings?: string[] };
+import { formatDate } from "@/lib/datetime";
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 /** Frame size as written by the FITS importer into the description ("FITS 9576×6388 · mono · 16-bit"). */
@@ -303,7 +304,7 @@ export default function FitsStackingPage() {
                     <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
                       <p className="text-xs text-white truncate">{image.title}</p>
                       <p className="text-[10px] text-gray-300 truncate">
-                        {[size, image.filters, image.exposureTime, image.captureDate ? new Date(image.captureDate).toLocaleDateString() : null].filter(Boolean).join(' · ')}
+                        {[size, image.filters, image.exposureTime, image.captureDate ? formatDate(image.captureDate) : null].filter(Boolean).join(' · ')}
                       </p>
                     </div>
                   </div>

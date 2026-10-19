@@ -1,3 +1,5 @@
+import { formatDateTime } from './datetime';
+
 const FITS_PATH_PREFIXES = ['fits://', 'fits-derived://', 'fits-upload://'];
 
 export function isFitsOriginalPath(originalPath: string | null | undefined): boolean {
@@ -37,7 +39,7 @@ export function formatCaptureMoment(
 ): CaptureMoment {
   if (!captureDate) return { text: 'Unknown date', status: 'unverified' };
   const date = new Date(captureDate);
-  const text = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const text = formatDateTime(date);
   const status: CaptureTimeStatus = captureDateSource === 'manual'
     ? 'edited'
     : isFitsOriginalPath(originalPath) || captureDateSource === 'exif'

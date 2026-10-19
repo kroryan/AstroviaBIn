@@ -14,6 +14,7 @@ import { Clock, Image as ImageIcon, MapPin, X, Plus } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { CatalogObject } from "../../../../packages/shared/src/types";
+import { formatDate, formatDateTime, formatShortDate } from "@/lib/datetime";
 import { computeVisibility } from "../../../../packages/shared/src/visibility";
 
 interface TargetImageSummary {
@@ -235,7 +236,7 @@ export function TargetDetailDialog({
               </div>
               {imagedTarget.latestCaptureDate && (
                 <div className="text-xs text-muted-foreground mt-1">
-                  Latest: {new Date(imagedTarget.latestCaptureDate).toLocaleDateString()}
+                  Latest: {formatDate(imagedTarget.latestCaptureDate)}
                 </div>
               )}
             </div>
@@ -246,7 +247,7 @@ export function TargetDetailDialog({
             const photos = imagedTarget.images.filter(img => !img.isFits);
             const fitsFrames = imagedTarget.images.filter(img => img.isFits);
             const openImage = (id: number) => { onOpenChange(false); setLocation(`/?image=${id}&from=targets`); };
-            const shortDate = (iso: string | null) => iso ? `${MONTH_NAMES[new Date(iso).getMonth()]} ${new Date(iso).getDate()}` : null;
+            const shortDate = (iso: string | null) => formatShortDate(iso);
             return (
               <>
                 {photos.length > 0 && (
@@ -258,7 +259,7 @@ export function TargetDetailDialog({
                           key={img.id}
                           type="button"
                           onClick={() => openImage(img.id)}
-                          title={img.captureDate ? `${img.title} — captured ${new Date(img.captureDate).toLocaleDateString()}` : img.title}
+                          title={img.captureDate ? `${img.title} — captured ${formatDateTime(img.captureDate)}` : img.title}
                           className="relative shrink-0 h-16 w-16 rounded-md overflow-hidden border border-border hover:ring-2 hover:ring-primary transition-all bg-muted"
                         >
                           {img.thumbnailUrl ? (
@@ -285,7 +286,7 @@ export function TargetDetailDialog({
                           key={img.id}
                           type="button"
                           onClick={() => openImage(img.id)}
-                          title={img.captureDate ? `${img.title} — captured ${new Date(img.captureDate).toLocaleDateString()}` : img.title}
+                          title={img.captureDate ? `${img.title} — captured ${formatDateTime(img.captureDate)}` : img.title}
                           className="relative shrink-0 h-16 w-16 rounded-md overflow-hidden border border-red-500/40 hover:ring-2 hover:ring-primary transition-all bg-muted"
                         >
                           {img.thumbnailUrl ? (

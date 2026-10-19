@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { queryClient } from '@/lib/queryClient';
+import { formatDateTime } from "@/lib/datetime";
 import type { Notification } from '@shared/types';
 
 interface NotificationsSectionProps {
@@ -83,7 +84,7 @@ export function NotificationsSection({
   };
 
   const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleString();
+    return formatDateTime(timestamp);
   };
 
   if (notifications.length === 0) {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { formatDateTime } from "@/lib/datetime";
 import type { AstroImage } from '@shared/schema';
 
 type Candidate = { x: number; y: number; ra: number; dec: number; snr: number; status: string;
@@ -202,7 +203,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     {reports.data?.length ? <div className="space-y-3">
       <label className="block text-sm">Saved analyses
         <select className="ml-2 max-w-full rounded-md border bg-background p-1" value={report?.runId || ''} onChange={event => setActiveRun(event.target.value)}>
-          {reports.data.map(item => <option key={item.runId} value={item.runId}>{new Date(item.startedAt).toLocaleString()} · {item.status}</option>)}
+          {reports.data.map(item => <option key={item.runId} value={item.runId}>{formatDateTime(item.startedAt)} · {item.status}</option>)}
         </select>
       </label>
       <Button type="button" size="sm" variant="destructive" disabled={!report || report.status === 'running' || removeReport.isPending}

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/header";
 import type { AstroImage, PlateSolvingJob } from "@shared/schema";
+import { formatDateTime } from "@/lib/datetime";
 import { isDeepSkyTagged, isPlateSolvingEligible } from "@shared/solar-system";
 
 const isDeepSkyImage = (image: AstroImage) => isDeepSkyTagged(image.tags);
@@ -517,12 +518,12 @@ export default function PlateSolvingPage() {
                           )}
                           {job.submittedAt && (
                             <div className="text-muted-foreground">
-                              Submitted: {new Date(job.submittedAt).toLocaleString()}
+                              Submitted: {formatDateTime(job.submittedAt)}
                             </div>
                           )}
                           {(job.status === "success" || job.status === "failed") && job.completedAt && (
                             <div className="text-muted-foreground">
-                              Completed: {new Date(job.completedAt).toLocaleString()}
+                              Completed: {formatDateTime(job.completedAt)}
                             </div>
                           )}
                         </div>

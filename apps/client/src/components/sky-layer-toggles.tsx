@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { formatDate } from "@/lib/datetime";
 import { DEFAULT_SKY_LAYERS, type SkyLayers, type SkyOverlayData } from "@/lib/sky-overlay-renderer";
 
 const STORAGE_KEY = "astroviabin.skyLayers";
@@ -80,7 +81,7 @@ export function SkyLayerToggles({ layers, onChange, overlay, compact = false }: 
         {overlay && !compact && (
           <p className="font-mono text-[10px] text-gray-300">
             Field {formatSize(overlay.field.widthDeg)} × {formatSize(overlay.field.heightDeg)} · {overlay.field.pixelScale.toFixed(2)}″/px
-            {overlay.field.constellation ? ` · ${overlay.field.constellation}` : ""} · {overlay.stars.length} stars · {overlay.objects.length} deep-sky · {overlay.online ? `online: Gaia DR3 + SIMBAD (cached ${new Date(overlay.online.fetchedAt).toLocaleDateString()})` : "offline catalogues"}
+            {overlay.field.constellation ? ` · ${overlay.field.constellation}` : ""} · {overlay.stars.length} stars · {overlay.objects.length} deep-sky · {overlay.online ? `online: Gaia DR3 + SIMBAD (cached ${formatDate(overlay.online.fetchedAt)})` : "offline catalogues"}
           </p>
         )}
       </>}

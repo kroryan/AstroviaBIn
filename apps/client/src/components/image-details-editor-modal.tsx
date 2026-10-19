@@ -7,6 +7,7 @@ import { BaseModal } from "./base-modal";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCaptureMoment } from "@/lib/fits";
+import { fromDateTimeInput, timeZoneLabel, toDateTimeInput } from "@/lib/datetime";
 import type { AstroImage } from "@shared/schema";
 
 interface ImageDetailsEditorModalProps {
@@ -14,12 +15,7 @@ interface ImageDetailsEditorModalProps {
   onClose: () => void;
 }
 
-function toDateTimeLocalValue(date: string | Date | null | undefined): string {
-  if (!date) return "";
-  const d = new Date(date);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+const toDateTimeLocalValue = toDateTimeInput;
 
 export function ImageDetailsEditorModal({ image, onClose }: ImageDetailsEditorModalProps) {
   const [title, setTitle] = useState(image.title || "");
@@ -38,7 +34,7 @@ export function ImageDetailsEditorModal({ image, onClose }: ImageDetailsEditorMo
     try {
       const updates: Record<string, unknown> = { title: title.trim() };
       if (captureDateChanged) {
-        updates.captureDate = captureDateLocal ? new Date(captureDateLocal).toISOString() : null;
+        updates.captureDate = fromDateTimeInput(captureDateLocal)?.toISOString() ?? null;
       }
       await apiRequest("PATCH", `/api/images/${image.id}`, updates);
 
@@ -72,7 +68,7 @@ export function ImageDetailsEditorModal({ image, onClose }: ImageDetailsEditorMo
 
         <div className="space-y-2">
           <Label htmlFor="captureDate" className="text-sm font-medium text-gray-300 flex items-center gap-1.5">
-            Captured on
+            Captured on <span className="font-mono text-xs text-gray-500">({timeZoneLabel()})</span>
             {!captureDateChanged && moment.status === 'unverified' && (
               <span title="The time may not be exact — it comes from file metadata, not a verified exposure timestamp."><AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-label="Time not verified" /></span>
             )}

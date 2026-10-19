@@ -6,6 +6,7 @@ import {
   BookOpen,
   RefreshCw,
 } from 'lucide-react';
+import { formatDate } from "@/lib/datetime";
 import { useToast } from '@/hooks/use-toast';
 
 interface CatalogSectionProps {
@@ -41,7 +42,7 @@ export function CatalogSection({ catalogStatus, refetchCatalogStatus }: CatalogS
             <div className="text-sm text-muted-foreground">Last Updated</div>
             <div className="text-sm font-medium">
               {catalogStatus?.lastUpdated
-                ? new Date(catalogStatus.lastUpdated).toLocaleDateString()
+                ? formatDate(catalogStatus.lastUpdated)
                 : 'Never'}
             </div>
           </div>

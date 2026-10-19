@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Heart, Share, Plus, Settings } from "lucide-react";
 import type { AstroImage, Equipment } from "@shared/schema";
 import { isDeepSkyTagged } from "@shared/solar-system";
+import { formatDate } from "@/lib/datetime";
 import { RemoteImage } from "./remote-image";
 
 function isFitsImage(image: AstroImage): boolean {
@@ -65,7 +66,7 @@ export function ImageGallery({
 
   const formatDate = (date: Date | null) => {
     if (!date) return "Unknown date";
-    return new Date(date).toLocaleDateString();
+    return formatDate(date);
   };
 
   if (isLoading) {

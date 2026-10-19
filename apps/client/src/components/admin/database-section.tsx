@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Database, Download, Loader2, HardDrive } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { formatDateTime } from "@/lib/datetime";
 import { useToast } from '@/hooks/use-toast';
 
 interface DatabaseInfo {
@@ -92,7 +93,7 @@ export function DatabaseSection() {
                 <div className="text-sm text-muted-foreground">Last Modified</div>
                 <div className="text-sm font-medium">
                   {dbInfo.lastModified
-                    ? new Date(dbInfo.lastModified).toLocaleString()
+                    ? formatDateTime(dbInfo.lastModified)
                     : 'Unknown'}
                 </div>
               </div>

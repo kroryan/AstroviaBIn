@@ -8,7 +8,7 @@ import { storage } from '../services/storage';
 import { xmpSidecarService } from '../services/xmp-sidecar';
 import { configService } from '../services/config';
 import { handleRouteError } from './route-utils';
-import { isPlateSolvingEligible, isSolarSystemTagged, shouldShowInNotSolvedFilter, SOLAR_SYSTEM_TAGS } from '../services/solar-system';
+import { isPlateSolvingEligible, isSolarSystemTagged, shouldShowInNotSolvedFilter, SOLAR_SYSTEM_TAGS, withoutDeepSkyForPlanets } from '../services/solar-system';
 import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
 import { resolveLibraryAssetPath } from '../services/library';
 import { readFitsMetadata, resolveFitsFile } from '../services/fits';
@@ -222,7 +222,7 @@ app.patch('/:id', async (c) => {
     const existing = await storage.getAstroImage(id);
     if (!existing) return c.json({ message: 'Image not found' }, 404);
     if (updates.tags !== undefined) {
-      updates.tags = normalizeTags(updates.tags);
+      updates.tags = withoutDeepSkyForPlanets(normalizeTags(updates.tags), existing.tags);
       const hasSolarSystem = isSolarSystemTagged(updates.tags);
       const hasDeepSky = updates.tags.some((tag: string) => tag.toLocaleLowerCase() === 'deep sky');
       const currentType = existing.objectType?.toLocaleLowerCase();

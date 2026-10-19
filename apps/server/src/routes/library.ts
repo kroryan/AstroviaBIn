@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { storage } from '../services/storage';
 import { libraryStorageDirectory, resolveLibraryAssetPath } from '../services/library';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
+import { defaultImageTags } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -60,7 +61,8 @@ app.post('/upload', async (c) => {
         thumbnailUrl: null,
         fullUrl: null,
         plateSolved: false,
-        tags: [],
+        // Deep Sky by default (like FITS) so new photos can be plate-solved; planets/Sun/Moon instead when named.
+        tags: defaultImageTags(path.basename(filename, extension)),
       });
       imageId = image.id;
       await storage.updateAstroImage(image.id, {

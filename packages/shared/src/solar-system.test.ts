@@ -13,3 +13,18 @@ test('comet and asteroid tags allow Deep Sky plate solving', () => {
   assert.equal(isPlateSolvingEligible(['Deep Sky', 'Comet']), true);
   assert.equal(isPlateSolvingEligible(['Deep Sky', 'Asteroid']), true);
 });
+
+test('new images are Deep Sky unless their name is a planet, the Sun or the Moon', async () => {
+  const { defaultImageTags, withoutDeepSkyForPlanets } = await import('./solar-system');
+  assert.deepEqual(defaultImageTags('Messier.png'), ['Deep Sky']);
+  assert.deepEqual(defaultImageTags('Saturno1 canarias'), ['Saturn']);
+  assert.deepEqual(defaultImageTags('sol2'), ['Sun']);
+  assert.deepEqual(defaultImageTags('marte'), ['Mars']);
+  assert.deepEqual(defaultImageTags('Júpiter 2026'), ['Jupiter']);
+  assert.deepEqual(defaultImageTags('polux'), ['Deep Sky'], 'no planet inside other words');
+  assert.deepEqual(defaultImageTags('Nebulosa (51 Andrómedas)'), ['Deep Sky']);
+  assert.deepEqual(defaultImageTags(null, 'moon-mosaic'), ['Moon']);
+  assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'Saturn'], ['Deep Sky']), ['Saturn']);
+  assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'Comet', 'Solar System'], ['Deep Sky']), ['Deep Sky', 'Comet', 'Solar System'], 'comets keep Deep Sky');
+  assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'NGC 253'], []), ['Deep Sky', 'NGC 253']);
+});

@@ -13,6 +13,7 @@ import { Header } from "@/components/header";
 import { EquipmentSpecFields } from "@/components/equipment-spec-fields";
 import { Edit3, Trash2, X, Plus, Users } from "lucide-react";
 import type { Equipment, EquipmentGroup } from "@shared/schema";
+import { formatDate } from "@/lib/datetime";
 import type { ReactNode } from "react";
 
 export default function EquipmentCatalog(): React.JSX.Element {
@@ -246,7 +247,7 @@ function EquipmentCard({ equipment, specs, isEditing, onEdit, onCancel, onDelete
                 <span className="text-xs text-gray-500"><span className="font-semibold">Cost:</span> ${equipment.cost.toFixed(2)}</span>
               )}
               {equipment.acquisitionDate && (
-                <span className="text-xs text-gray-500"><span className="font-semibold">Acquired:</span> {new Date(equipment.acquisitionDate).toLocaleDateString()}</span>
+                <span className="text-xs text-gray-500"><span className="font-semibold">Acquired:</span> {formatDate(equipment.acquisitionDate)}</span>
               )}
             </div>
             <div className="text-sm text-gray-400">{equipment.type}</div>

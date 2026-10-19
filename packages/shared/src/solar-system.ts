@@ -36,3 +36,37 @@ export function shouldShowInNotSolvedFilter(tags: string[] | null | undefined): 
   if (isDeepSkyTagged(tags)) return isPlateSolvingEligible(tags);
   return !isSolarSystemTagged(tags) && !hasSmallBodyTag(tags);
 }
+
+// Spanish and English names in titles/file names ("Saturno1 canarias.png", "sol2", "Moon").
+const BODY_NAMES: Array<[RegExp, string]> = [
+  [/^(sol|sun|solar)$/, 'Sun'], [/^(luna|moon|lunar)$/, 'Moon'], [/^(mercurio|mercury)$/, 'Mercury'],
+  [/^venus$/, 'Venus'], [/^(marte|mars)$/, 'Mars'], [/^(j[uú]piter)$/, 'Jupiter'], [/^(saturno|saturn)$/, 'Saturn'],
+  [/^(urano|uranus)$/, 'Uranus'], [/^(neptuno|neptune)$/, 'Neptune'], [/^(plut[oó]n?|pluto)$/, 'Pluto'],
+];
+
+/** The Sun, Moon or planet a title or file name names, if any. */
+export function solarSystemBodyIn(text: string | null | undefined): string | null {
+  for (const word of (text ?? '').toLowerCase().split(/[^a-záéíóúñü]+/)) {
+    const match = BODY_NAMES.find(([pattern]) => pattern.test(word));
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Tags for a newly added image: "Deep Sky" (so it can be plate-solved), or the named planet/Sun/
+ * Moon instead when the title or file name says so.
+ */
+export function defaultImageTags(...names: Array<string | null | undefined>): string[] {
+  for (const name of names) {
+    const body = solarSystemBodyIn(name);
+    if (body) return [body];
+  }
+  return ['Deep Sky'];
+}
+
+/** Tags after an edit: a newly added planet/Sun/Moon tag removes "Deep Sky" (comets/asteroids keep it). */
+export function withoutDeepSkyForPlanets(tags: string[], previousTags: string[] | null | undefined): string[] {
+  if (!isSolarSystemTagged(tags) || isSolarSystemTagged(previousTags)) return tags;
+  return tags.filter(tag => tag.trim().toLowerCase() !== 'deep sky');
+}
