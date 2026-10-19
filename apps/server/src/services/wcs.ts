@@ -2,7 +2,7 @@
  * FITS WCS (TAN gnomonic projection with optional SIP distortion), as written by
  * Astrometry.net's solve-field. Pixel coordinates follow the FITS convention:
  * the centre of the first pixel is (1, 1), x runs along image columns and y along
- * stored rows (row 1 is the first row Sidereal renders at the top of the viewer).
+ * stored rows (row 1 is the first row AstroviaBin renders at the top of the viewer).
  */
 
 export interface SipPolynomial {

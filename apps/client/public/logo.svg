@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>AstroviaBin</title>
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00f0ff"/>
+      <stop offset="1" stop-color="#7a5cff"/>
+    </linearGradient>
+    <linearGradient id="orbit" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2bd6"/>
+      <stop offset="1" stop-color="#ff7a3d"/>
+    </linearGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#f9f002"/>
+      <stop offset="1" stop-color="#f9f002" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="72" fill="#07040f"/>
+  <!-- perspective grid floor -->
+  <g stroke="#7a5cff" stroke-opacity="0.28" stroke-width="3">
+    <path d="M40 420 H472 M64 448 H448 M96 476 H416"/>
+    <path d="M256 400 V500 M200 400 L150 500 M312 400 L362 500 M144 400 L48 500 M368 400 L464 500"/>
+  </g>
+  <!-- chamfered hexagon frame -->
+  <path d="M256 44 L440 150 L440 362 L256 468 L72 362 L72 150 Z" fill="none" stroke="url(#frame)" stroke-width="22" stroke-linejoin="round" filter="url(#glow)"/>
+  <path d="M256 92 L398 174 L398 338 L256 420 L114 338 L114 174 Z" fill="#0d0a1c" stroke="#00f0ff" stroke-opacity="0.35" stroke-width="4"/>
+  <!-- orbit -->
+  <ellipse cx="256" cy="256" rx="150" ry="58" transform="rotate(-24 256 256)" fill="none" stroke="url(#orbit)" stroke-width="16" filter="url(#glow)"/>
+  <circle cx="384" cy="196" r="15" fill="#ff2bd6" filter="url(#glow)"/>
+  <!-- star core -->
+  <circle cx="256" cy="256" r="70" fill="url(#core)" opacity="0.55"/>
+  <path d="M256 168 L274 238 L344 256 L274 274 L256 344 L238 274 L168 256 L238 238 Z" fill="#ffffff" filter="url(#glow)"/>
+  <!-- circuit ticks -->
+  <g stroke="#00f0ff" stroke-width="8" stroke-linecap="square">
+    <path d="M72 206 H40 M72 306 H52 M440 206 H472 M440 306 H460"/>
+  </g>
+</svg>

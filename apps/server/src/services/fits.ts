@@ -624,7 +624,7 @@ export async function createProcessedFits(filePath: string, outputPath: string, 
     const value = copyHeaderValue(metadata.headers, key);
     if (value !== undefined) cards.push(fitsCard(key, value));
   }
-  cards.push(fitsCard('HISTORY', 'Sidereal non-destructive derivative'));
+  cards.push(fitsCard('HISTORY', 'AstroviaBin non-destructive derivative'));
   cards.push(fitsCard('HISTORY', `stretch=${settings.stretch || 'asinh'} background=${Boolean(settings.backgroundNeutralization)}`));
   if ((settings.scnrAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `scnrAmount=${settings.scnrAmount}`));
   if ((settings.sharpenAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `sharpenAmount=${settings.sharpenAmount} sharpenRadius=${settings.sharpenRadius ?? 1}`));

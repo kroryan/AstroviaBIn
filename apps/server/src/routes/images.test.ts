@@ -66,7 +66,7 @@ it('redirects /:id/full to the FITS native-resolution preview for FITS-backed im
 });
 
 it('streams the private library original inline (no attachment disposition) for /:id/full', async t => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-library-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-library-'));
   const previousLibrary = process.env.LIBRARY_STORAGE_DIR;
   process.env.LIBRARY_STORAGE_DIR = directory;
   await mkdir(path.join(directory, 'originals'), { recursive: true });

@@ -74,7 +74,7 @@ test.describe('Plate Solving Page', () => {
 });
 
 
-const screenshotDir = '/tmp/sidereal-309-screenshots';
+const screenshotDir = '/tmp/astroviabin-309-screenshots';
 const initialJobs = [
   { id: 14, imageId: 1, status: 'processing', astrometrySubmissionId: '16141301', astrometryJobId: 'null', submittedAt: '2026-10-06T12:00:00Z', completedAt: '2026-10-06T12:01:00Z', result: null },
   { id: 15, imageId: 2, status: 'processing', astrometrySubmissionId: '16141302', astrometryJobId: '123', submittedAt: '2026-10-06T12:00:00Z', completedAt: '2026-10-06T12:01:00Z', result: null },

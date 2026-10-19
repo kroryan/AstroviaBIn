@@ -3,21 +3,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export function AboutSection() {
   return <Card className="mb-6">
     <CardHeader>
-      <CardTitle>About Sidereal & third-party notices</CardTitle>
+      <CardTitle>About AstroviaBin & third-party notices</CardTitle>
       <CardDescription>Software provenance, scientific limitations, and license documents.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4 text-sm">
       <div>
-        <h3 className="font-semibold">Sidereal</h3>
-        <p className="text-muted-foreground">Local-first astronomy image library and FITS analysis. Sidereal is distributed under the MIT license; the application source and full license are available in the project repository.</p>
+        <h3 className="font-semibold">AstroviaBin</h3>
+        <p className="text-muted-foreground">Local-first astronomy image vault and FITS analysis. AstroviaBin is distributed under the MIT license; the application source and full license are available in the project repository.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-          <a className="text-primary underline" href="/api/licenses/sidereal" target="_blank" rel="noreferrer">Sidereal MIT license</a>
-          <a className="text-primary underline" href="https://github.com/kroryan/sidereal/tree/v0.x" target="_blank" rel="noreferrer">This fork's source code</a>
+          <a className="text-primary underline" href="/api/licenses/astroviabin" target="_blank" rel="noreferrer">AstroviaBin MIT license</a>
+          <a className="text-primary underline" href="https://github.com/kroryan/AstroviaBIn" target="_blank" rel="noreferrer">Source code</a>
+        </div>
+      </div>
+      <div>
+        <h3 className="font-semibold">Based on Sidereal</h3>
+        <p className="text-muted-foreground">AstroviaBin is a fork of Sidereal, the self-hosted astrophotography gallery by its original authors, released under the MIT license. Their copyright notice is retained in the license file.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://github.com/sidereal-io/sidereal" target="_blank" rel="noreferrer">Original Sidereal project</a>
         </div>
       </div>
       <div>
         <h3 className="font-semibold">Photutils</h3>
-        <p className="text-muted-foreground">Sidereal uses the independent Photutils project for local point-source shape checks and second-exposure follow-up. Photutils is distributed under the BSD 3-Clause license. Its checks reduce false positives but do not confirm an astrophysical discovery.</p>
+        <p className="text-muted-foreground">AstroviaBin uses the independent Photutils project for local point-source shape checks and second-exposure follow-up. Photutils is distributed under the BSD 3-Clause license. Its checks reduce false positives but do not confirm an astrophysical discovery.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://photutils.readthedocs.io/en/stable/development/license.html" target="_blank" rel="noreferrer">Photutils license</a>
           <a className="text-primary underline" href="https://github.com/astropy/photutils" target="_blank" rel="noreferrer">Photutils source and documentation</a>
@@ -25,7 +32,7 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">HOTPANTS</h3>
-        <p className="text-muted-foreground">High Order Transform of PSF ANd Template Subtraction by Andrew Becker and contributors. Sidereal vendors and builds the upstream C source without scientific or mathematical changes, including the alternative extractkernOnes helper for PSF visualization. The upstream repository contains both an MIT LICENSE notice and a GPL version 2 COPYING document; both are retained and offered here verbatim. Review the upstream notices for redistribution obligations.</p>
+        <p className="text-muted-foreground">High Order Transform of PSF ANd Template Subtraction by Andrew Becker and contributors. AstroviaBin vendors and builds the upstream C source without scientific or mathematical changes, including the alternative extractkernOnes helper for PSF visualization. The upstream repository contains both an MIT LICENSE notice and a GPL version 2 COPYING document; both are retained and offered here verbatim. Review the upstream notices for redistribution obligations.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="/api/licenses/hotpants/LICENSE" target="_blank" rel="noreferrer">HOTPANTS LICENSE</a>
           <a className="text-primary underline" href="/api/licenses/hotpants/COPYING" target="_blank" rel="noreferrer">HOTPANTS COPYING (GPL v2)</a>
@@ -61,11 +68,21 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">Astropy, NumPy and SciPy</h3>
-        <p className="text-muted-foreground">Sidereal's star extractor for plate solving and the HOTPANTS pipeline use Astropy, NumPy and SciPy, all distributed under the BSD 3-Clause license, installed from Debian.</p>
+        <p className="text-muted-foreground">AstroviaBin's star extractor for plate solving and the HOTPANTS pipeline use Astropy, NumPy and SciPy, all distributed under the BSD 3-Clause license, installed from Debian.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://www.astropy.org/" target="_blank" rel="noreferrer">Astropy</a>
           <a className="text-primary underline" href="https://numpy.org/" target="_blank" rel="noreferrer">NumPy</a>
           <a className="text-primary underline" href="https://scipy.org/" target="_blank" rel="noreferrer">SciPy</a>
+        </div>
+      </div>
+      <div>
+        <h3 className="font-semibold">Fonts</h3>
+        <p className="text-muted-foreground">The interface bundles Orbitron (The Orbitron Project Authors), Rajdhani (Indian Type Foundry) and Share Tech Mono (Carrois Type Design, Ralph du Carrois) via Fontsource, all licensed under the SIL Open Font License 1.1. They are served from this server; no font is loaded from a third party.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="/fonts/LICENSE-orbitron.txt" target="_blank" rel="noreferrer">Orbitron license</a>
+          <a className="text-primary underline" href="/fonts/LICENSE-rajdhani.txt" target="_blank" rel="noreferrer">Rajdhani license</a>
+          <a className="text-primary underline" href="/fonts/LICENSE-share-tech-mono.txt" target="_blank" rel="noreferrer">Share Tech Mono license</a>
+          <a className="text-primary underline" href="https://openfontlicense.org/" target="_blank" rel="noreferrer">SIL OFL 1.1</a>
         </div>
       </div>
       <div>

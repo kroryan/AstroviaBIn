@@ -30,10 +30,10 @@ function appVersion(): string {
 export default function systemRoutes(wsManager?: WsManager) {
   const app = new Hono();
 
-  app.get('/licenses/sidereal', async c => {
+  app.get('/licenses/astroviabin', async c => {
     try {
       const source = process.env.NODE_ENV === 'production'
-        ? '/usr/share/doc/sidereal/LICENSE' : path.resolve(process.cwd(), 'LICENSE');
+        ? '/usr/share/doc/astroviabin/LICENSE' : path.resolve(process.cwd(), 'LICENSE');
       return c.text(await readFile(source, 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
     } catch { return c.text('License file unavailable', 404); }
   });
@@ -231,12 +231,12 @@ export default function systemRoutes(wsManager?: WsManager) {
       }
 
       // A VACUUM INTO snapshot is consistent even while the app is writing (unlike copying the file).
-      const snapshot = path.join(os.tmpdir(), `sidereal-backup-${randomUUID()}.db`);
+      const snapshot = path.join(os.tmpdir(), `astroviabin-backup-${randomUUID()}.db`);
       await snapshotDatabase(snapshot);
       const dbBuffer = await readFile(snapshot);
       await rm(snapshot, { force: true });
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const filename = `sidereal-backup-${timestamp}.db`;
+      const filename = `astroviabin-backup-${timestamp}.db`;
 
       return new Response(dbBuffer, {
         headers: {

@@ -362,7 +362,7 @@ class DbStorage {
   }
 
   /**
-   * Materialize existing plate solutions as completed local records. Older Sidereal
+   * Materialize existing plate solutions as completed local records. Older AstroviaBin
    * data stored the WCS fields directly on each image but did not always retain a job
    * row. Importing that metadata avoids re-solving images just to make their status
    * visible in the queue. This is safe to run at every startup.

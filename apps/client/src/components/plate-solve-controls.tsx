@@ -97,7 +97,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
                 </label>
               </div>
               <p className={`col-span-2 text-[11px] ${muted}`}>
-                Optional. Sparse or noisy frames solve far more reliably near the target position. Without a hint Sidereal tries the previous solution, FITS pointing and any M/NGC/IC name in the title, then searches blind.
+                Optional. Sparse or noisy frames solve far more reliably near the target position. Without a hint AstroviaBin tries the previous solution, FITS pointing and any M/NGC/IC name in the title, then searches blind.
               </p>
             </div>
           )}

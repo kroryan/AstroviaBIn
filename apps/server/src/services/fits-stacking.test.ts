@@ -42,7 +42,7 @@ async function readOutputPixels(outputPath: string): Promise<{ metadata: Awaited
 }
 
 test('stacks identical frames back to the same pixel values', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-stack-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
   const size = 20;
   const values = patchFrame(size, 0, 0);
   const framePaths = [path.join(directory, 'a.fits'), path.join(directory, 'b.fits'), path.join(directory, 'c.fits')];
@@ -60,7 +60,7 @@ test('stacks identical frames back to the same pixel values', async () => {
 });
 
 test('rejects frames with mismatched dimensions', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-stack-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
   const a = path.join(directory, 'a.fits');
   const b = path.join(directory, 'b.fits');
   await writeFile(a, testFitsMono(10, new Array(100).fill(100)));
@@ -74,7 +74,7 @@ test('rejects frames with mismatched dimensions', async () => {
 });
 
 test('sigma-clip rejects a one-frame outlier (satellite trail / cosmic ray) that mean stacking would not', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-stack-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
   const size = 10;
   const base = new Array(size * size).fill(200);
   const outlierIndex = 42;
@@ -102,7 +102,7 @@ test('sigma-clip rejects a one-frame outlier (satellite trail / cosmic ray) that
 });
 
 test('registers a shifted frame before stacking', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-stack-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
   const size = 40;
   const reference = patchFrame(size, 0, 0);
   const shifted = patchFrame(size, 3, -2);
@@ -122,7 +122,7 @@ test('registers a shifted frame before stacking', async () => {
 });
 
 test('registration is not thrown off by a different overall background level between frames', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-stack-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
   const size = 40;
   const reference = patchFrame(size, 0, 0, 100, 900);
   // Same shift as above, but this frame also has a much brighter sky background —

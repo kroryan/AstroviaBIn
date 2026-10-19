@@ -1,4 +1,4 @@
-# Sidereal Docker Compose Configuration (SQLite — no external database needed)
+# AstroviaBin Docker Compose Configuration (SQLite — no external database needed)
 #
 # Usage: docker compose up -d
 #
@@ -6,17 +6,17 @@
 #   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 
 services:
-  sidereal:
+  astroviabin:
     build: .
-    container_name: sidereal
+    container_name: astroviabin
     restart: unless-stopped
     ports:
-      - "${SIDEREAL_PORT:-5000}:5000"
+      - "${ASTROVIABIN_PORT:-5000}:5000"
     environment:
       - NODE_ENV=production
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - SQLITE_DB_PATH=/app/config/sidereal.db
+      - SQLITE_DB_PATH=/app/config/astroviabin.db
       - XMP_SIDECAR_PATH=/app/sidecars
       - LIBRARY_STORAGE_DIR=/app/library
       - TILE_CACHE_DIR=/app/cache/deep-zoom
@@ -35,20 +35,20 @@ services:
       - FITS_ANALYSIS_DIR=/app/fits-analysis
       - FITS_CACHE_DIR=/app/cache/fits
       - FITS_MAX_PROCESS_BYTES=${FITS_MAX_PROCESS_BYTES:-1073741824}
-      - SIDEREAL_MAX_UPLOAD_BYTES=${SIDEREAL_MAX_UPLOAD_BYTES:-21474836480}
-      # Login. Change these before exposing Sidereal on a network.
-      - SIDEREAL_ADMIN_USER=${SIDEREAL_ADMIN_USER:-admin}
-      - SIDEREAL_ADMIN_PASSWORD=${SIDEREAL_ADMIN_PASSWORD:-admin}
-      - SIDEREAL_SESSION_SECRET=${SIDEREAL_SESSION_SECRET:-}
+      - ASTROVIABIN_MAX_UPLOAD_BYTES=${ASTROVIABIN_MAX_UPLOAD_BYTES:-21474836480}
+      # Login. Change these before exposing AstroviaBin on a network.
+      - ASTROVIABIN_ADMIN_USER=${ASTROVIABIN_ADMIN_USER:-admin}
+      - ASTROVIABIN_ADMIN_PASSWORD=${ASTROVIABIN_ADMIN_PASSWORD:-admin}
+      - ASTROVIABIN_SESSION_SECRET=${ASTROVIABIN_SESSION_SECRET:-}
       # Extra narrow-field index files (see download-astrometry-indexes) live in AppData.
       - ASTROMETRY_EXTRA_INDEX_DIRS=/app/config/astrometry-index
     volumes:
-      - ${SIDEREAL_HOST_DATA:-./data/appdata}:/app/config
-      - ${SIDEREAL_HOST_DATA:-./data/appdata}/logs:/app/logs
-      - ${SIDEREAL_HOST_DATA:-./data/appdata}/sidecars:/app/sidecars
-      - ${SIDEREAL_HOST_DATA:-./data/appdata}/cache:/app/cache
-      - ${SIDEREAL_HOST_LIBRARY:-./data/media}:/app/library
-      # Sources stay read-only. Sidereal writes derivatives separately and never edits originals.
+      - ${ASTROVIABIN_HOST_DATA:-./data/appdata}:/app/config
+      - ${ASTROVIABIN_HOST_DATA:-./data/appdata}/logs:/app/logs
+      - ${ASTROVIABIN_HOST_DATA:-./data/appdata}/sidecars:/app/sidecars
+      - ${ASTROVIABIN_HOST_DATA:-./data/appdata}/cache:/app/cache
+      - ${ASTROVIABIN_HOST_LIBRARY:-./data/media}:/app/library
+      # Sources stay read-only. AstroviaBin writes derivatives separately and never edits originals.
       - ${FITS_HOST_LIBRARY:-./data/fits/library}:/app/fits:ro
       - ${FITS_HOST_DERIVATIVES:-./data/fits/derivatives}:/app/fits-derived
       - ${FITS_HOST_UPLOADS:-./data/fits/uploads}:/app/fits-upload

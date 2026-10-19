@@ -8,13 +8,13 @@
  *
  * Usage:
  *   # PostgreSQL → SQLite
- *   node tools/scripts/migrate-db.js --from postgresql://user:pass@host:5432/sidereal --to sqlite:path/to/sidereal.db
+ *   node tools/scripts/migrate-db.js --from postgresql://user:pass@host:5432/astroviabin --to sqlite:path/to/astroviabin.db
  *
  *   # SQLite → PostgreSQL
- *   node tools/scripts/migrate-db.js --from sqlite:path/to/local.db --to postgresql://user:pass@host:5432/sidereal
+ *   node tools/scripts/migrate-db.js --from sqlite:path/to/local.db --to postgresql://user:pass@host:5432/astroviabin
  *
  * Inside Docker container:
- *   node /app/dist/tools/scripts/migrate-db.js --from postgresql://... --to sqlite:/app/config/sidereal.db
+ *   node /app/dist/tools/scripts/migrate-db.js --from postgresql://... --to sqlite:/app/config/astroviabin.db
  */
 
 import postgres from 'postgres';
@@ -414,7 +414,7 @@ for (let i = 0; i < args.length; i++) {
 
 if (!fromUrl || !toUrl) {
   console.log(`
-Sidereal Database Migration Tool
+AstroviaBin Database Migration Tool
 
 Migrates all data between PostgreSQL and SQLite in either direction.
 Tables, columns, and types are discovered automatically from database
@@ -426,13 +426,13 @@ Usage:
 Examples:
   # PostgreSQL → SQLite
   node tools/scripts/migrate-db.js \\
-    --from postgresql://sidereal:password@localhost:5432/sidereal \\
-    --to sqlite:sidereal.db
+    --from postgresql://astroviabin:password@localhost:5432/astroviabin \\
+    --to sqlite:astroviabin.db
 
   # SQLite → PostgreSQL
   node tools/scripts/migrate-db.js \\
     --from sqlite:local.db \\
-    --to postgresql://sidereal:password@localhost:5432/sidereal
+    --to postgresql://astroviabin:password@localhost:5432/astroviabin
 
 Note: SQLite targets run the bundled Drizzle migrations automatically to ensure their schema exists.
       PostgreSQL targets must still be created ahead of time.

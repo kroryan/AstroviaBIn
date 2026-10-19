@@ -8,7 +8,7 @@ process.env.SQLITE_DB_PATH = ':memory:';
 const { pruneCacheDirectory } = await import('./maintenance');
 
 it('removes stale cache files and then the oldest ones until the cache fits its budget', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-cache-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-cache-'));
   try {
     await mkdir(path.join(directory, 'tiles'), { recursive: true });
     const now = Date.now();
@@ -33,5 +33,5 @@ it('removes stale cache files and then the oldest ones until the cache fits its 
 });
 
 it('ignores a missing cache directory', async () => {
-  assert.deepEqual(await pruneCacheDirectory(path.join(tmpdir(), 'sidereal-missing-cache-dir'), 1, 1), { removed: 0, freedBytes: 0 });
+  assert.deepEqual(await pruneCacheDirectory(path.join(tmpdir(), 'astroviabin-missing-cache-dir'), 1, 1), { removed: 0, freedBytes: 0 });
 });

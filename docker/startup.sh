@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Sidereal Container Startup Script
+# AstroviaBin Container Startup Script
 set -e
 
 mask_connection_string() {
@@ -31,7 +31,7 @@ run_auto_db_migration() {
     elif [ -n "$DATABASE_URL" ]; then
         AUTO_DB_MIGRATE_TARGET="$DATABASE_URL"
     else
-        SQLITE_TARGET_PATH=${SQLITE_DB_PATH:-/app/config/sidereal.db}
+        SQLITE_TARGET_PATH=${SQLITE_DB_PATH:-/app/config/astroviabin.db}
         AUTO_DB_MIGRATE_TARGET="sqlite:$SQLITE_TARGET_PATH"
     fi
 
@@ -45,7 +45,7 @@ run_auto_db_migration() {
     echo "  From: $(mask_connection_string "$AUTO_DB_MIGRATE_FROM")"
     echo "  To: $(mask_connection_string "$AUTO_DB_MIGRATE_TARGET")"
 
-    if ! gosu sidereal node "$MIGRATE_SCRIPT" --from "$AUTO_DB_MIGRATE_FROM" --to "$AUTO_DB_MIGRATE_TARGET"; then
+    if ! gosu astroviabin node "$MIGRATE_SCRIPT" --from "$AUTO_DB_MIGRATE_FROM" --to "$AUTO_DB_MIGRATE_TARGET"; then
         echo "Automatic database migration failed; aborting startup."
         exit 1
     fi
@@ -62,9 +62,9 @@ run_auto_db_migration() {
 PUID=${PUID:-1001}
 PGID=${PGID:-1001}
 
-echo "Updating sidereal user to PUID=$PUID and GID=$PGID..."
+echo "Updating astroviabin user to PUID=$PUID and GID=$PGID..."
 groupmod -o -g "$PGID" nodejs || true
-usermod -o -u "$PUID" sidereal || true
+usermod -o -u "$PUID" astroviabin || true
 
 # These are host bind mounts in a typical deployment. Only transfer the
 # mount roots; recursively walking a multi-GB photo/FITS library on every restart
@@ -72,23 +72,23 @@ usermod -o -u "$PUID" sidereal || true
 echo "Setting directory permissions..."
 mkdir -p /app/config /app/logs /app/sidecars /app/cache/thumbnails /app/cache/deep-zoom /app/cache/fits /app/library /app/fits-derived /app/fits-upload /app/fits-analysis
 for directory in /app/config /app/logs /app/sidecars /app/cache /app/cache/thumbnails /app/cache/deep-zoom /app/cache/fits /app/library /app/fits-derived /app/fits-upload /app/fits-analysis; do
-    if ! chown sidereal:nodejs "$directory" 2>/dev/null; then
+    if ! chown astroviabin:nodejs "$directory" 2>/dev/null; then
         echo "Ownership changes are unavailable for $directory; keeping the mounted filesystem's UID/GID permissions."
     fi
 done
-if [ -f /app/config/sidereal.db ]; then
-    if ! chown sidereal:nodejs /app/config/sidereal.db 2>/dev/null; then
+if [ -f /app/config/astroviabin.db ]; then
+    if ! chown astroviabin:nodejs /app/config/astroviabin.db 2>/dev/null; then
         echo "Ownership changes are unavailable for the SQLite file; keeping the mounted filesystem's UID/GID permissions."
     fi
 fi
 
-echo "Starting Sidereal container..."
+echo "Starting AstroviaBin container..."
 echo "Node.js version: $(node --version)"
 echo "Environment: ${NODE_ENV:-development}"
 if [ -n "$DATABASE_URL" ]; then
     echo "Database: PostgreSQL ($(echo "$DATABASE_URL" | sed 's|://[^:]*:[^@]*@|://****:****@|'))"
 else
-    echo "Database: SQLite (built-in at /app/config/sidereal.db)"
+    echo "Database: SQLite (built-in at /app/config/astroviabin.db)"
 fi
 echo "Plate solving enabled: ${ENABLE_PLATE_SOLVING:-true}"
 echo "XMP sidecar path: ${XMP_SIDECAR_PATH:-/app/sidecars}"
@@ -120,13 +120,13 @@ else
     echo "No DATABASE_URL provided, using built-in SQLite database"
 fi
 
-# Run database migrations as sidereal user
+# Run database migrations as astroviabin user
 echo "Running database migrations..."
 if [ -n "$DATABASE_URL" ]; then
     # PostgreSQL migrations
     if [ -f "/app/dist/tools/scripts/apply-pg-migrations.js" ]; then
         echo "Running PostgreSQL migrations..."
-        gosu sidereal node /app/dist/tools/scripts/apply-pg-migrations.js || {
+        gosu astroviabin node /app/dist/tools/scripts/apply-pg-migrations.js || {
             echo "PostgreSQL migration failed, but continuing..."
         }
     else
@@ -154,9 +154,9 @@ cleanup() {
 # Trap signals for graceful shutdown
 trap cleanup TERM INT
 
-# Start main application as sidereal user
+# Start main application as astroviabin user
 echo "Starting main application..."
-gosu sidereal node /app/dist/index.js &
+gosu astroviabin node /app/dist/index.js &
 MAIN_PID=$!
 echo "Main process started with PID: $MAIN_PID"
 

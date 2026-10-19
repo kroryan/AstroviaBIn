@@ -93,7 +93,7 @@ test.describe('Header - Consistent Across Pages', () => {
     test(`should display header on ${p.name} page`, async ({ page }) => {
       await page.goto(p.url);
       await expect(page.locator('header')).toBeVisible();
-      await expect(page.locator('header h1')).toHaveText('Sidereal');
+      await expect(page.locator('header h1')).toHaveText('AstroviaBin');
     });
 
     test(`should display Sync Immich button on ${p.name} page`, async ({ page }) => {
@@ -103,7 +103,7 @@ test.describe('Header - Consistent Across Pages', () => {
 
     test(`should display GitHub link on ${p.name} page`, async ({ page }) => {
       await page.goto(p.url);
-      await expect(page.locator('a[href="https://github.com/sidereal-io/sidereal"]')).toBeVisible();
+      await expect(page.locator('a[href="https://github.com/kroryan/AstroviaBIn"]')).toBeVisible();
     });
   }
 });

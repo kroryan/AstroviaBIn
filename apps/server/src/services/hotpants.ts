@@ -192,7 +192,7 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
   await writeJson(path.join(directory, 'config.json'), config);
   running.set(activeKey, runId);
   const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
-  const child = spawn(process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python',
+  const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
     [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   let errors = '';
@@ -228,7 +228,7 @@ export async function getHotpantsReport(imageId: number, runId: string) {
   const directory = runDirectory(imageId, runId);
   const report = JSON.parse(await readFile(path.join(directory, 'report.json'), 'utf8'));
   if (report.status === 'running') {
-    if (running.get(String(imageId)) !== runId) return { ...report, status: 'interrupted', error: 'Sidereal restarted during this analysis. Start a new run.' };
+    if (running.get(String(imageId)) !== runId) return { ...report, status: 'interrupted', error: 'AstroviaBin restarted during this analysis. Start a new run.' };
     try { return { ...report, progress: JSON.parse(await readFile(path.join(directory, 'progress.json'), 'utf8')) }; }
     catch { return report; }
   }
@@ -291,7 +291,7 @@ export async function checkHotpantsCandidate(
   try {
     const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
       const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
-      const child = spawn(process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python',
+      const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
         [script, path.join(work, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';

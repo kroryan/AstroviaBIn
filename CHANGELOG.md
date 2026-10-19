@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-19
+
+First release as **AstroviaBin** (formerly Sidereal; history below keeps the old name).
+
+### Changed
+- Rebranded to AstroviaBin: new name, logo and icon set (SVG, PNG, favicon), and a cyberpunk interface theme (neon palette, Orbitron/Rajdhani/Share Tech Mono fonts bundled locally, chamfered panels, grid background, scanlines), including the login page.
+- Environment variables are now `ASTROVIABIN_*`; the previous `SIDEREAL_*` names are still accepted as aliases. A new install uses `/app/config/astroviabin.db`, an existing `sidereal.db` is used automatically when present. The session cookie was renamed, so users sign in once more.
+- Docker image, container, Compose services, Unraid template and CI image names use `astroviabin`.
+
 ### Added
 - User management in Admin settings: create accounts, assign admin / editor / viewer roles, change passwords, delete users (scrypt hashes, role checked on every request, sessions revoked on password change or deletion).
 - Stack FITS frames: load a gallery catalog, filter frames, see each frame's size/filter/exposure, pick the alignment reference, flag size mismatches, and save the selection as a catalog.

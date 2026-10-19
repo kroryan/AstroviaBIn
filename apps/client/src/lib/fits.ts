@@ -6,7 +6,7 @@ export function isFitsOriginalPath(originalPath: string | null | undefined): boo
 
 /**
  * Fallback URL for viewers without a tile source: FITS gets its native-resolution render,
- * Sidereal-library images get the real original instead of the downscaled gallery preview.
+ * AstroviaBin-library images get the real original instead of the downscaled gallery preview.
  * Falls back to `fullUrl` for anything without a higher-resolution source available.
  */
 export function resolveZoomUrl(image: { id: number; originalPath?: string | null; libraryAssetId?: number | null }): string {

@@ -17,7 +17,7 @@ test.describe('Error Handling', () => {
     await page.route('**/api/**', (route) => route.abort());
     await page.goto('/');
     await expect(page.locator('header')).toBeVisible();
-    await expect(page.locator('header h1')).toHaveText('Sidereal');
+    await expect(page.locator('header h1')).toHaveText('AstroviaBin');
   });
 
   test('should render search filters when API is blocked', async ({ page }) => {

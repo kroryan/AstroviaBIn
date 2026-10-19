@@ -1,6 +1,6 @@
 {
-  "name": "sidereal",
-  "version": "0.10.5",
+  "name": "astroviabin",
+  "version": "0.11.0",
   "type": "module",
   "license": "MIT",
   "allowScripts": {
@@ -20,7 +20,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "start:worker": "NODE_ENV=production node dist/worker.js",
     "start:worker:standalone": "NODE_ENV=production node dist/worker.js",
-    "docker:build": "docker build --no-cache -t sidereal .",
+    "docker:build": "docker build --no-cache -t astroviabin .",
     "docker:run": "docker compose up -d --build --force-recreate",
     "docker:stop": "docker compose down",
     "docker:logs": "docker compose logs -f",
@@ -35,6 +35,9 @@
     "seed:reset": "tsx tools/scripts/seed.ts --reset"
   },
   "dependencies": {
+    "@fontsource/orbitron": "^5.3.0",
+    "@fontsource/rajdhani": "^5.3.0",
+    "@fontsource/share-tech-mono": "^5.3.0",
     "@hono/node-server": "^2.1.4",
     "@hookform/resolvers": "^5.9.1",
     "@jridgewell/trace-mapping": "^0.3.31",

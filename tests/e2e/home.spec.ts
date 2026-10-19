@@ -11,16 +11,16 @@ test.describe('Home Page', () => {
   });
 
   test('should load with correct page title', async () => {
-    await expect(homePage.page).toHaveTitle('Sidereal');
+    await expect(homePage.page).toHaveTitle('AstroviaBin');
   });
 
   test('should display header with app title', async () => {
     await expect(homePage.header).toBeVisible();
-    await expect(homePage.appTitle).toHaveText('Sidereal');
+    await expect(homePage.appTitle).toHaveText('AstroviaBin');
   });
 
   test('should display logo image in header', async () => {
-    const logo = homePage.page.locator('header img[alt="Sidereal Logo"]');
+    const logo = homePage.page.locator('header img[alt="AstroviaBin Logo"]');
     await expect(logo).toBeVisible();
   });
 

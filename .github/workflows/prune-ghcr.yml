@@ -11,7 +11,7 @@ on:
         default: true
 
 env:
-  PACKAGE_NAME: sidereal
+  PACKAGE_NAME: astroviabin
 
 jobs:
   prune:

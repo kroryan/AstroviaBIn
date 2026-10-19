@@ -46,7 +46,7 @@ export function AstrometrySection({
           Astrometry.net Configuration
         </CardTitle>
         <CardDescription>
-          Run Astrometry.net privately on this Sidereal server
+          Run Astrometry.net privately on this AstroviaBin server
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

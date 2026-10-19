@@ -169,7 +169,7 @@ export default function AdminPage() {
           <Settings className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-3xl font-bold">Admin Settings</h1>
-            <p className="text-muted-foreground">Configure your Sidereal server</p>
+            <p className="text-muted-foreground">Configure your AstroviaBin server</p>
           </div>
         </div>
 

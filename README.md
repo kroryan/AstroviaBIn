@@ -1,36 +1,31 @@
 <p align="center">
-  <img src="apps/client/public/logo.png" width="300">
-  <h1 style="font-size: 55px" align="center">SIDEREAL</h1>
+  <img src="assets/brand/astroviabin-logo.svg" width="220" alt="AstroviaBin logo">
 </p>
+<h1 align="center">ASTROVIABIN</h1>
+<p align="center"><b>Self-hosted, cyberpunk-styled vault for astrophotography images and FITS.</b></p>
 
 <p align="center">
-  <a href="./docker"><img src="https://img.shields.io/badge/Docker-Ready-blue?logo=docker"/></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" />
-  <a href="./docker/unraid-templates"><img src="https://img.shields.io/badge/UnRAID-Compatible-orange)" /></a>
-  <a href="https://discord.gg/ffZ8cuJ8Kh"><img src="https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white" alt="Join us on Discord" /></a>
+  <a href="./docker"><img src="https://img.shields.io/badge/Docker-Ready-00f0ff?logo=docker&logoColor=white&labelColor=07040f"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-ff2bd6?labelColor=07040f" /></a>
+  <a href="https://github.com/kroryan/AstroviaBIn/actions/workflows/docker-build-test.yml"><img src="https://github.com/kroryan/AstroviaBIn/actions/workflows/docker-build-test.yml/badge.svg" alt="Build Status" /></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/kroryan/sidereal/actions/workflows/docker-build-test.yml"><img src="https://github.com/kroryan/sidereal/actions/workflows/docker-build-test.yml/badge.svg" alt="Build Status" /></a>
-  <a href="https://github.com/kroryan/sidereal/actions/workflows/release.yml"><img src="https://github.com/kroryan/sidereal/actions/workflows/release.yml/badge.svg" alt="Release" /></a>
-</p>
+**AstroviaBin** is a self-hosted photo and FITS library for astrophotographers. It stores uploads in its own database and local media directories, solves image fields with local Astrometry.net software (full WCS with SIP distortion and exact catalogue annotations), and provides saved FITS difference analyses with HOTPANTS and Photutils — all behind a login with per-user roles.
 
-**Sidereal** is a self-hosted photo and FITS library for astrophotographers. It stores uploads in its own database and local media directories, solves image fields with local Astrometry.net software, and provides saved FITS difference analyses with HOTPANTS and Photutils.
-
-Perfect for organizing, analyzing, and showcasing your astrophotography collection with full control over your data and infrastructure.
-
-This fork does **not** require Immich or an Astrometry.net account. Existing Immich assets can be migrated, but new uploads go directly to Sidereal. The original photos and FITS are never submitted to an external plate-solving service.
+AstroviaBin is a fork of [Sidereal](https://github.com/sidereal-io/sidereal) (MIT). It does **not** require Immich or an Astrometry.net account; existing Immich assets can be migrated, but new uploads go directly to AstroviaBin. Original photos and FITS are never submitted to an external plate-solving service.
 
 <div align="center">
-  <img width="80%" src="assets/images/demo.gif" />
+  <img width="90%" src="assets/images/screenshots/01_gallery.png" alt="AstroviaBin gallery" />
   <br/>
   <a href="assets/images/screenshots">View all screenshots</a>
 </div>
 
+> **Upgrading from Sidereal?** Existing installs keep working: `SIDEREAL_*` environment variables are still accepted as aliases for `ASTROVIABIN_*`, and an existing `/app/config/sidereal.db` is used when no `astroviabin.db` exists. Users have to sign in again once because the session cookie was renamed.
+
 ## Features
 
 ### **Self-Hosted Image Management**
-- **Private local library**: Upload and manage photos and FITS directly in Sidereal
+- **Private local library**: Upload and manage photos and FITS directly in AstroviaBin
 - **Interactive Sky Map**: Explore your collection on a high-fidelity celestial atlas powered by Aladin Lite v3
 - **Astrophotography Filtering**: Filter by telescopes, cameras, targets, constellations, and acquisition details
 - **Deep Zoom Viewer**: High-resolution exploration of your deep-sky images with OpenSeaDragon
@@ -94,19 +89,19 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 This branch is not the upstream GHCR image. Build it from source so the local-only astrometry and FITS analysis dependencies are included:
 
 ```bash
-git clone --branch v0.x https://github.com/kroryan/sidereal.git
-cd sidereal
+git clone --branch v0.x https://github.com/kroryan/AstroviaBIn.git
+cd astroviabin
 cat > .env <<'ENV'
-SIDEREAL_ADMIN_USER=choose-a-user
-SIDEREAL_ADMIN_PASSWORD=choose-a-strong-password
+ASTROVIABIN_ADMIN_USER=choose-a-user
+ASTROVIABIN_ADMIN_PASSWORD=choose-a-strong-password
 # Optional: put the library on another disk (defaults to ./data/...)
-# SIDEREAL_HOST_DATA=/srv/sidereal/AppData
-# SIDEREAL_HOST_LIBRARY=/srv/sidereal/Media
+# ASTROVIABIN_HOST_DATA=/srv/astroviabin/AppData
+# ASTROVIABIN_HOST_LIBRARY=/srv/astroviabin/Media
 ENV
 docker compose up -d --build
 ```
 
-Open `http://localhost:5000` and sign in. Without `SIDEREAL_ADMIN_USER`/`SIDEREAL_ADMIN_PASSWORD` the login is **admin / admin** — change it before exposing the port. The default Compose file stores everything under `./data`; set `SIDEREAL_HOST_DATA`, `SIDEREAL_HOST_LIBRARY`, and `FITS_HOST_*` to use another disk. The SQLite database lives in `AppData`; original media lives under `Media` and `FITS`, not inside the container. Back up both the database and those directories together.
+Open `http://localhost:5000` and sign in. Without `ASTROVIABIN_ADMIN_USER`/`ASTROVIABIN_ADMIN_PASSWORD` the login is **admin / admin** — change it before exposing the port. The default Compose file stores everything under `./data`; set `ASTROVIABIN_HOST_DATA`, `ASTROVIABIN_HOST_LIBRARY`, and `FITS_HOST_*` to use another disk. The SQLite database lives in `AppData`; original media lives under `Media` and `FITS`, not inside the container. Back up both the database and those directories together.
 
 > **PostgreSQL option**: If you prefer PostgreSQL, download [`docker-compose.postgres.yml`](docker-compose.postgres.yml) and layer it on:
 > ```bash
@@ -119,22 +114,22 @@ Open `http://localhost:5000` and sign in. Without `SIDEREAL_ADMIN_USER`/`SIDEREA
 Build the same source locally and bind-mount persistent directories:
 
 ```bash
-docker build -t sidereal:local .
+docker build -t astroviabin:local .
 docker run -d \
-  --name sidereal \
+  --name astroviabin \
   -p 5000:5000 \
   -e NODE_ENV=production \
   -e FITS_ANALYSIS_DIR=/app/fits-analysis \
-  -v /srv/sidereal/AppData:/app/config \
-  -v /srv/sidereal/Media:/app/library \
-  -v /srv/sidereal/FITS/library:/app/fits:ro \
-  -v /srv/sidereal/FITS/uploads:/app/fits-upload \
-  -v /srv/sidereal/FITS/derivatives:/app/fits-derived \
-  -v /srv/sidereal/FITS/analysis:/app/fits-analysis \
-  sidereal:local
+  -v /srv/astroviabin/AppData:/app/config \
+  -v /srv/astroviabin/Media:/app/library \
+  -v /srv/astroviabin/FITS/library:/app/fits:ro \
+  -v /srv/astroviabin/FITS/uploads:/app/fits-upload \
+  -v /srv/astroviabin/FITS/derivatives:/app/fits-derived \
+  -v /srv/astroviabin/FITS/analysis:/app/fits-analysis \
+  astroviabin:local
 ```
 
-> To use PostgreSQL instead, add `-e DATABASE_URL="postgresql://user:password@host:5432/sidereal"` to the command above.
+> To use PostgreSQL instead, add `-e DATABASE_URL="postgresql://user:password@host:5432/astroviabin"` to the command above.
 
 ### Option 3: UnRAID
 
@@ -147,8 +142,8 @@ UnRAID shares as described in the [Docker guide](docker/README.md).
 
 ```bash
 # Clone and install dependencies
-git clone --branch v0.x https://github.com/kroryan/sidereal.git
-cd sidereal
+git clone --branch v0.x https://github.com/kroryan/AstroviaBIn.git
+cd astroviabin
 npm install
 
 # Option A: Build and run with Docker Compose (builds from source)
@@ -197,23 +192,23 @@ npm run dev:worker:standalone
 | `XMP_SIDECAR_PATH` | `/app/sidecars` | Directory for XMP sidecar files |
 | `FITS_LIBRARY_DIR` | `data/fits` | Local directory scanned for source `.fit`, `.fits`, and `.fts` files |
 | `FITS_DERIVATIVES_DIR` | `data/fits-derived` | Local directory where processed FITS derivatives are written |
-| `FITS_UPLOAD_DIR` | `data/fits-upload` | Local directory used by Sidereal's direct FITS upload button |
+| `FITS_UPLOAD_DIR` | `data/fits-upload` | Local directory used by AstroviaBin's direct FITS upload button |
 | `FITS_CACHE_DIR` | `data/fits-cache` | PNG preview cache for FITS files |
 | `FITS_ANALYSIS_DIR` | `data/fits-analysis` | Private HOTPANTS runs, evidence, and follow-up checks; put this on spacious persistent storage |
-| `SIDEREAL_MAX_UPLOAD_BYTES` | `21474836480` | Maximum direct upload size (20 GiB) |
+| `ASTROVIABIN_MAX_UPLOAD_BYTES` | `21474836480` | Maximum direct upload size (20 GiB) |
 | `FITS_MAX_PROCESS_BYTES` | `1073741824` | Maximum uncompressed primary FITS image size processed in memory |
 | `FITS_FULL_PREVIEW_MAX` | `4096` | Longest side of the non-tiled FITS fallback preview (the zoom viewer uses native-resolution tiles) |
-| `SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD` | `admin` / `admin` | Built-in administrator (always available, cannot be removed from the UI). **Change them.** More users are managed in Admin settings. |
-| `SIDEREAL_SESSION_SECRET` | _(generated)_ | Cookie signing key; generated once and stored as `.session-secret` next to the database when unset |
-| `SIDEREAL_AUTH_DISABLED` | `false` | Turn the login off only when another authenticating proxy sits in front |
+| `ASTROVIABIN_ADMIN_USER` / `ASTROVIABIN_ADMIN_PASSWORD` | `admin` / `admin` | Built-in administrator (always available, cannot be removed from the UI). **Change them.** More users are managed in Admin settings. |
+| `ASTROVIABIN_SESSION_SECRET` | _(generated)_ | Cookie signing key; generated once and stored as `.session-secret` next to the database when unset |
+| `ASTROVIABIN_AUTH_DISABLED` | `false` | Turn the login off only when another authenticating proxy sits in front |
 | `ASTROMETRY_EXTRA_INDEX_DIRS` | `/app/config/astrometry-index` | Colon-separated extra index directories (narrow fields) |
 | `ASTROMETRY_TIMEOUT_MS` | `900000` | Total time budget per local solve (hinted attempts, then blind) |
-| `SIDEREAL_BACKUP_DIR` / `SIDEREAL_BACKUP_KEEP` | `<db dir>/backups` / `14` | Daily SQLite backups |
-| `SIDEREAL_CACHE_MAX_BYTES` / `SIDEREAL_CACHE_MAX_AGE_DAYS` | `10 GiB` / `60` | Preview and tile cache bounds per cache directory |
+| `ASTROVIABIN_BACKUP_DIR` / `ASTROVIABIN_BACKUP_KEEP` | `<db dir>/backups` / `14` | Daily SQLite backups |
+| `ASTROVIABIN_CACHE_MAX_BYTES` / `ASTROVIABIN_CACHE_MAX_AGE_DAYS` | `10 GiB` / `60` | Preview and tile cache bounds per cache directory |
 
 ### FITS in the main gallery
 
-FITS is a local source in the existing gallery, not a separate gallery. Use **Upload** in the header to send a frame straight to Sidereal, or mount/configure a source folder and use **Scan FITS**. Direct uploads are stored in `FITS_UPLOAD_DIR`; mounted source files stay read-only. Plate solving uses bundled Astrometry.net binaries and index files locally; no FITS or preview is submitted to the public Astrometry.net site.
+FITS is a local source in the existing gallery, not a separate gallery. Use **Upload** in the header to send a frame straight to AstroviaBin, or mount/configure a source folder and use **Scan FITS**. Direct uploads are stored in `FITS_UPLOAD_DIR`; mounted source files stay read-only. Plate solving uses bundled Astrometry.net binaries and index files locally; no FITS or preview is submitted to the public Astrometry.net site.
 
 The FITS panel offers linear, asinh, logarithmic, and gamma stretches plus background neutralization. **Save processed FITS** writes a new 32-bit floating-point derivative to `FITS_DERIVATIVES_DIR`; it never overwrites the original. The current reader supports uncompressed primary-HDU mono and RGB FITS with `BITPIX` 8, 16, 32, 64, -32, or -64. Set `FITS_MAX_PROCESS_BYTES` according to available RAM for large frames.
 
@@ -224,10 +219,10 @@ Open a FITS and expand **HOTPANTS** above **FITS processing** to save a differen
 With Docker Compose, configure host folders in a Compose `.env` file or your shell before starting:
 
 ```bash
-FITS_HOST_LIBRARY=/srv/sidereal/FITS/library
-FITS_HOST_DERIVATIVES=/srv/sidereal/FITS/derivatives
-FITS_HOST_UPLOADS=/srv/sidereal/FITS/uploads
-FITS_HOST_ANALYSIS=/srv/sidereal/FITS/analysis
+FITS_HOST_LIBRARY=/srv/astroviabin/FITS/library
+FITS_HOST_DERIVATIVES=/srv/astroviabin/FITS/derivatives
+FITS_HOST_UPLOADS=/srv/astroviabin/FITS/uploads
+FITS_HOST_ANALYSIS=/srv/astroviabin/FITS/analysis
 # Optional; default is 1 GiB
 FITS_MAX_PROCESS_BYTES=1073741824
 ```
@@ -237,7 +232,7 @@ FITS_MAX_PROCESS_BYTES=1073741824
 The image bundles the 2MASS index files for fields of roughly 30′ and wider. For longer focal lengths, download smaller scales once into the persistent AppData folder (about 5 GB for 4203–4207, fields down to ~8′):
 
 ```bash
-docker exec -u "$(id -u)" sidereal download-astrometry-indexes
+docker exec -u "$(id -u)" astroviabin download-astrometry-indexes
 ```
 
 New index files are picked up by the next solve; no restart is needed.
@@ -254,40 +249,40 @@ After startup, access the admin interface at `/admin` to configure:
 
 ## Database Migration
 
-Sidereal includes a bidirectional migration script for moving data between SQLite and PostgreSQL:
+AstroviaBin includes a bidirectional migration script for moving data between SQLite and PostgreSQL:
 
 ```bash
 # PostgreSQL → SQLite
 node tools/scripts/migrate-db.js \
-  --from postgresql://user:pass@host:5432/sidereal \
-  --to sqlite:path/to/sidereal.db
+  --from postgresql://user:pass@host:5432/astroviabin \
+  --to sqlite:path/to/astroviabin.db
 
 # SQLite → PostgreSQL
 node tools/scripts/migrate-db.js \
   --from sqlite:path/to/local.db \
-  --to postgresql://user:pass@host:5432/sidereal
+  --to postgresql://user:pass@host:5432/astroviabin
 ```
 
 Inside a Docker container:
 ```bash
 node /app/dist/tools/scripts/migrate-db.js \
   --from postgresql://... \
-  --to sqlite:/app/config/sidereal.db
+  --to sqlite:/app/config/astroviabin.db
 ```
-To avoid running the command manually inside the container, set the `AUTO_DB_MIGRATE_FROM` environment variable (and optional `AUTO_DB_MIGRATE_TO`) on the Sidereal service. The Docker startup script runs the migration before launching the app, deletes any existing SQLite target file (unless `AUTO_DB_MIGRATE_RESET_SQLITE=false`), and writes a marker to `/app/config/.auto-db-migrated` so it only happens once unless you delete that file or set `AUTO_DB_MIGRATE_ONCE=false`.
+To avoid running the command manually inside the container, set the `AUTO_DB_MIGRATE_FROM` environment variable (and optional `AUTO_DB_MIGRATE_TO`) on the AstroviaBin service. The Docker startup script runs the migration before launching the app, deletes any existing SQLite target file (unless `AUTO_DB_MIGRATE_RESET_SQLITE=false`), and writes a marker to `/app/config/.auto-db-migrated` so it only happens once unless you delete that file or set `AUTO_DB_MIGRATE_ONCE=false`.
 
 The script handles all type conversions (timestamps, booleans, JSON, arrays) and respects foreign key ordering automatically. SQLite targets run the bundled Drizzle migrations during the copy; PostgreSQL targets should be initialized once beforehand so the schema exists.
 
 ## Container images
 
 Build this fork's `v0.x` branch locally with `docker compose up -d --build`.
-The upstream `ghcr.io/sidereal-io/sidereal` images are a different project
+The upstream `ghcr.io/kroryan/astroviabin` images are a different project
 line and must not be used as a substitute for this fork's private FITS workflow.
 
 ## Architecture
 
 ```
-Browser ──► Sidereal (React + Hono/Node)
+Browser ──► AstroviaBin (React + Hono/Node)
                 ├──► local SQLite or optional PostgreSQL
                 ├──► mounted private photo/FITS/analysis directories
                 ├──► local Astrometry.net solver + index files
@@ -299,7 +294,7 @@ Optional historical reference request ──► NASA SkyView (coordinates only)
 ## Project Structure
 
 ```
-Sidereal/
+AstroviaBin/
 ├── apps/
 │   ├── client/                 # React frontend application
 │   │   ├── src/
@@ -344,8 +339,8 @@ node --version  # v20+
 npm --version   # 10+
 
 # Clone repository
-git clone --branch v0.x https://github.com/kroryan/sidereal.git
-cd sidereal
+git clone --branch v0.x https://github.com/kroryan/AstroviaBIn.git
+cd astroviabin
 ```
 
 ### Setup
@@ -381,7 +376,7 @@ docker compose up -d               # Full stack via Docker
 
 ### Testing
 
-Sidereal includes comprehensive end-to-end testing using Playwright:
+AstroviaBin includes comprehensive end-to-end testing using Playwright:
 
 ```bash
 # Run all tests
@@ -399,7 +394,7 @@ npm run test:e2e:headed # Run tests in headed browser mode
 - `playwright.config.ts` - Playwright configuration with multiple browsers
 
 **Prerequisites for Testing:**
-- Sidereal application running on `http://localhost:5173`
+- AstroviaBin application running on `http://localhost:5173`
 - Test database with sample data
 - All dependencies installed via `npm install`
 
@@ -427,7 +422,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ## Roadmap
 
 ### Core Features
-- [x] **Direct photo and FITS uploads**: Sidereal owns its local library
+- [x] **Direct photo and FITS uploads**: AstroviaBin owns its local library
 - [x] **Interactive Sky Map**: Celestial atlas visualization for plate-solved image collections
 - [ ] Advanced image statistics and analytics for astrophotography sessions
 - [ ] Equipment usage reporting and session tracking
@@ -435,7 +430,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - [ ] XMP sidecar viewer and editor for astrophotography metadata
 
 ### Integrations
-- [ ] **NINA Plugin**: Sync session data (targets, equipment, acquisition details) directly from N.I.N.A. to Sidereal
+- [ ] **NINA Plugin**: Sync session data (targets, equipment, acquisition details) directly from N.I.N.A. to AstroviaBin
 - [x] **Local Plate Solving**: Bundled Astrometry.net binaries and index files; no remote submission
 - [x] **FITS Difference Analysis**: HOTPANTS with local Photutils validation and second-exposure checks
 
@@ -448,7 +443,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 - [ ] Community features (sharing, public galleries)
 
 ### Community & Help
-- **Bug Reports**: [GitHub Issues](https://github.com/kroryan/sidereal/issues)
+- **Bug Reports**: [GitHub Issues](https://github.com/kroryan/AstroviaBIn/issues)
 
 ## License
 
@@ -471,6 +466,6 @@ Third-party components keep their own licenses. In particular, the Docker image 
 
 **Built for the astrophotography community**
 
-[Star this repo](https://github.com/kroryan/sidereal) | [Report bug](https://github.com/kroryan/sidereal/issues)
+[Star this repo](https://github.com/kroryan/AstroviaBIn) | [Report bug](https://github.com/kroryan/AstroviaBIn/issues)
 
 </div>

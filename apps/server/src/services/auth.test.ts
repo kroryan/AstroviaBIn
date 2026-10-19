@@ -2,9 +2,9 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 delete process.env.DATABASE_URL;
 process.env.SQLITE_DB_PATH = ':memory:';
-process.env.SIDEREAL_SESSION_SECRET = 'test-secret';
-delete process.env.SIDEREAL_ADMIN_USER;
-delete process.env.SIDEREAL_ADMIN_PASSWORD;
+process.env.ASTROVIABIN_SESSION_SECRET = 'test-secret';
+delete process.env.ASTROVIABIN_ADMIN_USER;
+delete process.env.ASTROVIABIN_ADMIN_PASSWORD;
 const auth = await import('./auth');
 const users = await import('./users');
 
@@ -17,14 +17,14 @@ it('defaults to the built-in admin / admin account', async () => {
 });
 
 it('uses configured built-in credentials instead of the default', async () => {
-  process.env.SIDEREAL_ADMIN_USER = 'astro';
-  process.env.SIDEREAL_ADMIN_PASSWORD = 's3cret';
+  process.env.ASTROVIABIN_ADMIN_USER = 'astro';
+  process.env.ASTROVIABIN_ADMIN_PASSWORD = 's3cret';
   try {
     assert.equal(await auth.authenticate('admin', 'admin'), null);
     assert.equal((await auth.authenticate('astro', 's3cret'))?.role, 'admin');
   } finally {
-    delete process.env.SIDEREAL_ADMIN_USER;
-    delete process.env.SIDEREAL_ADMIN_PASSWORD;
+    delete process.env.ASTROVIABIN_ADMIN_USER;
+    delete process.env.ASTROVIABIN_ADMIN_PASSWORD;
   }
 });
 

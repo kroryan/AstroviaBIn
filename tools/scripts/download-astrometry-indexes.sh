@@ -12,7 +12,7 @@ target=${1:-${ASTROMETRY_EXTRA_INDEX_DIRS:-/app/config/astrometry-index}}
 [ "$#" -gt 0 ] && shift
 scales=${*:-4207 4206 4205 4204 4203}
 mkdir -p "$target"
-# Keep the index license next to the data (shown in Admin → About Sidereal & third-party notices).
+# Keep the index license next to the data (shown in Admin → About AstroviaBin & third-party notices).
 [ -s "$target/LICENSE-4200.txt" ] || curl -fsSL --retry 5 -o "$target/LICENSE-4200.txt" "https://data.astrometry.net/4200/LICENSE"
 for scale in $scales; do
   case "$scale" in

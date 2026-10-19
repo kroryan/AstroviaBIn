@@ -108,7 +108,7 @@ export function Header() {
       setUploadStage('complete');
       const image = data.image && typeof data.image === 'object' ? data.image as Record<string, unknown> : undefined;
       const savedName = kind === 'fits' ? data.output : image?.filename;
-      toast({ title: kind === 'fits' ? 'FITS uploaded' : 'Image uploaded', description: `${typeof savedName === 'string' ? savedName : file.name} was saved in Sidereal's local library.` });
+      toast({ title: kind === 'fits' ? 'FITS uploaded' : 'Image uploaded', description: `${typeof savedName === 'string' ? savedName : file.name} was saved in AstroviaBin's local library.` });
       queryClient.invalidateQueries({ queryKey: ["/api/images"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tags"] });
@@ -135,21 +135,21 @@ export function Header() {
   const unacknowledgedCount = notifications.length;
 
   return (
-    <header className="bg-card border-b border-border sticky top-0 z-40">
+    <header className="cyber-header sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-            <img src="/logo.png" alt="Sidereal Logo" className="h-8 w-8" />
-            <h1 className="text-xl font-bold text-foreground">Sidereal</h1>
+          <Link href="/" className="flex shrink-0 items-center gap-2 mr-6 hover:opacity-90 transition-opacity">
+            <img src="/logo.svg" alt="AstroviaBin logo" className="h-9 w-9 drop-shadow-[0_0_8px_rgba(0,240,255,0.6)]" />
+            <h1 className="cyber-wordmark text-lg whitespace-nowrap" style={{ textShadow: 'none' }}>ASTROVIA<span className="opacity-90">BIN</span></h1>
           </Link>
 
           {/* Desktop navigation */}
-          <nav className="hidden xl:flex items-center space-x-5">
+          <nav className="hidden xl:flex flex-1 items-center gap-4">
             {NAV_LINKS.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
-                className={`transition-colors ${isActive(href) ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`font-display whitespace-nowrap text-[0.66rem] uppercase tracking-[0.14em] transition-all ${isActive(href) ? 'neon-text-cyan border-b border-[#00f0ff] pb-0.5' : 'text-muted-foreground hover:text-[#ff2bd6]'}`}
               >
                 {label}
               </Link>
@@ -162,7 +162,7 @@ export function Header() {
             <input ref={fitsInputRef} type="file" accept=".fit,.fits,.fts,application/fits" className="hidden" onChange={handleFitsUpload} />
             {canEdit && <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button disabled={uploadType !== null} title="Upload to Sidereal's private library" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
+                <Button disabled={uploadType !== null} title="Upload to AstroviaBin's private library" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
                   {uploadType ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
                   <span>{uploadType ? 'Uploading…' : 'Upload'}</span>
                 </Button>
@@ -177,7 +177,7 @@ export function Header() {
               <span className="inline 2xl:hidden">{fitsScanning ? 'Scanning…' : 'FITS Scan'}</span><span className="hidden 2xl:inline">{fitsScanning ? 'Scanning FITS…' : 'Scan FITS'}</span>
             </Button>}
             <a
-              href="https://github.com/sidereal-io/sidereal"
+              href="https://github.com/kroryan/AstroviaBIn"
               target="_blank"
               rel="noopener noreferrer"
               title="View on GitHub"
@@ -222,8 +222,8 @@ export function Header() {
               <SheetContent side="right" className="w-64 p-0">
                 <SheetTitle className="sr-only">Navigation</SheetTitle>
                 <div className="flex items-center space-x-2 px-4 h-16 border-b border-border">
-                  <img src="/logo.png" alt="Sidereal Logo" className="h-8 w-8" />
-                  <span className="text-xl font-bold text-foreground">Sidereal</span>
+                  <img src="/logo.svg" alt="AstroviaBin logo" className="h-8 w-8" />
+                  <span className="cyber-wordmark text-lg">ASTROVIABIN</span>
                 </div>
                 <nav className="flex flex-col py-2">
                   {NAV_LINKS.map(({ href, label }) => (
@@ -307,7 +307,7 @@ export function Header() {
             <div className={`h-full rounded-full transition-all duration-200 ${uploadStage === 'failed' ? 'bg-destructive' : uploadStage === 'complete' ? 'bg-green-500' : 'bg-primary'}`} style={{ width: `${uploadProgress}%` }} />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {uploadStage === 'uploading' ? `Uploading ${uploadType === 'fits' ? 'FITS' : 'image'}…` : uploadStage === 'processing' ? 'Saving locally and adding to the gallery…' : uploadStage === 'complete' ? 'Saved to Sidereal’s local library.' : 'Upload failed; see the notification for details.'}
+            {uploadStage === 'uploading' ? `Uploading ${uploadType === 'fits' ? 'FITS' : 'image'}…` : uploadStage === 'processing' ? 'Saving locally and adding to the gallery…' : uploadStage === 'complete' ? 'Saved to AstroviaBin’s local library.' : 'Upload failed; see the notification for details.'}
           </p>
         </div>
       )}

@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>Sidereal</Name>
-  <Repository>ghcr.io/sidereal-io/sidereal:latest</Repository>
-  <Registry>https://ghcr.io/sidereal-io/sidereal</Registry>
+  <Name>AstroviaBin</Name>
+  <Repository>ghcr.io/kroryan/astroviabin:latest</Repository>
+  <Registry>https://ghcr.io/kroryan/astroviabin</Registry>
   <Network>bridge</Network>
   <WebUI>http://[IP]:[PORT:2284]/</WebUI>
-  <Icon>https://raw.githubusercontent.com/sidereal-io/sidereal/main/assets/images/sidereal-transparent.png</Icon>
-  <TemplateURL>https://raw.githubusercontent.com/sidereal-io/sidereal/main/docker/unraid-templates/sidereal.xml</TemplateURL>
-  <Support>https://github.com/sidereal-io/sidereal/issues</Support>
-  <Project>https://github.com/sidereal-io/sidereal</Project>
+  <Icon>https://raw.githubusercontent.com/kroryan/AstroviaBIn/main/assets/brand/astroviabin-logo-1024.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/kroryan/AstroviaBIn/main/docker/unraid-templates/astroviabin.xml</TemplateURL>
+  <Support>https://github.com/kroryan/AstroviaBIn/issues</Support>
+  <Project>https://github.com/kroryan/AstroviaBIn</Project>
   <Beta>False</Beta>
   <Category>MediaApp:Photos MediaApp:Other Tools:</Category>
   <Date>2026-03-23</Date>
@@ -56,7 +56,7 @@
     - FEAT: PostgreSQL support for production environments
     - FEAT: Worker process management with enable/disable functionality
     - FIX: Thumbnail proxy endpoint 500 errors resolved
-    - REFACTOR: Project renamed from Sidereal to Sidereal
+    - REFACTOR: Project renamed from AstroviaBin to AstroviaBin
     - DOCS: Enhanced security documentation and deployment guides
     
     ### v0.2.0
@@ -65,7 +65,7 @@
     - FEAT: PostgreSQL support for production environments
     - FEAT: Worker process management with enable/disable functionality
     - FIX: Thumbnail proxy endpoint 500 errors resolved
-    - REFACTOR: Project renamed from Sidereal to Sidereal
+    - REFACTOR: Project renamed from AstroviaBin to AstroviaBin
     - DOCS: Enhanced security documentation and deployment guides
     
     ### v0.1.0
@@ -76,13 +76,13 @@
     - Immich synchronization
   </Changes>
   <Overview>
-    Sidereal is a comprehensive astrophotography image management and analysis application that bridges the gap between your astrophotography sessions and organized digital asset management. It provides seamless integration with Immich for photo management, advanced plate solving through Astrometry.net, and detailed equipment tracking to help you organize and analyze your celestial captures.
+    AstroviaBin is a comprehensive astrophotography image management and analysis application that bridges the gap between your astrophotography sessions and organized digital asset management. It provides seamless integration with Immich for photo management, advanced plate solving through Astrometry.net, and detailed equipment tracking to help you organize and analyze your celestial captures.
   </Overview>
   
   <Requires/>
   
   <Description>
-    Sidereal is a comprehensive astrophotography image management and analysis application. It provides automatic synchronization with Immich, plate solving capabilities through Astrometry.net, equipment tracking, and detailed image metadata management. Perfect for organizing and analyzing your astrophotography collection.
+    AstroviaBin is a comprehensive astrophotography image management and analysis application. It provides automatic synchronization with Immich, plate solving capabilities through Astrometry.net, equipment tracking, and detailed image metadata management. Perfect for organizing and analyzing your astrophotography collection.
     
     Features:
     - Interactive Sky Map (Aladin Lite v3)
@@ -121,17 +121,17 @@
   
   <Config Name="WebUI Port" Target="5000" Default="2284" Mode="tcp" Description="Port for web interface" Type="Port" Display="always" Required="true" Mask="false">2284</Config>
   
-  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/sidereal/config" Mode="rw" Description="Configuration and SQLite database storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/sidereal/config</Config>
+  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/astroviabin/config" Mode="rw" Description="Configuration and SQLite database storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/astroviabin/config</Config>
   
-  <Config Name="Logs Directory" Target="/app/logs" Default="/mnt/user/appdata/sidereal/logs" Mode="rw" Description="Application logs storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/sidereal/logs</Config>
+  <Config Name="Logs Directory" Target="/app/logs" Default="/mnt/user/appdata/astroviabin/logs" Mode="rw" Description="Application logs storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/astroviabin/logs</Config>
   
-  <Config Name="Sidecar Directory" Target="/app/sidecars" Default="/mnt/user/appdata/sidereal/sidecars" Mode="rw" Description="XMP sidecar files storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/sidereal/sidecars</Config>
+  <Config Name="Sidecar Directory" Target="/app/sidecars" Default="/mnt/user/appdata/astroviabin/sidecars" Mode="rw" Description="XMP sidecar files storage" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/astroviabin/sidecars</Config>
   
-  <Config Name="Cache Directory" Target="/app/cache" Default="/mnt/user/appdata/sidereal/cache" Mode="rw" Description="Cache storage for thumbnails and survey images" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/sidereal/cache</Config>
+  <Config Name="Cache Directory" Target="/app/cache" Default="/mnt/user/appdata/astroviabin/cache" Mode="rw" Description="Cache storage for thumbnails and survey images" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/astroviabin/cache</Config>
   
   <Config Name="XMP Sidecar Path" Target="XMP_SIDECAR_PATH" Default="/app/sidecars" Mode="" Description="Directory for XMP sidecar files" Type="Variable" Display="advanced" Required="false" Mask="false">/app/sidecars</Config>
   
-  <Config Name="Database URL" Target="DATABASE_URL" Default="" Mode="" Description="Leave empty to use built-in SQLite database. Set to a PostgreSQL connection string for external database support (e.g., postgresql://sidereal:password@postgres:5432/sidereal)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Database URL" Target="DATABASE_URL" Default="" Mode="" Description="Leave empty to use built-in SQLite database. Set to a PostgreSQL connection string for external database support (e.g., postgresql://astroviabin:password@postgres:5432/astroviabin)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
   
   <Config Name="Node Environment" Target="NODE_ENV" Default="production" Mode="" Description="Application environment" Type="Variable" Display="advanced" Required="false" Mask="false">production</Config>
   

@@ -1,6 +1,6 @@
-# Sidereal — Agent Guide
+# AstroviaBin — Agent Guide
 
-**Sidereal** is a self-hosted photo and FITS library for astrophotographers. This fork stores uploads in its own library (no Immich), plate-solves locally with Astrometry.net (WCS with SIP distortion is persisted and annotations are projected from it), runs HOTPANTS/Photutils difference analyses, and tracks equipment and deep-sky imaging metadata. Access requires a login (`SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD`).
+**AstroviaBin** is a self-hosted photo and FITS library for astrophotographers. This fork stores uploads in its own library (no Immich), plate-solves locally with Astrometry.net (WCS with SIP distortion is persisted and annotations are projected from it), runs HOTPANTS/Photutils difference analyses, and tracks equipment and deep-sky imaging metadata. Access requires a login (`ASTROVIABIN_ADMIN_USER` / `ASTROVIABIN_ADMIN_PASSWORD`).
 
 **Stack:** TypeScript monorepo · React 19 + Vite (frontend) · Hono (backend) · Drizzle ORM · SQLite (default) / PostgreSQL · Playwright (E2E)
 
@@ -78,7 +78,7 @@ cp .env.example .env.local
 ### Database
 
 - **ORM:** Drizzle — type-safe query builder
-- **Default:** SQLite (`local.db` locally, `/app/config/sidereal.db` in Docker)
+- **Default:** SQLite (`local.db` locally, `/app/config/astroviabin.db` in Docker)
 - **Optional:** PostgreSQL — set `DATABASE_URL=postgresql://...`
 - **Schemas:** `packages/shared/src/db/sqlite-schema.ts` and `postgres-schema.ts`
 - **Migrations:** Generated to `tools/migrations/sqlite/` and applied automatically on startup
@@ -131,12 +131,12 @@ See `.env.example` and `.env.worker.example` for the full list.
 
 ## Workflow
 
-This project follows the Jesse Vincent **Superpowers** development methodology, with four sidereal-specific overrides. AI agents MUST use both:
+This project follows the Jesse Vincent **Superpowers** development methodology, with four astroviabin-specific overrides. AI agents MUST use both:
 
 1. **`superpowers:brainstorming`, `writing-plans`, `executing-plans` (or `subagent-driven-development`), and `finishing-a-development-branch`** — the standard methodology
-2. **`sidereal-workflow-overrides`** — the project's overlay (spec on GitHub issue, plan in `.workspace/plans/`, ADR before PR, `Closes #<n>` in PR body)
+2. **`astroviabin-workflow-overrides`** — the project's overlay (spec on GitHub issue, plan in `.workspace/plans/`, ADR before PR, `Closes #<n>` in PR body)
 
-When the user asks "what's next?" or starts a workflow without naming an issue, use **`sidereal-pick-next-issue`** first.
+When the user asks "what's next?" or starts a workflow without naming an issue, use **`astroviabin-pick-next-issue`** first.
 
 ### Hard rules
 
@@ -144,7 +144,7 @@ When the user asks "what's next?" or starts a workflow without naming an issue, 
 - **Mandatory TDD.** Every feature or bug fix follows Red-Green-Refactor. Code without a test baseline will be discarded.
 - **Never set `spec/ready` yourself.** Only a human applies that label.
 
-See the `sidereal-workflow-overrides` skill for the full override details.
+See the `astroviabin-workflow-overrides` skill for the full override details.
 
 ## Decision Records
 

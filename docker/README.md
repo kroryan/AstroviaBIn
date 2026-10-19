@@ -1,8 +1,8 @@
-# Deploying this Sidereal fork
+# Deploying this AstroviaBin fork
 
 This fork stores photos and FITS locally and bundles the offline
 Astrometry.net solver, HOTPANTS, and Photutils. Do not deploy the upstream
-`ghcr.io/sidereal-io/sidereal` image for this workflow: it is not the
+`ghcr.io/kroryan/astroviabin` image for this workflow: it is not the
 same build. Immich and a remote Astrometry.net account are not required.
 
 ## Docker Compose installation
@@ -10,34 +10,34 @@ same build. Immich and a remote Astrometry.net account are not required.
 From the repository root:
 
 ```bash
-git clone --branch v0.x https://github.com/kroryan/sidereal.git
-cd sidereal
-mkdir -p /srv/sidereal/AppData /srv/sidereal/Media
-mkdir -p /srv/sidereal/FITS/{library,derivatives,uploads,analysis}
+git clone --branch v0.x https://github.com/kroryan/AstroviaBIn.git
+cd astroviabin
+mkdir -p /srv/astroviabin/AppData /srv/astroviabin/Media
+mkdir -p /srv/astroviabin/FITS/{library,derivatives,uploads,analysis}
 docker compose up -d --build
 docker compose ps
 ```
 
 Open `http://localhost:5000`. Both `docker-compose.yml` and
 `docker-compose.prod.yml` build this fork's image locally. The default
-paths use `/srv/sidereal`; put the following in a Compose
+paths use `/srv/astroviabin`; put the following in a Compose
 `.env` file to use another disk:
 
 ```dotenv
-SIDEREAL_PORT=5000
-SIDEREAL_HOST_DATA=/srv/sidereal/AppData
-SIDEREAL_HOST_LIBRARY=/srv/sidereal/Media
-FITS_HOST_LIBRARY=/srv/sidereal/FITS/library
-FITS_HOST_DERIVATIVES=/srv/sidereal/FITS/derivatives
-FITS_HOST_UPLOADS=/srv/sidereal/FITS/uploads
-FITS_HOST_ANALYSIS=/srv/sidereal/FITS/analysis
+ASTROVIABIN_PORT=5000
+ASTROVIABIN_HOST_DATA=/srv/astroviabin/AppData
+ASTROVIABIN_HOST_LIBRARY=/srv/astroviabin/Media
+FITS_HOST_LIBRARY=/srv/astroviabin/FITS/library
+FITS_HOST_DERIVATIVES=/srv/astroviabin/FITS/derivatives
+FITS_HOST_UPLOADS=/srv/astroviabin/FITS/uploads
+FITS_HOST_ANALYSIS=/srv/astroviabin/FITS/analysis
 ```
 
 The mounted FITS library is read-only to the container. Direct uploads
 go to `FITS_HOST_UPLOADS`, derivatives to
 `FITS_HOST_DERIVATIVES`, and saved analyses, reports, evidence, and
 follow-up checks to `FITS_HOST_ANALYSIS`. Set the latter three on
-spacious persistent storage. SQLite lives in `SIDEREAL_HOST_DATA`.
+spacious persistent storage. SQLite lives in `ASTROVIABIN_HOST_DATA`.
 Back up AppData, Media, and all FITS directories together.
 
 The image build installs public Astrometry.net index files, builds the
@@ -77,7 +77,7 @@ Do not point an old upstream image at this fork's database.
 ## Operations
 
 ```bash
-docker compose logs -f sidereal
+docker compose logs -f astroviabin
 docker compose ps
 docker compose up -d --build
 ```
@@ -87,7 +87,7 @@ analysis fails, check the report's error and its private `hotpants.log`
 in the analysis directory. Verify free space and permissions on every
 mounted path. For local-only FITS analysis, verify the Docker image
 contains `/usr/local/bin/hotpants`,
-`/opt/sidereal-python/bin/python`, and the Astrometry.net index files.
+`/opt/astroviabin-python/bin/python`, and the Astrometry.net index files.
 
 The historical UnRAID template references an upstream image and does
 not install this fork's scientific stack. Build this branch locally and

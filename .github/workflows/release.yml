@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sidereal
+  IMAGE_NAME: ${{ github.repository_owner }}/astroviabin
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -49,8 +49,8 @@ jobs:
       - name: Create release archive
         run: |
           mkdir -p release
-          tar -czf release/sidereal-${{ github.ref_name }}-dist.tar.gz dist/
-          tar -czf release/sidereal-${{ github.ref_name }}-source.tar.gz \
+          tar -czf release/astroviabin-${{ github.ref_name }}-dist.tar.gz dist/
+          tar -czf release/astroviabin-${{ github.ref_name }}-source.tar.gz \
             --exclude=node_modules \
             --exclude=dist \
             --exclude=.git \
@@ -61,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-archives-${{ github.ref_name }}
-          path: release/sidereal-${{ github.ref_name }}-*.tar.gz
+          path: release/astroviabin-${{ github.ref_name }}-*.tar.gz
           retention-days: 1
 
       - name: Set up Docker Buildx
@@ -271,8 +271,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            release/sidereal-${{ github.ref_name }}-dist.tar.gz
-            release/sidereal-${{ github.ref_name }}-source.tar.gz
+            release/astroviabin-${{ github.ref_name }}-dist.tar.gz
+            release/astroviabin-${{ github.ref_name }}-source.tar.gz
             release/sbom-${{ github.ref_name }}.spdx.json
           generate_release_notes: false
 
@@ -289,8 +289,8 @@ jobs:
           echo "${{ steps.meta.outputs.tags }}" | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Release Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Distribution archive: sidereal-${{ github.ref_name }}-dist.tar.gz" >> $GITHUB_STEP_SUMMARY
-          echo "- Source archive: sidereal-${{ github.ref_name }}-source.tar.gz" >> $GITHUB_STEP_SUMMARY
+          echo "- Distribution archive: astroviabin-${{ github.ref_name }}-dist.tar.gz" >> $GITHUB_STEP_SUMMARY
+          echo "- Source archive: astroviabin-${{ github.ref_name }}-source.tar.gz" >> $GITHUB_STEP_SUMMARY
           echo "- SBOM: sbom-${{ github.ref_name }}.spdx.json" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Security" >> $GITHUB_STEP_SUMMARY

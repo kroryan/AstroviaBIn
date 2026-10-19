@@ -214,7 +214,7 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
     const value = copyHeaderValue(reference.headers, key);
     if (value !== undefined) cards.push(fitsCard(key, value));
   }
-  cards.push(fitsCard('HISTORY', `Sidereal stack of ${frames.length} frames (method=${method})`));
+  cards.push(fitsCard('HISTORY', `AstroviaBin stack of ${frames.length} frames (method=${method})`));
   for (let index = 0; index < offsets.length; index++) {
     cards.push(fitsCard('HISTORY', `frame ${index}: dx=${offsets[index].dx} dy=${offsets[index].dy}`));
   }

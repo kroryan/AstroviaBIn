@@ -51,7 +51,7 @@ function testFitsRgb(size: number, planes: [number[], number[], number[]]): Buff
 }
 
 test('reads standard FITS headers and renders a display preview', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'm42.fits');
   await writeFile(source, testFits([0, 100, 500, 1000]));
   try {
@@ -76,7 +76,7 @@ test('reads standard FITS headers and renders a display preview', async () => {
 });
 
 test('creates a float FITS derivative without changing the source', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'source.fits');
   const output = path.join(directory, 'processed.fits');
   await writeFile(source, testFits([0, 100, 500, 1000]));
@@ -92,7 +92,7 @@ test('creates a float FITS derivative without changing the source', async () => 
 });
 
 test('midtones transfer function stretch differs from a linear stretch', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'm42.fits');
   await writeFile(source, testFits([0, 100, 500, 1000]));
   try {
@@ -108,7 +108,7 @@ test('midtones transfer function stretch differs from a linear stretch', async (
 });
 
 test('SCNR pulls an isolated green pixel back toward the red/blue average', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'green-cast.fits');
   await writeFile(source, testFitsRgb(1, [[0], [1000], [0]]));
   try {
@@ -125,7 +125,7 @@ test('SCNR pulls an isolated green pixel back toward the red/blue average', asyn
 });
 
 test('unsharp mask sharpening changes the rendered preview', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'bump.fits');
   const size = 5;
   // A mid-grey background with a brighter centre, so the unsharp mask boosts
@@ -144,7 +144,7 @@ test('unsharp mask sharpening changes the rendered preview', async () => {
 });
 
 test('square root and squared stretches differ from a linear stretch', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'm42.fits');
   await writeFile(source, testFits([0, 100, 500, 1000]));
   try {
@@ -160,7 +160,7 @@ test('square root and squared stretches differ from a linear stretch', async () 
 });
 
 test('colour maps only affect the preview, not a saved derivative, and grey stays mono', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'm42.fits');
   const output = path.join(directory, 'processed.fits');
   await writeFile(source, testFits([0, 100, 500, 1000]));
@@ -181,7 +181,7 @@ test('colour maps only affect the preview, not a saved derivative, and grey stay
 });
 
 test('inverted colour map flips an RGB preview', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'rgb.fits');
   await writeFile(source, testFitsRgb(1, [[200], [400], [600]]));
   try {
@@ -197,7 +197,7 @@ test('inverted colour map flips an RGB preview', async () => {
 });
 
 test('hot pixel removal replaces an isolated spike with its local median', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'hot-pixel.fits');
   const size = 5;
   const values = new Array(size * size).fill(300);
@@ -219,7 +219,7 @@ test('hot pixel removal replaces an isolated spike with its local median', async
 });
 
 test('background extraction flattens a large-scale gradient', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'gradient.fits');
   const size = 16;
   const values: number[] = [];
@@ -242,7 +242,7 @@ test('background extraction flattens a large-scale gradient', async () => {
 });
 
 test('denoise changes the rendered preview', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'noisy.fits');
   const size = 6;
   const values = Array.from({ length: size * size }, (_, index) => (index % 2 === 0 ? 200 : 800));
@@ -258,7 +258,7 @@ test('denoise changes the rendered preview', async () => {
 });
 
 test('creates a derivative with cosmetic correction, denoise, and background extraction applied together', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
   const source = path.join(directory, 'combo.fits');
   const output = path.join(directory, 'combo-processed.fits');
   const size = 8;

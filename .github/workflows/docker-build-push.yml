@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/sidereal
+  IMAGE_NAME: ${{ github.repository_owner }}/astroviabin
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
       - name: Create application snapshot
         run: |
           mkdir -p snapshot
-          tar -czf snapshot/sidereal-snapshot-${{ github.sha }}.tar.gz \
+          tar -czf snapshot/astroviabin-snapshot-${{ github.sha }}.tar.gz \
             --exclude=node_modules \
             --exclude=.git \
             --exclude=snapshot \
@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: app-snapshot-${{ github.sha }}
-          path: snapshot/sidereal-snapshot-${{ github.sha }}.tar.gz
+          path: snapshot/astroviabin-snapshot-${{ github.sha }}.tar.gz
           retention-days: 30
 
   # PR builds: AMD64 only (ubuntu-latest is native amd64, no QEMU needed)
@@ -121,13 +121,13 @@ jobs:
       - name: Export Docker image as artifact
         run: |
           docker save ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-scan \
-            | gzip > sidereal-pr-${{ github.event.pull_request.number }}-${{ github.sha }}.tar.gz
+            | gzip > astroviabin-pr-${{ github.event.pull_request.number }}-${{ github.sha }}.tar.gz
 
       - name: Upload Docker image artifact (PR)
         uses: actions/upload-artifact@v7
         with:
           name: docker-image-pr-${{ github.event.pull_request.number }}
-          path: sidereal-pr-${{ github.event.pull_request.number }}-${{ github.sha }}.tar.gz
+          path: astroviabin-pr-${{ github.event.pull_request.number }}-${{ github.sha }}.tar.gz
           retention-days: 7
 
       - name: Create PR build summary

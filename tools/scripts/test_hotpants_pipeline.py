@@ -1,4 +1,4 @@
-"""Focused synthetic checks for Sidereal's post-HOTPANTS candidate validation."""
+"""Focused synthetic checks for AstroviaBin's post-HOTPANTS candidate validation."""
 
 import tempfile
 import unittest

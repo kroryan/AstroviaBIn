@@ -42,7 +42,7 @@ const NGC_CSV_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/maste
 const ADDENDUM_CSV_URL = 'https://raw.githubusercontent.com/mattiaverga/OpenNGC/master/database_files/addendum.csv';
 const GITHUB_API_URL = 'https://api.github.com/repos/mattiaverga/OpenNGC/commits?path=database_files/NGC.csv&per_page=1';
 
-// OpenNGC marks NGC 2244 as a duplicate of NGC 2239. For Sidereal we present the
+// OpenNGC marks NGC 2244 as a duplicate of NGC 2239. For AstroviaBin we present the
 // modern, commonly used NGC 2244 designation while retaining NGC 2239 as a searchable alias.
 const ROSETTE_PRIMARY_NAME = 'NGC 2239';
 const ROSETTE_CANONICAL_NAME = 'NGC 2244';
@@ -117,7 +117,7 @@ class CatalogService {
     let commitSha = '';
     try {
       const apiResponse = await fetch(GITHUB_API_URL, {
-        headers: { 'User-Agent': 'Sidereal/1.0' },
+        headers: { 'User-Agent': 'AstroviaBin/1.0' },
       });
       if (apiResponse.ok) {
         const commits = await apiResponse.json();
@@ -147,7 +147,7 @@ class CatalogService {
     const currentSha = (settings.catalog_commitSha as string) || '';
 
     const apiResponse = await fetch(GITHUB_API_URL, {
-      headers: { 'User-Agent': 'Sidereal/1.0' },
+      headers: { 'User-Agent': 'AstroviaBin/1.0' },
     });
 
     if (!apiResponse.ok) {

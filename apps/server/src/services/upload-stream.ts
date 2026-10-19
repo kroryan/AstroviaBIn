@@ -13,7 +13,7 @@ export class UploadRequestError extends Error {
 }
 
 export function maxUploadBytes(): number {
-  const configured = Number(process.env.SIDEREAL_MAX_UPLOAD_BYTES);
+  const configured = Number(process.env.ASTROVIABIN_MAX_UPLOAD_BYTES);
   return Number.isSafeInteger(configured) && configured > 0 ? configured : 20 * 1024 ** 3;
 }
 

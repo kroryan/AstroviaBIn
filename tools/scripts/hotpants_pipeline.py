@@ -107,7 +107,7 @@ def fetch_reference(wcs, shape, destination, survey):
     query = urllib.parse.urlencode({'Survey': survey, 'Position': f'{ra:.8f},{dec:.8f}',
                                     'Return': 'FITS', 'Size': f'{fov:.6f}', 'Pixels': '2048'})
     url = 'https://skyview.gsfc.nasa.gov/cgi-bin/images?' + query
-    request = urllib.request.Request(url, headers={'User-Agent': 'Sidereal private FITS analysis/1.0'})
+    request = urllib.request.Request(url, headers={'User-Agent': 'AstroviaBin private FITS analysis/1.0'})
     with urllib.request.urlopen(request, timeout=180) as response, destination.open('wb') as output:
         total = 0
         while True:

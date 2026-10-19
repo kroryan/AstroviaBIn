@@ -25,15 +25,15 @@ warnings=()
 # --- Check 1: branch name pattern ---
 if [[ ! "$branch" =~ ^issue-([0-9]+)- ]]; then
   if [[ "$branch" == "main" || "$branch" == "master" ]]; then
-    warnings+=("editing on \`$branch\` — sidereal workflow expects an \`issue-<n>-<slug>\` branch off origin/main")
+    warnings+=("editing on \`$branch\` — astroviabin workflow expects an \`issue-<n>-<slug>\` branch off origin/main")
   else
-    warnings+=("branch \`$branch\` does not match \`issue-<n>-<slug>\` — sidereal workflow expects issue-scoped branches")
+    warnings+=("branch \`$branch\` does not match \`issue-<n>-<slug>\` — astroviabin workflow expects issue-scoped branches")
   fi
   # Without an issue number we can't run checks 2 and 3.
   if [[ ${#warnings[@]} -gt 0 ]]; then
-    printf '\n[sidereal-workflow] Heads up:\n' >&2
+    printf '\n[astroviabin-workflow] Heads up:\n' >&2
     for w in "${warnings[@]}"; do printf '  - %s\n' "$w" >&2; done
-    printf '  See the sidereal-workflow-overrides skill for the full workflow.\n\n' >&2
+    printf '  See the astroviabin-workflow-overrides skill for the full workflow.\n\n' >&2
   fi
   exit 0
 fi
@@ -74,14 +74,14 @@ shopt -s nullglob
 plans=( .workspace/plans/*"issue-${issue_num}"*.md )
 shopt -u nullglob
 if [[ ${#plans[@]} -eq 0 ]]; then
-  warnings+=("no plan file found at \`.workspace/plans/*issue-${issue_num}*.md\` — sidereal workflow expects a plan before implementation")
+  warnings+=("no plan file found at \`.workspace/plans/*issue-${issue_num}*.md\` — astroviabin workflow expects a plan before implementation")
 fi
 
 # --- Emit ---
 if [[ ${#warnings[@]} -gt 0 ]]; then
-  printf '\n[sidereal-workflow] Heads up (warn-only):\n' >&2
+  printf '\n[astroviabin-workflow] Heads up (warn-only):\n' >&2
   for w in "${warnings[@]}"; do printf '  - %s\n' "$w" >&2; done
-  printf '  See the sidereal-workflow-overrides skill for the full workflow.\n' >&2
+  printf '  See the astroviabin-workflow-overrides skill for the full workflow.\n' >&2
   printf '  To clear the label cache: rm -rf .workspace/cache/label-cache\n\n' >&2
 fi
 

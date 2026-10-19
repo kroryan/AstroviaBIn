@@ -96,7 +96,7 @@ docker-compose.immich.yml
 # Documentation (internal/dev only)
 docs/screenshots.md
 
-# Sidereal specific
+# AstroviaBin specific
 sidecars/
 xmp-sidecars/
 uploads/

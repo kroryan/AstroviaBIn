@@ -22,7 +22,7 @@ const isFitsPath = (originalPath: string | null | undefined) => Boolean(original
 
 async function imageTileSource(image: { id: number; libraryAssetId?: number | null; updatedAt?: Date | string | null }) {
   const asset = await storage.getLibraryAssetForAstroImage(image.id);
-  if (!asset) throw new Error('This image has not been migrated to the private Sidereal library');
+  if (!asset) throw new Error('This image has not been migrated to the private AstroviaBin library');
   const sourcePath = resolveLibraryAssetPath(asset);
   const sourceStat = await stat(sourcePath);
   const updatedAt = image.updatedAt instanceof Date ? image.updatedAt.getTime() : Date.parse(String(image.updatedAt || '')) || 0;
@@ -167,7 +167,7 @@ app.get('/:id/tile-info', async (c) => {
     const image = await storage.getAstroImage(parseInt(c.req.param('id')));
     if (!image) return c.json({ message: 'Image not found' }, 404);
     if (isFitsPath(image.originalPath)) return c.redirect(`/api/fits/${image.id}/tile-info`, 302);
-    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private Sidereal library' }, 404);
+    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private AstroviaBin library' }, 404);
     const source = await imageTileSource(image);
     return c.json(tileInfo(source.width, source.height));
   } catch (error) {
@@ -183,7 +183,7 @@ app.get('/:id/tile', async (c) => {
     if (isFitsPath(image.originalPath)) {
       return c.redirect(`/api/fits/${image.id}/tile?${new URLSearchParams(c.req.query()).toString()}`, 302);
     }
-    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private Sidereal library' }, 404);
+    if (!image.libraryAssetId) return c.json({ message: 'Image has not been migrated to the private AstroviaBin library' }, 404);
     const level = Number(c.req.query('level'));
     const x = Number(c.req.query('x'));
     const y = Number(c.req.query('y'));

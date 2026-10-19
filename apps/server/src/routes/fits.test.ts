@@ -37,7 +37,7 @@ function wideTestFits(width: number): Buffer {
 }
 
 test('scan indexes FITS into the existing gallery and serves a preview', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-route-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-route-'));
   const sourceDirectory = path.join(directory, 'source');
   const derivativesDirectory = path.join(directory, 'derivatives');
   const uploadsDirectory = path.join(directory, 'uploads');
@@ -131,7 +131,7 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
 });
 
 test('preview=full renders at native resolution instead of the capped preview size', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-fits-route-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-route-'));
   const sourceDirectory = path.join(directory, 'source');
   const cacheDirectory = path.join(directory, 'cache');
   const oldLibraryDir = process.env.FITS_LIBRARY_DIR;

@@ -1,17 +1,17 @@
-# Sidereal API Documentation
+# AstroviaBin API Documentation
 
-This document describes the REST API endpoints available in Sidereal.
+This document describes the REST API endpoints available in AstroviaBin.
 
 ## Base URL
 
-All API endpoints are relative to your Sidereal server's base URL:
+All API endpoints are relative to your AstroviaBin server's base URL:
 ```
 http://localhost:5000/api
 ```
 
 ## Authentication
 
-Currently, Sidereal does not require authentication for API access. All endpoints are publicly accessible when the server is running.
+Currently, AstroviaBin does not require authentication for API access. All endpoints are publicly accessible when the server is running.
 
 ## Response Format
 
@@ -1112,7 +1112,7 @@ GET /api/admin/database
 ```json
 {
   "type": "sqlite",
-  "path": "/app/config/sidereal.db",
+  "path": "/app/config/astroviabin.db",
   "sizeBytes": 1048576,
   "lastModified": "2024-01-15T10:00:00Z"
 }
@@ -1169,7 +1169,7 @@ Currently, there are no rate limits implemented. However, be mindful of:
 
 ## Private FITS difference analysis
 
-These endpoints operate on a FITS already stored in Sidereal. Science FITS
+These endpoints operate on a FITS already stored in AstroviaBin. Science FITS
 files stay local and are not sent to Astrometry.net or Photutils servers.
 A survey reference request sends sky coordinates and field size only; use
 a local FITS reference to avoid that external request.
@@ -1219,7 +1219,7 @@ Auxiliary files and HOTPANTS utilities are also available under
 
 ## WebSocket Events
 
-Sidereal uses native WebSocket for real-time updates. Connect to `ws://<host>/ws` and listen for JSON messages:
+AstroviaBin uses native WebSocket for real-time updates. Connect to `ws://<host>/ws` and listen for JSON messages:
 
 ### Plate Solving Updates
 ```javascript
@@ -1270,5 +1270,5 @@ Note: Admin settings take precedence over environment variables.
 ## Support
 
 For API support and questions:
-- Check the [GitHub Issues](https://github.com/kroryan/sidereal/issues)
+- Check the [GitHub Issues](https://github.com/kroryan/AstroviaBIn/issues)
 - Review the [Contributing Guide](../CONTRIBUTING.md)

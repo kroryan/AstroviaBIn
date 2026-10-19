@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage } from 'node:http';
+import { defaultSqlitePath } from '../db';
 import { findUserByUsername, passwordFingerprint, verifyPassword, type Role } from './users';
 
 export interface AuthUser {
@@ -12,41 +13,41 @@ export interface AuthUser {
 }
 
 /**
- * Login for a self-hosted install. The built-in admin comes from SIDEREAL_ADMIN_USER and
- * SIDEREAL_ADMIN_PASSWORD (default admin / admin — change them); further accounts with the admin,
+ * Login for a self-hosted install. The built-in admin comes from ASTROVIABIN_ADMIN_USER and
+ * ASTROVIABIN_ADMIN_PASSWORD (default admin / admin — change them); further accounts with the admin,
  * editor or viewer role are managed in Admin settings. Sessions are HMAC-signed cookies;
- * the signing secret is SIDEREAL_SESSION_SECRET or a random value persisted next to the database.
+ * the signing secret is ASTROVIABIN_SESSION_SECRET or a random value persisted next to the database.
  * The background worker authenticates with a per-boot internal token instead of a cookie.
  */
 
-export const SESSION_COOKIE = 'sidereal_session';
+export const SESSION_COOKIE = 'astroviabin_session';
 const SESSION_DAYS = 30;
-const INTERNAL_HEADER = 'x-sidereal-internal';
+const INTERNAL_HEADER = 'x-astroviabin-internal';
 
 export function authDisabled(): boolean {
-  return process.env.SIDEREAL_AUTH_DISABLED === 'true';
+  return process.env.ASTROVIABIN_AUTH_DISABLED === 'true';
 }
 
 export function adminUser(): string {
-  return process.env.SIDEREAL_ADMIN_USER || 'admin';
+  return process.env.ASTROVIABIN_ADMIN_USER || 'admin';
 }
 
 function adminPassword(): string {
-  return process.env.SIDEREAL_ADMIN_PASSWORD || 'admin';
+  return process.env.ASTROVIABIN_ADMIN_PASSWORD || 'admin';
 }
 
 export function usingDefaultCredentials(): boolean {
-  return !process.env.SIDEREAL_ADMIN_USER && !process.env.SIDEREAL_ADMIN_PASSWORD;
+  return !process.env.ASTROVIABIN_ADMIN_USER && !process.env.ASTROVIABIN_ADMIN_PASSWORD;
 }
 
 let cachedSecret: Buffer | null = null;
 function sessionSecret(): Buffer {
   if (cachedSecret) return cachedSecret;
-  if (process.env.SIDEREAL_SESSION_SECRET) {
-    cachedSecret = Buffer.from(process.env.SIDEREAL_SESSION_SECRET);
+  if (process.env.ASTROVIABIN_SESSION_SECRET) {
+    cachedSecret = Buffer.from(process.env.ASTROVIABIN_SESSION_SECRET);
     return cachedSecret;
   }
-  const directory = path.dirname(path.resolve(process.env.SQLITE_DB_PATH || (process.env.NODE_ENV === 'production' ? '/app/config/sidereal.db' : 'local.db')));
+  const directory = path.dirname(path.resolve(process.env.SQLITE_DB_PATH || defaultSqlitePath()));
   const file = path.join(directory, '.session-secret');
   try {
     cachedSecret = Buffer.from(fs.readFileSync(file, 'utf8').trim(), 'hex');
@@ -63,8 +64,8 @@ function sessionSecret(): Buffer {
 
 /** Token shared with the worker process through the environment it inherits. */
 export function internalToken(): string {
-  if (!process.env.SIDEREAL_INTERNAL_TOKEN) process.env.SIDEREAL_INTERNAL_TOKEN = randomBytes(32).toString('hex');
-  return process.env.SIDEREAL_INTERNAL_TOKEN;
+  if (!process.env.ASTROVIABIN_INTERNAL_TOKEN) process.env.ASTROVIABIN_INTERNAL_TOKEN = randomBytes(32).toString('hex');
+  return process.env.ASTROVIABIN_INTERNAL_TOKEN;
 }
 
 function safeEqual(left: string, right: string): boolean {

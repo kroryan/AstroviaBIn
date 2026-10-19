@@ -209,7 +209,7 @@ async function sourceFor(image: LocalImage): Promise<SolveSource> {
     return { path: fitsPath, width: metadata.width, height: metadata.height, kind: 'fits', headers: metadata.headers };
   }
   const asset = await storage.getLibraryAssetForAstroImage(image.id);
-  if (!asset) throw new Error('This image has no private local original in the Sidereal library');
+  if (!asset) throw new Error('This image has no private local original in the AstroviaBin library');
   const imagePath = resolveLibraryAssetPath(asset);
   const metadata = await sharp(imagePath, { limitInputPixels: false }).metadata();
   if (!metadata.width || !metadata.height) throw new Error('Could not read image dimensions for plate solving');
@@ -223,7 +223,7 @@ async function sourceFor(image: LocalImage): Promise<SolveSource> {
  * Python stack is unavailable or finds too few stars (solve-field then extracts on its own).
  */
 async function extractStars(source: SolveSource, workDirectory: string): Promise<string | null> {
-  const python = process.env.SIDEREAL_ANALYSIS_PYTHON || '/opt/sidereal-python/bin/python';
+  const python = process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python';
   const script = process.env.STAR_EXTRACT_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/star_extract.py');
   const output = path.join(workDirectory, 'stars.xyls');
   try {
@@ -317,7 +317,7 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
     throw new Error(`Local Astrometry.net is not ready (solver: ${status.solver}, index files: ${status.indexCount})`);
   }
   const source = await sourceFor(image);
-  const workDirectory = await mkdtemp(path.join(os.tmpdir(), 'sidereal-solve-'));
+  const workDirectory = await mkdtemp(path.join(os.tmpdir(), 'astroviabin-solve-'));
   const backendConfig = path.join(workDirectory, 'backend.cfg');
   const totalBudgetMs = Number(process.env.ASTROMETRY_TIMEOUT_MS || 900_000);
   const startedAt = Date.now();

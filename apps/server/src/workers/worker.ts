@@ -1,3 +1,4 @@
+import "../env-compat";
 import { storage } from "../services/storage";
 import { AstrometryService } from "../services/astrometry";
 import { configService } from "../services/config";
@@ -22,8 +23,8 @@ class PlateSolvingWorker {
   private connectToServer() {
     try {
       const port = process.env.PORT || '5000';
-      const token = process.env.SIDEREAL_INTERNAL_TOKEN;
-      this.ws = new WebSocket(`ws://localhost:${port}/ws`, token ? { headers: { 'x-sidereal-internal': token } } : undefined);
+      const token = process.env.ASTROVIABIN_INTERNAL_TOKEN;
+      this.ws = new WebSocket(`ws://localhost:${port}/ws`, token ? { headers: { 'x-astroviabin-internal': token } } : undefined);
 
       this.ws.on('open', () => {
         console.log('Worker connected to server via WebSocket');

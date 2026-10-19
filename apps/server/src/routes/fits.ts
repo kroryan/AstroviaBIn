@@ -77,7 +77,7 @@ function processingSettings(value: unknown): FitsProcessingSettings {
 function outputFilename(value: unknown, sourcePath: string): string {
   const extension = (path.extname(sourcePath) || '.fits').toLowerCase();
   const requested = typeof value === 'string' ? value.trim() : '';
-  const base = (requested || `${path.basename(sourcePath, path.extname(sourcePath))}-sidereal`)
+  const base = (requested || `${path.basename(sourcePath, path.extname(sourcePath))}-astroviabin`)
     .replace(/\.(fit|fits|fts)$/i, '')
     .replace(/[^a-z0-9._-]+/gi, '_')
     .replace(/^[_ .-]+|[_ .-]+$/g, '');
@@ -111,7 +111,7 @@ async function importFits(filePath: string, root: string, source: FitsSource) {
     filters: textHeader(metadata.headers, 'FILTER') || null,
     targetName: textHeader(metadata.headers, 'OBJECT') || null,
     tags,
-    description: `FITS ${metadata.width}×${metadata.height} · ${metadata.channels === 3 ? 'RGB' : 'mono'} · ${metadata.bitpix}-bit${derived ? ' · Sidereal processed derivative' : ''}`,
+    description: `FITS ${metadata.width}×${metadata.height} · ${metadata.channels === 3 ? 'RGB' : 'mono'} · ${metadata.bitpix}-bit${derived ? ' · AstroviaBin processed derivative' : ''}`,
   };
   if (existing) return storage.updateAstroImage(existing.id, values);
   const image = await storage.createAstroImage(values);

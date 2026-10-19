@@ -1,7 +1,7 @@
 # FITS difference analysis
 
-Open a FITS in Sidereal and select **Analyze FITS** to create a saved run.
-Sidereal prepares a science image, obtains or verifies its WCS with the
+Open a FITS in AstroviaBin and select **Analyze FITS** to create a saved run.
+AstroviaBin prepares a science image, obtains or verifies its WCS with the
 locally installed Astrometry.net solver, acquires a reference, resamples it
 onto the science image, then invokes the unmodified HOTPANTS binary. It
 normalizes the subtraction to the science-image pixel scale. Photutils
@@ -21,7 +21,7 @@ model signal/noise threshold, and expected point-source FWHM (in processed
 pixels). A poor FWHM setting can miss real sources or admit artifacts.
 The threshold is based on HOTPANTS' modeled noise, not calibrated
 photometric significance. Advanced mode accepts the upstream
-HOTPANTS flags, except `-inim`, `-tmplim`, and `-outim`, which Sidereal sets
+HOTPANTS flags, except `-inim`, `-tmplim`, and `-outim`, which AstroviaBin sets
 to its private run files. File-based inputs such as masks, noise arrays,
 stamp lists, region files, and PCA kernels must first be uploaded as
 auxiliary files for the science FITS. Output filenames are confined to the
@@ -48,21 +48,21 @@ map, reconstruct convolution, or create a masked difference. The generated
 FITS layers are attached to that run. Advanced HOTPANTS options include
 noise and input masks, region/stamp lists, kernel basis files, convolution
 settings, output layers, and the other documented upstream parameters.
-For PSF visualization Sidereal invokes the upstream `extractkernOnes`
+For PSF visualization AstroviaBin invokes the upstream `extractkernOnes`
 variant. The full-field map is produced by feeding it a regular impulse
 lattice; generated kernel FITS are checked for finite, nonblank pixels
 before appearing in a report. HOTPANTS' numerical source is not altered.
 The report also lists nearby OpenNGC objects within three arcminutes, when
 the local catalog is available. These peaks are **unconfirmed candidates**.
 To examine one further, upload or select a second local FITS exposure of
-the same field and use **Check in second FITS**. Sidereal locally checks
+the same field and use **Check in second FITS**. AstroviaBin locally checks
 the saved sky coordinate with Photutils. A repeat detection is reported
 only when a point source is found, the FITS filter matches, and the
 observation timestamp differs. Missing/different filters or observation
 times give an inconclusive result. Even a repeat detection is supporting
 evidence, **not a confirmed supernova**; moving objects, cataloged
 variables, sensor artifacts, and more epochs must still be checked.
-OpenNGC proximity is not a transient-discovery check: Sidereal does not
+OpenNGC proximity is not a transient-discovery check: AstroviaBin does not
 currently cross-match a transient registry, perform photometric calibration,
 or classify supernovae. DSS2 and a modern science FITS can differ greatly
 in filter, pixel scale, calibration, seeing, and epoch. For example, a
@@ -71,7 +71,7 @@ exploratory, not as a credible transient search. Prefer a well-matched
 local reference and independent exposures for follow-up.
 
 HOTPANTS source, copyright notices, and both upstream license documents are
-in [`vendor/hotpants`](../vendor/hotpants/UPSTREAM.md). Sidereal's Settings
+in [`vendor/hotpants`](../vendor/hotpants/UPSTREAM.md). AstroviaBin's Settings
 page links to the full local license texts. Photutils is an independent
 BSD-3-Clause project; its wheel and license are installed in the Docker
 image, and [its license](https://photutils.readthedocs.io/en/stable/development/license.html)

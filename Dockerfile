@@ -1,4 +1,4 @@
-# Multi-stage build for Sidereal
+# Multi-stage build for AstroviaBin
 # SECURITY: This image does not contain any secrets or API keys
 # All sensitive configuration is provided via environment variables at runtime
 FROM node:24-alpine AS builder
@@ -51,7 +51,7 @@ RUN sed -i 's/Components: main/Components: main contrib/' /etc/apt/sources.list.
 
 # Create app user for security (will be remapped via PUID/PGID if provided)
 RUN groupadd --system --gid 1001 nodejs && \
-    useradd --system --uid 1001 --gid nodejs --home-dir /home/sidereal --create-home --shell /usr/sbin/nologin sidereal
+    useradd --system --uid 1001 --gid nodejs --home-dir /home/astroviabin --create-home --shell /usr/sbin/nologin astroviabin
 
 # Set working directory
 WORKDIR /app
@@ -77,8 +77,8 @@ RUN apt-get update && \
 
 # Photutils is an independent, BSD-3-Clause source-detection and photometry
 # library. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
-RUN /usr/bin/python3 -m venv --system-site-packages /opt/sidereal-python && \
-    /opt/sidereal-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1
+RUN /usr/bin/python3 -m venv --system-site-packages /opt/astroviabin-python && \
+    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1
 
 COPY --from=hotpants-builder /opt/hotpants/hotpants /usr/local/bin/hotpants
 COPY --from=hotpants-builder /opt/hotpants/extractkern /usr/local/bin/extractkern
@@ -88,7 +88,7 @@ COPY --from=hotpants-builder /opt/hotpants/COPYING /usr/share/doc/hotpants/COPYI
 COPY --from=hotpants-builder /opt/hotpants/LICENSE /usr/share/doc/hotpants/LICENSE
 # Accompany container-distributed HOTPANTS binaries with corresponding source.
 COPY vendor/hotpants/ /usr/share/doc/hotpants/source/
-COPY LICENSE /usr/share/doc/sidereal/LICENSE
+COPY LICENSE /usr/share/doc/astroviabin/LICENSE
 
 # Remove package-manager tooling after production dependencies are installed
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx

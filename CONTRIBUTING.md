@@ -1,14 +1,14 @@
-# Contributing to Sidereal
+# Contributing to AstroviaBin
 
-Thank you for your interest in contributing to Sidereal! We welcome contributions from the community to help make this astrophotography management tool even better.
+Thank you for your interest in contributing to AstroviaBin! We welcome contributions from the community to help make this astrophotography management tool even better.
 
 ## 🚀 Quick Start
 
 1. **Fork** the repository on GitHub
 2. **Clone** your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Sidereal.git
-   cd Sidereal
+   git clone https://github.com/YOUR_USERNAME/AstroviaBin.git
+   cd AstroviaBin
    ```
 3. **Install** dependencies:
    ```bash
@@ -63,8 +63,8 @@ We welcome several types of contributions:
 ### Environment Setup
 ```bash
 # Clone and install
-git clone https://github.com/YOUR_USERNAME/Sidereal.git
-cd Sidereal
+git clone https://github.com/YOUR_USERNAME/AstroviaBin.git
+cd AstroviaBin
 npm install
 
 # Setup environment
@@ -289,7 +289,7 @@ Brief description of the changes
 
 ## 📄 License
 
-By contributing to Sidereal, you agree that your contributions will be licensed under the MIT License.
+By contributing to AstroviaBin, you agree that your contributions will be licensed under the MIT License.
 
 ## 🙏 Recognition
 
@@ -299,4 +299,4 @@ Contributors are recognized in:
 - README acknowledgments
 - Community shout-outs
 
-Thank you for contributing to Sidereal! Your help makes this project better for the entire astrophotography community.
+Thank you for contributing to AstroviaBin! Your help makes this project better for the entire astrophotography community.

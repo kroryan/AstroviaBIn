@@ -17,6 +17,17 @@ const SQLITE_MIGRATIONS_PATH = SQLITE_MIGRATIONS_CANDIDATES.find(candidate =>
   fs.existsSync(path.join(candidate, 'meta', '_journal.json'))
 ) || SQLITE_MIGRATIONS_CANDIDATES[0];
 
+/**
+ * Default database location. Installs from before the rename keep using their existing
+ * sidereal.db when no astroviabin.db exists yet, so upgrading never starts with an empty library.
+ */
+export function defaultSqlitePath(): string {
+  if (process.env.NODE_ENV !== 'production') return 'local.db';
+  const current = '/app/config/astroviabin.db';
+  const legacy = '/app/config/sidereal.db';
+  return !fs.existsSync(current) && fs.existsSync(legacy) ? legacy : current;
+}
+
 let db: any;
 let schema: any;
 let initialized = false;
@@ -37,7 +48,7 @@ async function initializeDatabase() {
   } else {
     // Use built-in SQLite database
     try {
-      const dbPath = process.env.SQLITE_DB_PATH || (process.env.NODE_ENV === 'production' ? '/app/config/sidereal.db' : 'local.db');
+      const dbPath = process.env.SQLITE_DB_PATH || defaultSqlitePath();
       console.log(`Using SQLite database: ${dbPath}`);
 
       // Dynamic imports to handle missing dependencies gracefully

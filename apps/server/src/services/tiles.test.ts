@@ -35,7 +35,7 @@ test('tileInfo reports native dimensions and the matching maxLevel', () => {
 });
 
 test('level 0 renders a single tile covering the entire (downscaled) image', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-tiles-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-tiles-'));
   try {
     const source = await testImage(2000, 1000);
     const tile = await renderTile(source, directory, 'img', 2000, 1000, 0, 0, 0);
@@ -48,7 +48,7 @@ test('level 0 renders a single tile covering the entire (downscaled) image', asy
 });
 
 test('the max level tiles together reconstruct the native resolution exactly', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-tiles-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-tiles-'));
   try {
     const width = 600;
     const height = 300;
@@ -76,7 +76,7 @@ test('the max level tiles together reconstruct the native resolution exactly', a
 });
 
 test('rejects an out-of-bounds tile and an invalid level', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-tiles-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-tiles-'));
   try {
     const source = await testImage(300, 300);
     const maxLevel = computeMaxLevel(300, 300);
@@ -89,7 +89,7 @@ test('rejects an out-of-bounds tile and an invalid level', async () => {
 });
 
 test('caches the resized level image so a second tile at the same level is served from the cache file', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'sidereal-tiles-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-tiles-'));
   try {
     const source = await testImage(600, 300);
     const maxLevel = computeMaxLevel(600, 300);

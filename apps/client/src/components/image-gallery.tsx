@@ -80,7 +80,7 @@ export function ImageGallery({
     return (
       <div className="text-center py-12">
         <p className="text-muted-foreground mb-4">
-          No astrophotography images found. Add images to the local Sidereal library to get started.
+          No astrophotography images found. Add images to the local AstroviaBin library to get started.
         </p>
       </div>
     );

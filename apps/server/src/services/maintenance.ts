@@ -59,8 +59,8 @@ export function cacheDirectories(): string[] {
 }
 
 export async function pruneCaches(): Promise<{ removed: number; freedBytes: number }> {
-  const maxBytes = Number(process.env.SIDEREAL_CACHE_MAX_BYTES) > 0 ? Number(process.env.SIDEREAL_CACHE_MAX_BYTES) : 10 * 1024 ** 3;
-  const maxAgeDays = Number(process.env.SIDEREAL_CACHE_MAX_AGE_DAYS) > 0 ? Number(process.env.SIDEREAL_CACHE_MAX_AGE_DAYS) : 60;
+  const maxBytes = Number(process.env.ASTROVIABIN_CACHE_MAX_BYTES) > 0 ? Number(process.env.ASTROVIABIN_CACHE_MAX_BYTES) : 10 * 1024 ** 3;
+  const maxAgeDays = Number(process.env.ASTROVIABIN_CACHE_MAX_AGE_DAYS) > 0 ? Number(process.env.ASTROVIABIN_CACHE_MAX_AGE_DAYS) : 60;
   let removed = 0;
   let freedBytes = 0;
   for (const directory of cacheDirectories()) {
@@ -73,7 +73,7 @@ export async function pruneCaches(): Promise<{ removed: number; freedBytes: numb
 
 export function databaseBackupDirectory(): string | null {
   if (isPostgres || !sqliteDbPath || sqliteDbPath === ':memory:') return null;
-  return path.resolve(process.env.SIDEREAL_BACKUP_DIR || path.join(path.dirname(path.resolve(sqliteDbPath)), 'backups'));
+  return path.resolve(process.env.ASTROVIABIN_BACKUP_DIR || path.join(path.dirname(path.resolve(sqliteDbPath)), 'backups'));
 }
 
 /** Writes a transactionally consistent copy of the SQLite database (VACUUM INTO). */
@@ -85,15 +85,15 @@ export async function snapshotDatabase(outputPath: string): Promise<void> {
   client.prepare('VACUUM INTO ?').run(outputPath);
 }
 
-/** Daily SQLite backup, keeping the newest `SIDEREAL_BACKUP_KEEP` (default 14) copies. */
+/** Daily SQLite backup, keeping the newest `ASTROVIABIN_BACKUP_KEEP` (default 14) copies. */
 export async function backupDatabase(now = new Date()): Promise<string | null> {
   const directory = databaseBackupDirectory();
   if (!directory) return null;
-  const name = `sidereal-${now.toISOString().slice(0, 10)}.db`;
+  const name = `astroviabin-${now.toISOString().slice(0, 10)}.db`;
   const output = path.join(directory, name);
   await snapshotDatabase(output);
-  const keep = Number(process.env.SIDEREAL_BACKUP_KEEP) > 0 ? Number(process.env.SIDEREAL_BACKUP_KEEP) : 14;
-  const backups = (await readdir(directory)).filter(file => /^sidereal-\d{4}-\d{2}-\d{2}\.db$/.test(file)).sort().reverse();
+  const keep = Number(process.env.ASTROVIABIN_BACKUP_KEEP) > 0 ? Number(process.env.ASTROVIABIN_BACKUP_KEEP) : 14;
+  const backups = (await readdir(directory)).filter(file => /^astroviabin-\d{4}-\d{2}-\d{2}\.db$/.test(file)).sort().reverse();
   for (const old of backups.slice(keep)) await rm(path.join(directory, old), { force: true });
   return output;
 }

@@ -79,12 +79,12 @@ for (const [name, entries, successful] of [
       const output = join(directory, 'output');
       const result = spawnSync('bash', ['-c', selection], {
         env: { ...process.env, DIGEST_DIR: digestDir, GITHUB_OUTPUT: output,
-          REGISTRY: 'ghcr.io', IMAGE_NAME: 'fixture/sidereal' },
+          REGISTRY: 'ghcr.io', IMAGE_NAME: 'fixture/astroviabin' },
         encoding: 'utf8',
       });
       if (successful) {
         assert.equal(result.status, 0, result.stderr);
-        assert.equal(readFileSync(output, 'utf8'), `image-ref=ghcr.io/fixture/sidereal@sha256:${digest}\n`);
+        assert.equal(readFileSync(output, 'utf8'), `image-ref=ghcr.io/fixture/astroviabin@sha256:${digest}\n`);
       } else {
         assert.notEqual(result.status, 0, 'Unsafe scan target accepted');
       }

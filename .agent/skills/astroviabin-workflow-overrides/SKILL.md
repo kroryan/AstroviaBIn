@@ -1,9 +1,9 @@
 ---
-name: sidereal-workflow-overrides
-description: Use whenever the superpowers brainstorming, writing-plans, or finishing-a-development-branch skills would apply in the sidereal repo. Defines four project-specific overrides on top of the standard superpowers workflow — spec lives on a GitHub issue, plans live in `.workspace/plans/`, an ADR may be required before PR, and the PR body must close the issue.
+name: astroviabin-workflow-overrides
+description: Use whenever the superpowers brainstorming, writing-plans, or finishing-a-development-branch skills would apply in the astroviabin repo. Defines four project-specific overrides on top of the standard superpowers workflow — spec lives on a GitHub issue, plans live in `.workspace/plans/`, an ADR may be required before PR, and the PR body must close the issue.
 ---
 
-# Sidereal Workflow Overrides
+# AstroviaBin Workflow Overrides
 
 This skill is an **overlay** on the superpowers workflow. Follow the standard `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:executing-plans` (or `subagent-driven-development`), and `superpowers:finishing-a-development-branch` skills as written, with the four overrides below.
 
@@ -13,7 +13,7 @@ If a step here conflicts with a superpowers skill, this skill wins (per superpow
 
 **Replaces:** `spec/brainstorming` Step 6 ("Write design doc to `docs/superpowers/specs/...`") and Step 8 ("User reviews the spec file").
 
-In sidereal, the spec is the GitHub issue body, not a local file. The brainstorming dialogue, design proposals, and final spec all land on the issue.
+In astroviabin, the spec is the GitHub issue body, not a local file. The brainstorming dialogue, design proposals, and final spec all land on the issue.
 
 ```bash
 # New idea
@@ -85,7 +85,7 @@ Everything else in superpowers stays as written: the brainstorming dialogue styl
 
 ## Quick reference
 
-| Phase | Standard superpowers | Sidereal override |
+| Phase | Standard superpowers | AstroviaBin override |
 |---|---|---|
 | Spec | File in `docs/superpowers/specs/` | GitHub issue body, `spec/brainstorming` label |
 | Approval gate | User reviews spec file | Human applies `spec/ready` label |

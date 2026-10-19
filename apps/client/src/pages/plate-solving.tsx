@@ -222,7 +222,7 @@ export default function PlateSolvingPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Plate Solving</h1>
           <p className="text-muted-foreground">
-            Solve images privately on this Sidereal server with local Astrometry.net
+            Solve images privately on this AstroviaBin server with local Astrometry.net
           </p>
         </div>
 
@@ -544,7 +544,7 @@ export default function PlateSolvingPage() {
               <p className="text-muted-foreground">
                 {showOnlyUnsolved 
                   ? "All images have been plate solved, or try adjusting your search criteria."
-                  : "Try adjusting your search criteria or add images to the private Sidereal library."
+                  : "Try adjusting your search criteria or add images to the private AstroviaBin library."
                 }
               </p>
             </CardContent>

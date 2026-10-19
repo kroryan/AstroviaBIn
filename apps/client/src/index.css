@@ -1,59 +1,67 @@
 @import "tailwindcss";
 
+/*
+ * AstroviaBin — cyberpunk theme. One dark theme: deep violet-black surfaces, neon cyan as the
+ * primary signal colour, hot magenta as the accent and cyber yellow for highlights. The stock
+ * Tailwind palette is remapped too, so components that use fixed colours (gray-900, blue-500,
+ * green-400, …) follow the same neon look without per-component rewrites.
+ */
 @theme {
-  --color-background: hsl(0, 0%, 100%);
-  --color-foreground: hsl(20, 14.3%, 4.1%);
-  --color-muted: hsl(60, 4.8%, 95.9%);
-  --color-muted-foreground: hsl(25, 5.3%, 44.7%);
-  --color-popover: hsl(0, 0%, 100%);
-  --color-popover-foreground: hsl(20, 14.3%, 4.1%);
-  --color-card: hsl(0, 0%, 100%);
-  --color-card-foreground: hsl(20, 14.3%, 4.1%);
-  --color-border: hsl(20, 5.9%, 90%);
-  --color-input: hsl(20, 5.9%, 90%);
-  --color-primary: hsl(207, 90%, 54%);
-  --color-primary-foreground: hsl(211, 100%, 99%);
-  --color-secondary: hsl(60, 4.8%, 95.9%);
-  --color-secondary-foreground: hsl(24, 9.8%, 10%);
-  --color-accent: hsl(60, 4.8%, 95.9%);
-  --color-accent-foreground: hsl(24, 9.8%, 10%);
-  --color-destructive: hsl(0, 84.2%, 60.2%);
-  --color-destructive-foreground: hsl(60, 9.1%, 97.8%);
-  --color-ring: hsl(20, 14.3%, 4.1%);
-  --radius: 0.5rem;
+  --font-sans: "Rajdhani", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Orbitron", "Rajdhani", ui-sans-serif, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, monospace;
 
-  /* Custom astrophotography colors */
-  --color-astro-dark: hsl(237, 63%, 14%);
-  --color-astro-blue: hsl(217, 86%, 17%);
-  --color-astro-purple: hsl(264, 31%, 35%);
-  --color-stellar-red: hsl(346, 78%, 60%);
-  --color-star-orange: hsl(37, 92%, 50%);
-  --color-nebula-gray: hsl(238, 40%, 26%);
-  --color-space-gray: hsl(236, 32%, 40%);
-}
+  --color-background: #07040f;
+  --color-foreground: #e9e6ff;
+  --color-muted: #140f2a;
+  --color-muted-foreground: #9a96c8;
+  --color-popover: #0d0a1c;
+  --color-popover-foreground: #e9e6ff;
+  --color-card: #0d0a1c;
+  --color-card-foreground: #e9e6ff;
+  --color-border: #2a2052;
+  --color-input: #0a0716;
+  --color-primary: #00f0ff;
+  --color-primary-foreground: #04020a;
+  --color-secondary: #1a1236;
+  --color-secondary-foreground: #e9e6ff;
+  --color-accent: #1f1540;
+  --color-accent-foreground: #ff2bd6;
+  --color-destructive: #ff3b6b;
+  --color-destructive-foreground: #fff5f8;
+  --color-ring: #ff2bd6;
+  --radius: 0.2rem;
 
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-background: hsl(215, 28%, 7%);
-    --color-foreground: hsl(0, 0%, 98%);
-    --color-muted: hsl(215, 20%, 12%);
-    --color-muted-foreground: hsl(240, 5%, 72%);
-    --color-popover: hsl(215, 25%, 10%);
-    --color-popover-foreground: hsl(0, 0%, 98%);
-    --color-card: hsl(215, 25%, 13%);
-    --color-card-foreground: hsl(0, 0%, 98%);
-    --color-border: hsl(215, 15%, 30%);
-    --color-input: hsl(215, 28%, 7%);
-    --color-primary: hsl(207, 90%, 54%);
-    --color-primary-foreground: hsl(211, 100%, 99%);
-    --color-secondary: hsl(215, 20%, 12%);
-    --color-secondary-foreground: hsl(0, 0%, 98%);
-    --color-accent: hsl(215, 20%, 12%);
-    --color-accent-foreground: hsl(0, 0%, 98%);
-    --color-destructive: hsl(346, 78%, 60%);
-    --color-destructive-foreground: hsl(0, 0%, 98%);
-    --color-ring: hsl(240, 4.9%, 83.9%);
-  }
+  --color-neon-cyan: #00f0ff;
+  --color-neon-magenta: #ff2bd6;
+  --color-neon-yellow: #f9f002;
+  --color-neon-violet: #7a5cff;
+  --color-neon-green: #39ff88;
+
+  /* Legacy astrophotography tokens, re-pointed at the neon palette */
+  --color-astro-dark: #07040f;
+  --color-astro-blue: #0b1d3a;
+  --color-astro-purple: #3b1f6e;
+  --color-stellar-red: #ff3b6b;
+  --color-star-orange: #ff7a3d;
+  --color-nebula-gray: #1a1236;
+  --color-space-gray: #2a2052;
+
+  /* Stock palette remap */
+  --color-gray-50: #f4f2ff; --color-gray-100: #e9e6ff; --color-gray-200: #cfc9f2; --color-gray-300: #b3aee0;
+  --color-gray-400: #9a96c8; --color-gray-500: #77729f; --color-gray-600: #4f4880; --color-gray-700: #2a2052;
+  --color-gray-800: #160f2e; --color-gray-900: #0d0a1c; --color-gray-950: #07040f;
+  --color-slate-700: #2a2052; --color-slate-800: #160f2e; --color-slate-900: #0d0a1c;
+  --color-blue-300: #7ff8ff; --color-blue-400: #3ff4ff; --color-blue-500: #00d9ee; --color-blue-600: #00b8d4; --color-blue-700: #0090a8;
+  --color-sky-400: #3ff4ff; --color-sky-500: #00d9ee;
+  --color-purple-400: #ff6fe4; --color-purple-500: #ff2bd6; --color-purple-600: #d81eb3; --color-purple-700: #a8148a;
+  --color-violet-500: #7a5cff; --color-indigo-500: #7a5cff; --color-indigo-600: #6040e8;
+  --color-green-300: #8dffbd; --color-green-400: #39ff88; --color-green-500: #1fe070; --color-green-600: #12b858;
+  --color-emerald-400: #39ff88; --color-emerald-500: #1fe070;
+  --color-yellow-300: #fbf66a; --color-yellow-400: #f9f002; --color-yellow-500: #e0d800;
+  --color-amber-300: #fbf66a; --color-amber-400: #f9f002; --color-amber-500: #e0d800;
+  --color-orange-400: #ff7a3d; --color-orange-500: #ff6020;
+  --color-red-300: #ff9ab4; --color-red-400: #ff5c85; --color-red-500: #ff3b6b; --color-red-600: #e02253; --color-red-700: #b31440;
 }
 
 @layer base {
@@ -61,129 +69,247 @@
     border-color: var(--color-border);
   }
 
+  html {
+    color-scheme: dark;
+  }
+
   body {
-    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    font-family: var(--font-sans);
+    font-size: 1.02rem;
+    letter-spacing: 0.01em;
     -webkit-font-smoothing: antialiased;
-    background-color: var(--color-background);
     color: var(--color-foreground);
+    background-color: var(--color-background);
+    background-image:
+      radial-gradient(1200px 600px at 85% -10%, rgb(255 43 214 / 0.14), transparent 60%),
+      radial-gradient(1000px 500px at -10% 10%, rgb(0 240 255 / 0.12), transparent 60%),
+      linear-gradient(rgb(122 92 255 / 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(122 92 255 / 0.07) 1px, transparent 1px);
+    background-size: auto, auto, 48px 48px, 48px 48px;
+    background-attachment: fixed;
+  }
+
+  /* Very faint CRT scanlines over everything; never intercepts input. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2147483647;
+    background: repeating-linear-gradient(to bottom, rgb(255 255 255 / 0.018) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+
+  h1, h2, [data-slot="card-title"], .font-display {
+    font-family: var(--font-display);
+    letter-spacing: 0.06em;
+  }
+
+  /* Smaller headings (image titles, sections) stay narrow and readable. */
+  h3, h4 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+
+  h1 {
+    text-shadow: 0 0 12px rgb(0 240 255 / 0.45);
+  }
+
+  code, pre, kbd, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  ::selection {
+    background: rgb(255 43 214 / 0.45);
+    color: #fff;
   }
 
   button, [role="button"] {
     cursor: pointer;
   }
 
-  /* Force dark theme for astrophotography app */
-  html {
-    color-scheme: dark;
-  }
-
-  /* Custom scrollbar for dark theme */
   ::-webkit-scrollbar {
     width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
-    background: hsl(215, 28%, 7%);
+    background: #07040f;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: hsl(215, 15%, 20%);
-    border-radius: 4px;
+    background: linear-gradient(#00f0ff, #ff2bd6);
+    border-radius: 0;
+  }
+}
+
+/* Neon chrome for the shared UI primitives (shadcn cards, buttons, inputs, badges). */
+@layer base {
+  [data-slot="card"], .cyber-panel {
+    background: linear-gradient(160deg, rgb(20 15 42 / 0.92), rgb(10 7 22 / 0.92));
+    border: 1px solid rgb(0 240 255 / 0.22);
+    box-shadow: 0 0 0 1px rgb(255 43 214 / 0.05), 0 0 24px rgb(0 240 255 / 0.06), inset 0 1px 0 rgb(255 255 255 / 0.03);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    border-radius: 0;
   }
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(240, 5%, 64.9%);
+  [data-slot="button"] {
+    font-family: var(--font-display);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: box-shadow 0.2s, transform 0.1s, background-color 0.2s;
+  }
+
+  [data-slot="button"]:hover:not(:disabled) {
+    box-shadow: 0 0 14px rgb(0 240 255 / 0.45);
+  }
+
+  [data-slot="button"]:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  [data-slot="input"], [data-slot="select-trigger"], [data-slot="textarea"] {
+    background-color: rgb(10 7 22 / 0.85);
+    border-color: rgb(122 92 255 / 0.45);
+  }
+
+  [data-slot="input"]:focus-visible, [data-slot="select-trigger"]:focus-visible, [data-slot="textarea"]:focus-visible {
+    border-color: #00f0ff;
+    box-shadow: 0 0 0 1px #00f0ff, 0 0 14px rgb(0 240 255 / 0.35);
+  }
+
+  [data-slot="badge"] {
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    border-radius: 0;
+  }
+
+  [data-slot="dialog-content"], [data-slot="popover-content"], [data-slot="dropdown-menu-content"], [data-slot="select-content"], [data-slot="sheet-content"] {
+    background-color: #0d0a1c;
+    border-color: rgb(0 240 255 / 0.35);
+    box-shadow: 0 0 32px rgb(255 43 214 / 0.18);
   }
 }
 
 @layer components {
   .sky-card {
     background-color: var(--color-card);
-    border: 1px solid var(--color-border);
-    border-radius: 0.75rem;
+    border: 1px solid rgb(0 240 255 / 0.22);
     overflow: hidden;
-    transition: all 0.3s;
+    transition: box-shadow 0.3s, border-color 0.3s;
     cursor: pointer;
+    clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
   }
 
   .sky-card:hover {
-    background-color: color-mix(in srgb, var(--color-card) 80%, transparent);
+    border-color: rgb(255 43 214 / 0.6);
+    box-shadow: 0 0 18px rgb(255 43 214 / 0.25);
   }
 
   .sky-button-primary {
-    background-color: rgb(220 38 38);
-    color: white;
+    background: linear-gradient(90deg, #00f0ff, #7a5cff);
+    color: #04020a;
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    transition: background-color 0.3s;
+    border-radius: 0;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+    transition: filter 0.2s, box-shadow 0.2s;
     cursor: pointer;
   }
 
   .sky-button-primary:hover {
-    background-color: rgb(185 28 28);
+    filter: brightness(1.15);
+    box-shadow: 0 0 18px rgb(0 240 255 / 0.55);
   }
 
   .sky-button-secondary {
-    background-color: rgb(147 51 234);
-    color: white;
+    background: linear-gradient(90deg, #ff2bd6, #ff7a3d);
+    color: #04020a;
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
     padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    transition: background-color 0.3s;
+    border-radius: 0;
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+    transition: filter 0.2s;
     cursor: pointer;
   }
 
   .sky-button-secondary:hover {
-    background-color: rgb(126 34 206);
+    filter: brightness(1.15);
   }
 
-  .sky-input {
-    background-color: var(--color-input);
-    border: 1px solid var(--color-border);
-    border-radius: 0.5rem;
+  .sky-input, .input {
+    background-color: rgb(10 7 22 / 0.85);
+    border: 1px solid rgb(122 92 255 / 0.45);
+    border-radius: 0;
     padding: 0.5rem 0.75rem;
     color: var(--color-foreground);
   }
 
-  .sky-input::placeholder {
+  .sky-input::placeholder, .input::placeholder {
     color: var(--color-muted-foreground);
   }
 
-  .sky-input:focus {
+  .sky-input:focus, .input:focus {
     outline: none;
-    border-color: var(--color-primary);
-  }
-
-  .input {
-    background-color: var(--color-input);
-    border: 1px solid var(--color-border);
-    border-radius: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    color: var(--color-foreground);
-  }
-
-  .input::placeholder {
-    color: var(--color-muted-foreground);
-  }
-
-  .input:focus {
-    outline: none;
-    border-color: var(--color-primary);
+    border-color: #00f0ff;
+    box-shadow: 0 0 12px rgb(0 240 255 / 0.35);
   }
 
   .sky-tag {
-    background-color: rgb(147 51 234);
-    color: white;
+    background-color: rgb(255 43 214 / 0.14);
+    border: 1px solid rgb(255 43 214 / 0.6);
+    color: #ff8bea;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     padding: 0.125rem 0.5rem;
-    border-radius: 0.375rem;
     cursor: pointer;
-    transition: background-color 0.3s;
-    font-weight: 500;
+    transition: background-color 0.2s, box-shadow 0.2s;
   }
 
   .sky-tag:hover {
-    background-color: rgb(126 34 206);
+    background-color: rgb(255 43 214 / 0.3);
+    box-shadow: 0 0 10px rgb(255 43 214 / 0.45);
   }
+
+  /* Brand wordmark: neon text with a short glitch on hover. */
+  .cyber-wordmark {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    background: linear-gradient(90deg, #00f0ff, #ff2bd6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 6px rgb(0 240 255 / 0.55));
+  }
+
+  .cyber-wordmark:hover {
+    animation: cyber-glitch 0.35s steps(2) 2;
+  }
+
+  .neon-text-cyan { color: #00f0ff; text-shadow: 0 0 8px rgb(0 240 255 / 0.6); }
+  .neon-text-magenta { color: #ff2bd6; text-shadow: 0 0 8px rgb(255 43 214 / 0.6); }
+
+  .cyber-header {
+    background: linear-gradient(180deg, rgb(13 10 28 / 0.96), rgb(7 4 15 / 0.92));
+    border-bottom: 1px solid rgb(0 240 255 / 0.35);
+    box-shadow: 0 1px 0 rgb(255 43 214 / 0.35), 0 8px 30px rgb(0 0 0 / 0.5);
+    backdrop-filter: blur(8px);
+  }
+}
+
+@keyframes cyber-glitch {
+  0% { transform: translate(0); filter: drop-shadow(-2px 0 #ff2bd6) drop-shadow(2px 0 #00f0ff); }
+  50% { transform: translate(1px, -1px); filter: drop-shadow(2px 0 #ff2bd6) drop-shadow(-2px 0 #00f0ff); }
+  100% { transform: translate(0); filter: drop-shadow(0 0 6px rgb(0 240 255 / 0.55)); }
 }
 
 /* Aladin Lite fullscreen: ensure it renders above the sticky header (z-40) */
@@ -239,34 +365,22 @@
 }
 
 /* Status indicators */
-.status-plate-solved {
-  background-color: rgb(22 163 74);
-  color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
+.status-plate-solved, .status-processing, .status-failed, .status-no-data {
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  border: 1px solid currentColor;
+  background-color: rgb(4 2 10 / 0.6);
 }
 
-.status-processing {
-  background-color: rgb(202 138 4);
-  color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-}
+.status-plate-solved { color: #39ff88; box-shadow: 0 0 10px rgb(57 255 136 / 0.3); }
+.status-processing { color: #f9f002; box-shadow: 0 0 10px rgb(249 240 2 / 0.3); }
+.status-failed { color: #ff3b6b; box-shadow: 0 0 10px rgb(255 59 107 / 0.3); }
+.status-no-data { color: #9a96c8; }
 
-.status-failed {
-  background-color: rgb(220 38 38);
-  color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-}
-
-.status-no-data {
-  background-color: rgb(75 85 99);
-  color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
+/* Unlayered so it wins over the CardTitle's text-2xl: Orbitron is wide, keep titles on one line. */
+[data-slot="card-title"] {
+  font-size: clamp(1.02rem, 1.25vw, 1.3rem);
+  line-height: 1.25;
 }

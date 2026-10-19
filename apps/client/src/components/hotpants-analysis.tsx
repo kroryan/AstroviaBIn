@@ -135,7 +135,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
       </label>
     </div>
     <details className="text-sm"><summary className="cursor-pointer font-medium">Advanced HOTPANTS controls and auxiliary files</summary>
-      <p className="mt-2 text-muted-foreground">Optional upstream command-line flags, for example <code>-r 8 -ng 3 6 0.7 4 1.5 2 3</code>. Required input/output paths are managed by Sidereal. File-based flags must name an uploaded attachment. See the bundled HOTPANTS README for every supported flag.</p>
+      <p className="mt-2 text-muted-foreground">Optional upstream command-line flags, for example <code>-r 8 -ng 3 6 0.7 4 1.5 2 3</code>. Required input/output paths are managed by AstroviaBin. File-based flags must name an uploaded attachment. See the bundled HOTPANTS README for every supported flag.</p>
       <textarea className="mt-2 w-full rounded-md border bg-background p-2 font-mono" rows={3} value={hotpantsOptions} onChange={event => setHotpantsOptions(event.target.value)} placeholder="Optional HOTPANTS flags" />
       <label className="block mt-2">Auxiliary FITS, stamps or region list <Input type="file" className="mt-1" disabled={upload.isPending} onChange={event => { const selected = event.target.files?.[0]; if (selected) upload.mutate(selected); }} /></label>
       {inputs.data?.length ? <p className="mt-1 text-muted-foreground">Available: {inputs.data.join(', ')}</p> : null}
@@ -187,7 +187,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
         {report.analysisVersion === 2 && <>
           <div className="rounded-md border p-3 text-xs space-y-2">
             <p className="font-medium">Independent local FITS follow-up</p>
-            <p className="text-muted-foreground">Select a separate exposure of the same field. A point source at the same sky position supports a candidate only when the filter matches and the observing time differs; it is not a confirmed discovery. No FITS leaves Sidereal.</p>
+            <p className="text-muted-foreground">Select a separate exposure of the same field. A point source at the same sky position supports a candidate only when the filter matches and the observing time differs; it is not a confirmed discovery. No FITS leaves AstroviaBin.</p>
             <select className="w-full rounded-md border bg-background p-2" value={followupImageId} onChange={event => setFollowupImageId(event.target.value)}>
               <option value="">Select a second FITS exposure</option>
               {availableFits.data?.filter(item => item.id !== image.id).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}

@@ -39,13 +39,14 @@ app.post('/upload', async (c) => {
 
     const asset = await storage.createLibraryAsset({
       legacyAssetId: null,
+      // Stored identifier from before the AstroviaBin rename; kept so existing records stay valid.
       legacyRelativePath: `sidereal-upload/${id}`,
       relativePath,
       filename,
       mimeType: IMAGE_MIME_TYPES[extension] || `image/${imageMetadata.format}`,
       byteSize,
       sha256,
-      metadata: { source: 'Sidereal upload', width: imageMetadata.width, height: imageMetadata.height, format: imageMetadata.format },
+      metadata: { source: 'AstroviaBin upload', width: imageMetadata.width, height: imageMetadata.height, format: imageMetadata.format },
     });
 
     let imageId: number | undefined;
@@ -75,7 +76,7 @@ app.post('/upload', async (c) => {
   } catch (error) {
     if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
     if (error instanceof UploadRequestError) return c.json({ message: error.message }, error.status);
-    return handleRouteError(c, error, 'Failed to upload image to the private Sidereal library');
+    return handleRouteError(c, error, 'Failed to upload image to the private AstroviaBin library');
   }
 });
 

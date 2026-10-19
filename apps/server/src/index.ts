@@ -1,3 +1,4 @@
+import './env-compat';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -20,9 +21,9 @@ const app = new Hono();
 internalToken();
 registerAuth(app);
 if (authDisabled()) {
-  console.warn('Authentication is DISABLED (SIDEREAL_AUTH_DISABLED=true). Only use this behind another authenticating proxy.');
+  console.warn('Authentication is DISABLED (ASTROVIABIN_AUTH_DISABLED=true). Only use this behind another authenticating proxy.');
 } else if (usingDefaultCredentials()) {
-  console.warn('Using the default admin / admin login. Set SIDEREAL_ADMIN_USER and SIDEREAL_ADMIN_PASSWORD.');
+  console.warn('Using the default admin / admin login. Set ASTROVIABIN_ADMIN_USER and ASTROVIABIN_ADMIN_PASSWORD.');
 }
 
 // Setup routes (wsManager set after server starts)
@@ -59,7 +60,10 @@ async function startServer() {
 
   app.use('/assets/*', serveStatic({ root: publicPath, rewriteRequestPath: (p) => p }));
   app.use('/favicon.ico', serveStatic({ root: publicPath, rewriteRequestPath: () => '/favicon.ico' }));
-  app.use('/logo.png', serveStatic({ root: publicPath, rewriteRequestPath: () => '/logo.png' }));
+  app.use('/fonts/*', serveStatic({ root: publicPath, rewriteRequestPath: (p) => p }));
+  for (const file of ['/logo.png', '/logo.svg', '/favicon-32.png', '/icon-192.png', '/apple-touch-icon.png']) {
+    app.use(file, serveStatic({ root: publicPath, rewriteRequestPath: () => file }));
+  }
 
   // SPA fallback: serve index.html for all non-API routes
   app.get('*', async (c) => {
@@ -102,7 +106,7 @@ async function startServer() {
     });
   }
 
-  console.log(`Sidereal server running on port ${PORT}`);
+  console.log(`AstroviaBin server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Database: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite'}`);
   console.log(`Worker manager available in production mode`);

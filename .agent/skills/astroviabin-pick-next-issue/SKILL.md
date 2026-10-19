@@ -1,5 +1,5 @@
 ---
-name: sidereal-pick-next-issue
+name: astroviabin-pick-next-issue
 description: Use when the user asks "what's next?", "what should I work on?", "find me an issue", "pick something to do", or starts a workflow without naming a specific issue. Surveys the GitHub issue queue, recommends the highest-priority `spec/ready` issue, and lists alternatives plus the `spec/brainstorming` queue.
 ---
 
@@ -11,7 +11,7 @@ Help the user choose what to work on next by surveying the GitHub issue queue an
 
 - User asks "what's next?", "what should I work on?", "anything to do?"
 - User asks to start the workflow without naming an issue ("let's do the next one", "start something")
-- User invokes `sidereal-workflow-overrides` or superpowers brainstorming/writing-plans without specifying an issue number
+- User invokes `astroviabin-workflow-overrides` or superpowers brainstorming/writing-plans without specifying an issue number
 
 ## Process
 
@@ -59,10 +59,10 @@ If a section is empty, say so explicitly ("No issues in the brainstorming queue.
 Ask: "Want me to start on #<n>, or pick a different one?"
 
 If the user picks an `spec/ready` issue:
-- Invoke `sidereal-workflow-overrides` and start at Override 2 (branch creation), since the issue is already approved.
+- Invoke `astroviabin-workflow-overrides` and start at Override 2 (branch creation), since the issue is already approved.
 
 If the user picks a `spec/brainstorming` issue:
-- Invoke `superpowers:brainstorming` with `sidereal-workflow-overrides` layered on top, starting at Override 1 (continue refining the issue body).
+- Invoke `superpowers:brainstorming` with `astroviabin-workflow-overrides` layered on top, starting at Override 1 (continue refining the issue body).
 
 If both queues are empty:
 - Report that. Suggest the user open a new issue with the `spec/brainstorming` label to start a fresh design.

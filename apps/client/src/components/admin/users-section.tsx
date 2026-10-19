@@ -92,7 +92,7 @@ export function UsersSection() {
                 <Badge variant="secondary">admin</Badge>
                 <Badge variant="outline">built-in</Badge>
               </div>
-              <span className="text-xs text-muted-foreground">Set with SIDEREAL_ADMIN_USER / SIDEREAL_ADMIN_PASSWORD on the server</span>
+              <span className="text-xs text-muted-foreground">Set with ASTROVIABIN_ADMIN_USER / ASTROVIABIN_ADMIN_PASSWORD on the server</span>
             </div>
           )}
           {data?.users.map(user => (
@@ -105,7 +105,7 @@ export function UsersSection() {
                     <KeyRound className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="ghost" className="hover:text-red-400" title="Delete user"
-                    onClick={() => { if (window.confirm(`Delete ${user.username}? Their photos and edits stay in Sidereal.`)) remove.mutate(user.id); }}>
+                    onClick={() => { if (window.confirm(`Delete ${user.username}? Their photos and edits stay in AstroviaBin.`)) remove.mutate(user.id); }}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
