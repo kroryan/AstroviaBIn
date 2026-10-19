@@ -78,6 +78,8 @@ it('names catalogs after a descriptive title unless a title names the identified
   assert.equal(descriptiveTitle('TauCanisMajo261019115041.GIF'), null);
   assert.equal(descriptiveTitle('Coordenadas celestes - RA 3.339 Dec 35.23 CYT133.png'), null);
   assert.equal(descriptiveTitle('Pegasus', 'Pegasus'), null);
+  assert.equal(descriptiveTitle('R Aquarii (HIP 117054) .png'), 'R Aquarii (HIP 117054)');
+  assert.equal(descriptiveTitle('Eris (136199 Eris) .png'), 'Eris (136199 Eris)');
   assert.ok(titleReferencesTarget('messier51.png', 'NGC 5194', 'M 51'));
   assert.ok(titleReferencesTarget('Galaxia de diseño grandioso (M74) .png', 'NGC 628', 'M 74'));
   assert.ok(titleReferencesTarget('IC153.png', 'IC 153'));

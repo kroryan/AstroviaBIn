@@ -24,7 +24,7 @@ function StatusChips({ image }: { image: AstroImage }) {
 }
 
 /** One compact tile size for photos, catalog covers and catalog contents; only whole tiles per row. */
-export const GALLERY_GRID = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(7.5rem,1fr))]";
+export const GALLERY_GRID = "grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(6rem,1fr))]";
 
 interface ImageGalleryProps {
   images: AstroImage[];

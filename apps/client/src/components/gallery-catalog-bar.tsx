@@ -76,11 +76,22 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
       <div className="flex flex-wrap items-center gap-2 pb-1">
         <Library className="h-4 w-4 text-muted-foreground shrink-0" />
         <button className={chip(!selectedId)} onClick={() => onSelect(undefined)}>All images</button>
-        {catalogs.map(catalog => (
-          <button key={catalog.id} className={chip(catalog.id === selectedId)} onClick={() => onSelect(catalog.id)} title={catalog.description || undefined}>
-            {catalog.name} <span className="opacity-70">({catalog.imageCount})</span>
-          </button>
-        ))}
+        {selected && (
+          <span className={`${chip(true)} inline-flex max-w-[16rem] items-center gap-1`} title={selected.description || undefined}>
+            <span className="truncate">{selected.name}</span> <span className="opacity-70">({selected.imageCount})</span>
+            <button aria-label="Close album" onClick={() => onSelect(undefined)}><X className="h-3 w-3" /></button>
+          </span>
+        )}
+        {catalogs.length > 0 && (
+          <Select value="" onValueChange={value => onSelect(Number(value))}>
+            <SelectTrigger className="h-7 w-auto max-w-[14rem] text-xs shrink-0 sky-input">
+              <SelectValue placeholder={`Open album… (${catalogs.length})`} />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-900 border-gray-700 text-white max-h-80">
+              {catalogs.map(catalog => <SelectItem key={catalog.id} value={String(catalog.id)}>{catalog.name} ({catalog.imageCount})</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" disabled={classify.isPending}
           title="File unclassified images: Solar System frames together, plate-solved images by field and target"
           onClick={() => classify.mutate()}>

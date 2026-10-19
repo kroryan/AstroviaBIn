@@ -89,7 +89,9 @@ export function descriptiveTitle(title: string | null | undefined, constellation
     .trim();
   if (cleaned.length < 3 || cleaned.length > 60 || !/[a-zà-ÿ]/i.test(cleaned)) return null;
   // Camera/observatory file names and coordinate dumps are not names.
-  if (/^coordenadas|^celestial coordinates|_|\d{5,}/i.test(cleaned)) return null;
+  // (a single token with a long number, like 36489F003 or TauCanisMajo261019115041; catalogue
+  // numbers inside a real title, like "R Aquarii (HIP 117054)", are fine).
+  if (/^coordenadas|^celestial coordinates|_/i.test(cleaned) || /^\S*\d{5,}\S*$/.test(cleaned)) return null;
   if (constellation && cleaned.toLowerCase() === constellation.toLowerCase()) return null;
   return cleaned;
 }
