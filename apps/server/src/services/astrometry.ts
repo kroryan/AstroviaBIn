@@ -5,6 +5,7 @@ import { configService } from './config';
 import { getConstellationFromCoordinates } from './constellation-utils';
 import { filterRelevantTags } from './tags-utils';
 import { catalogService } from './catalog';
+import { classifyGallery } from './gallery-auto-classify';
 import { solveImageLocally, type SolveHint } from './astrometry-local';
 import type { WcsSolution } from './wcs';
 
@@ -201,6 +202,13 @@ export class AstrometryService {
       if (target) await storage.updateAstroImage(image.id, { targetName: target.name } as any);
     } catch (error) {
       console.error(`Failed to identify the catalog target for image ${image.id}:`, error);
+    }
+
+    try {
+      // File the newly solved image with the other images of its field.
+      await classifyGallery({ imageId: image.id });
+    } catch (error) {
+      console.error(`Failed to auto-classify image ${image.id} into a gallery catalog:`, error);
     }
 
     try {

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z, ZodError } from 'zod';
 import { storage } from '../services/storage';
+import { classifyGallery } from '../services/gallery-auto-classify';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -36,6 +37,15 @@ app.post('/', async (c) => {
     return c.json(await storage.createGalleryCatalog(data), 201);
   } catch (error) {
     return validationError(c, error) ?? handleRouteError(c, error, 'Failed to create gallery catalog');
+  }
+});
+
+// Files every unclassified image: Solar System frames together, plate-solved images by field.
+app.post('/auto-classify', async (c) => {
+  try {
+    return c.json(await classifyGallery());
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to auto-classify the gallery');
   }
 });
 

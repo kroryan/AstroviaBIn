@@ -6,6 +6,9 @@ import { ImageGallery } from "@/components/image-gallery";
 import { Sidebar } from "@/components/sidebar";
 import { ImageOverlay } from "@/components/image-overlay";
 import { GalleryCatalogBar } from "@/components/gallery-catalog-bar";
+import { GalleryCatalogFolders } from "@/components/gallery-catalog-folders";
+import type { GalleryCatalogSummary } from "@/components/gallery-catalog-picker";
+import { Switch } from "@/components/ui/switch";
 import { usePlateSolvingUpdates } from "@/hooks/use-socket";
 import { useSearch, useLocation } from "wouter";
 import type { AstroImage, Equipment } from "@shared/schema";
@@ -26,6 +29,14 @@ export default function Home() {
     galleryCatalogId: undefined as number | undefined,
   });
   const [visibleCount, setVisibleCount] = useState(12); // Show 12 images initially
+  // Catalogs as folders with only the unclassified images loose, or every image flat.
+  const [grouped, setGrouped] = useState<boolean>(() => {
+    try { return localStorage.getItem("astroviabin.galleryGrouped") !== "false"; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("astroviabin.galleryGrouped", String(grouped)); } catch { /* storage unavailable */ }
+  }, [grouped]);
+  const { data: catalogs = [] } = useQuery<GalleryCatalogSummary[]>({ queryKey: ["/api/gallery-catalogs"] });
 
   type Stats = { totalImages: number; plateSolved: number; fitsCount: number; totalHours: number; uniqueTargets: number; };
   type Tag = { tag: string; count: number };
@@ -100,9 +111,17 @@ export default function Home() {
     setVisibleCount(prev => prev + 12); // Load 12 more images
   };
 
+  // Grouping applies to the plain "All images" view; any filter or search shows matching images flat.
+  const f = filters as typeof filters & { dateFrom?: string; dateTo?: string; minIntegration?: number };
+  const filtering = Boolean(filters.galleryCatalogId || filters.search || filters.tags.length || filters.objectType
+    || filters.plateSolved !== undefined || filters.constellation || filters.equipmentId || f.dateFrom || f.dateTo || f.minIntegration !== undefined);
+  const showFolders = grouped && !filtering;
+  const catalogued = new Set(catalogs.flatMap(catalog => catalog.imageIds ?? []));
+  const listedImages = showFolders ? filteredImages.filter(image => !catalogued.has(image.id)) : filteredImages;
+
   // Get only the visible images based on pagination
-  const visibleImages = filteredImages.slice(0, visibleCount);
-  const hasMoreImages = visibleCount < filteredImages.length;
+  const visibleImages = listedImages.slice(0, visibleCount);
+  const hasMoreImages = visibleCount < listedImages.length;
 
   const handleCloseOverlay = () => {
     setSelectedImage(null);
@@ -141,7 +160,20 @@ export default function Home() {
               onSelect={(galleryCatalogId) => handleFiltersChange({ ...filters, galleryCatalogId })}
               visibleImageIds={filteredImages.map(image => image.id)}
             />
-            <ImageGallery
+            <div className="mb-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+              <label htmlFor="gallery-grouped" className="cursor-pointer">Group by catalog</label>
+              <Switch id="gallery-grouped" checked={grouped} onCheckedChange={setGrouped} />
+            </div>
+            {showFolders && <GalleryCatalogFolders catalogs={catalogs} images={images}
+              onOpen={galleryCatalogId => handleFiltersChange({ ...filters, galleryCatalogId })} />}
+            {showFolders && catalogued.size > 0 && (
+              <h2 className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                Unclassified ({listedImages.length})
+              </h2>
+            )}
+            {showFolders && catalogued.size > 0 && !imagesLoading && listedImages.length === 0 ? (
+              <p className="mb-8 text-sm text-muted-foreground">Every image is filed in a catalog. New images stay here until they are classified.</p>
+            ) : <ImageGallery
               images={visibleImages}
               equipment={equipment}
               onImageClick={(image) => {
@@ -152,9 +184,9 @@ export default function Home() {
               isLoading={imagesLoading}
               hasMoreImages={hasMoreImages}
               onLoadMore={handleLoadMore}
-              totalImages={filteredImages.length}
+              totalImages={listedImages.length}
               visibleCount={visibleCount}
-            />
+            />}
           </main>
           
           <Sidebar 

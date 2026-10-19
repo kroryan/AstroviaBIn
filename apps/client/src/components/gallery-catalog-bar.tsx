@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FolderPlus, Library, Pencil, Trash2, X } from "lucide-react";
+import { Check, FolderPlus, Library, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -57,7 +57,16 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
       refresh();
     },
   });
-  const error = cleanError(create.error) || cleanError(update.error) || cleanError(remove.error) || cleanError(addShown.error);
+  const classify = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/gallery-catalogs/auto-classify", {})).json() as Promise<{ added: number; created: string[] }>,
+    onSuccess: (result) => {
+      setLastAdded(result.added
+        ? `${result.added} image${result.added === 1 ? "" : "s"} filed${result.created.length ? `; new catalog${result.created.length === 1 ? "" : "s"}: ${result.created.join(", ")}` : ""}`
+        : "Everything is already classified");
+      refresh();
+    },
+  });
+  const error = cleanError(classify.error) || cleanError(create.error) || cleanError(update.error) || cleanError(remove.error) || cleanError(addShown.error);
 
   const chip = (active: boolean) =>
     `px-3 py-1 rounded-full text-xs border transition-colors whitespace-nowrap ${active ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"}`;
@@ -72,6 +81,11 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
             {catalog.name} <span className="opacity-70">({catalog.imageCount})</span>
           </button>
         ))}
+        {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" disabled={classify.isPending}
+          title="File unclassified images: Solar System frames together, plate-solved images by field and target"
+          onClick={() => classify.mutate()}>
+          <Sparkles className="h-3 w-3 mr-1" /> {classify.isPending ? "Classifying…" : "Auto-classify"}
+        </Button>}
         {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" onClick={() => { setCreating(value => !value); setEditing(false); setName(""); setDescription(""); }}>
           <FolderPlus className="h-3 w-3 mr-1" /> New catalog
         </Button>}

@@ -679,12 +679,12 @@ class DbStorage {
   }
 
   // Gallery catalogs (user-defined groupings of photos and FITS)
-  async getGalleryCatalogs(): Promise<Array<GalleryCatalog & { imageCount: number; coverImageId: number | null }>> {
+  async getGalleryCatalogs(): Promise<Array<GalleryCatalog & { imageCount: number; coverImageId: number | null; imageIds: number[] }>> {
     const catalogs = await db.select().from(schema.galleryCatalogs).orderBy(schema.galleryCatalogs.name).execute() as GalleryCatalog[];
     const items = await db.select().from(schema.galleryCatalogImages).orderBy(desc(schema.galleryCatalogImages.addedAt)).execute() as Array<{ catalogId: number; imageId: number }>;
     return catalogs.map(catalog => {
       const members = items.filter(item => item.catalogId === catalog.id);
-      return { ...catalog, imageCount: members.length, coverImageId: members[0]?.imageId ?? null };
+      return { ...catalog, imageCount: members.length, coverImageId: members[0]?.imageId ?? null, imageIds: members.map(member => member.imageId) };
     });
   }
 

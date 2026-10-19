@@ -16,6 +16,7 @@ import { computeSkyAnnotations } from '../services/sky-annotations';
 import { computeSkyOverlay, mergeOnlineCatalog, overlayToAnnotations } from '../services/sky-overlay';
 import { getOnlineCatalog } from '../services/online-catalogs';
 import { wcsFromStored } from '../services/wcs';
+import { classifyGallery } from '../services/gallery-auto-classify';
 
 const app = new Hono();
 const SOLAR_SYSTEM_TAG_SET = new Set(SOLAR_SYSTEM_TAGS.map(tag => tag.toLocaleLowerCase()));
@@ -238,6 +239,10 @@ app.patch('/:id', async (c) => {
     const updatedImage = await storage.updateAstroImage(id, updates);
     if (!updatedImage) {
       return c.json({ message: 'Image not found' }, 404);
+    }
+    // Newly tagged planets/Sun/Moon go to the Solar System catalog.
+    if (updates.tags !== undefined && isSolarSystemTagged(updates.tags) && !isSolarSystemTagged(existing.tags)) {
+      await classifyGallery({ imageId: id }).catch(error => console.error(`Failed to auto-classify image ${id}:`, error));
     }
 
     return c.json(updatedImage);

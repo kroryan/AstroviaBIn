@@ -14,6 +14,8 @@ export interface GalleryCatalogSummary {
   description: string | null;
   imageCount: number;
   coverImageId: number | null;
+  /** Member image ids, most recently added first. */
+  imageIds?: number[];
 }
 
 function cleanError(error: unknown): string | null {
