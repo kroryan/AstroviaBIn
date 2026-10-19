@@ -323,8 +323,8 @@ export default function PlateSolvingPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <Button
                   variant="outline"
                   onClick={handleSelectAll}

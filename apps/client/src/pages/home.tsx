@@ -28,7 +28,7 @@ export default function Home() {
     equipmentName: undefined as string | undefined,
     galleryCatalogId: undefined as number | undefined,
   });
-  const [visibleCount, setVisibleCount] = useState(12); // Show 12 images initially
+  const [visibleCount, setVisibleCount] = useState(48); // compact tiles: several rows at once
   // Catalogs as folders with only the unclassified images loose, or every image flat.
   const [grouped, setGrouped] = useState<boolean>(() => {
     try { return localStorage.getItem("astroviabin.galleryGrouped") !== "false"; } catch { return true; }
@@ -104,11 +104,11 @@ export default function Home() {
   // Reset visible count when filters change
   const handleFiltersChange = (newFilters: typeof filters) => {
     setFilters(newFilters);
-    setVisibleCount(12); // Reset to initial count
+    setVisibleCount(48); // Reset to initial count
   };
 
   const handleLoadMore = () => {
-    setVisibleCount(prev => prev + 12); // Load 12 more images
+    setVisibleCount(prev => prev + 48);
   };
 
   // Grouping applies to the plain "All images" view; any filter or search shows matching images flat.

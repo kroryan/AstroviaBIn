@@ -74,7 +74,7 @@ export default function EquipmentCatalog(): React.JSX.Element {
     <div className="min-h-screen bg-background">
       <Header />
       <div className="max-w-4xl mx-auto py-8 px-4">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <h2 className="text-2xl font-bold">Equipment Catalog</h2>
           <Button onClick={() => setShowAdd(true)}>Add New Equipment</Button>
         </div>
