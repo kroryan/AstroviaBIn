@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { snapshotDatabase } from '../services/maintenance';
+import { skyDataDirectories } from '../services/sky-catalog';
 import type { WsManager } from '../services/ws-manager';
 import { readFileSync } from 'node:fs';
 
@@ -64,6 +65,24 @@ export default function systemRoutes(wsManager?: WsManager) {
     try {
       return c.text(await readFile(source, 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
     } catch { return c.text('License file unavailable on this installation', 404); }
+  });
+
+  // Provenance and licences of the offline sky-annotation data (stars, deep-sky, constellations).
+  app.get('/licenses/sky/:document', async c => {
+    const files: Record<string, string> = {
+      sources: 'SOURCES.txt',
+      hyg: 'LICENSES/HYG-LICENSE.md',
+      'd3-celestial': 'LICENSES/d3-celestial-LICENSE.txt',
+      tycho2: 'LICENSES/Tycho-2-ReadMe.txt',
+    };
+    const file = files[c.req.param('document')];
+    if (!file) return c.text('Not found', 404);
+    for (const directory of skyDataDirectories()) {
+      try {
+        return c.text(await readFile(path.join(directory, file), 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
+      } catch { /* try the next location */ }
+    }
+    return c.text('Sky data licence file unavailable on this installation', 404);
   });
 
   // Save admin settings

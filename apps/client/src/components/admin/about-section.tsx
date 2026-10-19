@@ -59,8 +59,21 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">Star and sky annotation data</h3>
+        <p className="text-muted-foreground">Image annotations are drawn offline from a bundle built when the server image is made. Named stars, Bayer/Flamsteed designations, HD and HIP numbers and proper motions come from the HYG database (David Nash / astronexus, CC BY-SA 4.0). Fainter stars come from the Tycho-2 Catalogue (Høg et al. 2000, A&amp;A 355, L27; ESA Hipparcos mission, distributed by CDS as I/259). Henry Draper star positions come from Astrometry.net's hd.fits (HD Catalogue and Extension with Tycho-2 cross-identifications), the file nova.astrometry.net uses for HD labels. Constellation figures and names come from d3-celestial by Olaf Frohn (BSD 3-Clause). The derived bundle is shared under CC BY-SA 4.0 where its sources require it. This publication makes use of data products from the Two Micron All Sky Survey (see the index-file notice above).</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="/api/licenses/sky/sources" target="_blank" rel="noreferrer">Sky data sources</a>
+          <a className="text-primary underline" href="/api/licenses/sky/hyg" target="_blank" rel="noreferrer">HYG license (CC BY-SA 4.0)</a>
+          <a className="text-primary underline" href="/api/licenses/sky/tycho2" target="_blank" rel="noreferrer">Tycho-2 catalogue description</a>
+          <a className="text-primary underline" href="/api/licenses/sky/d3-celestial" target="_blank" rel="noreferrer">d3-celestial license (BSD 3-Clause)</a>
+          <a className="text-primary underline" href="https://github.com/astronexus/HYG-Database" target="_blank" rel="noreferrer">HYG database</a>
+          <a className="text-primary underline" href="https://cdsarc.cds.unistra.fr/viz-bin/cat/I/259" target="_blank" rel="noreferrer">Tycho-2 at CDS</a>
+          <a className="text-primary underline" href="https://github.com/ofrohn/d3-celestial" target="_blank" rel="noreferrer">d3-celestial</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">OpenNGC catalog</h3>
-        <p className="text-muted-foreground">Target identification and plate-solving annotations use OpenNGC by Mattia Verga, licensed under CC BY-SA 4.0. Annotation positions are projected from each image's own WCS solution (TAN with SIP distortion) and depend on the catalog's coordinates and object sizes.</p>
+        <p className="text-muted-foreground">Target identification and deep-sky annotations (outlines with catalogue size and position angle) use OpenNGC by Mattia Verga, licensed under CC BY-SA 4.0. Every annotation is projected through each image's own WCS solution (TAN with SIP distortion); outlines are only as accurate as the catalogue's sizes.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://github.com/mattiaverga/OpenNGC" target="_blank" rel="noreferrer">OpenNGC source</a>
           <a className="text-primary underline" href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA 4.0</a>

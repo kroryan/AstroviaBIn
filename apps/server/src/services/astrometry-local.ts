@@ -10,6 +10,7 @@ import { storage } from './storage';
 import { resolveLibraryAssetPath } from './library';
 import { readFitsMetadata, readFitsHeader, resolveFitsFile } from './fits';
 import { computeSkyAnnotations } from './sky-annotations';
+import { computeSkyOverlay, overlayToAnnotations } from './sky-overlay';
 import { parseWcsHeaders, pixelScaleArcsec, pixelToSky, type WcsSolution } from './wcs';
 import type { AstrometryCalibration, PlateSolvingResult } from './astrometry';
 
@@ -361,7 +362,8 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
 
     const wcs = parseWcsHeaders(await readFitsHeader(wcsPath), source.width, source.height);
     const calibration = calibrationFromWcs(wcs);
-    const annotations = await computeSkyAnnotations(wcs);
+    const overlay = computeSkyOverlay(wcs);
+    const annotations = overlay ? overlayToAnnotations(overlay) : await computeSkyAnnotations(wcs);
     return { calibration, annotations, machineTags: [], wcs };
   } finally {
     await rm(workDirectory, { recursive: true, force: true });

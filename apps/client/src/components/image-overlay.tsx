@@ -14,6 +14,7 @@ import { FitsProcessingPanel } from "./fits-processing-panel";
 import { HotpantsAnalysis } from "./hotpants-analysis";
 import { ImageTagsEditor } from "./image-tags-editor";
 import { PlateSolveControls } from "./plate-solve-controls";
+import { SkyLayerToggles, useSkyLayers } from "./sky-layer-toggles";
 import { GalleryCatalogPicker } from "./gallery-catalog-picker";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -108,6 +109,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
     refetchInterval: query => ["processing", "pending"].includes(query.state.data?.status) ? 5_000 : false,
   });
   const isPlateSolveProcessing = plateSolvingJob?.status === "processing" || plateSolvingJob?.status === "pending";
+  const [skyLayers, setSkyLayers] = useSkyLayers();
+  // The full astro overlay (stars, outlines, constellations, grid) when the server provides it.
+  const skyOverlay = showAnnotations && !isPlateSolveProcessing ? annotationsData?.overlay ?? null : null;
 
   // Group equipment by type
   const equipmentByType = equipment.reduce((acc, item) => {
@@ -181,7 +185,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 imageUrl={resolveZoomUrl(currentImage)}
                 tileInfoUrl={`/api/images/${currentImage.id}/tile-info`}
                 tileUrlBase={`/api/images/${currentImage.id}/tile`}
-                annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                annotations={!skyOverlay && showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                skyOverlay={skyOverlay}
+                skyLayers={skyLayers}
                 annotationSize={annotationsData?.imageDimensions}
                 fullHeight={isExpanded}
                 height={isExpanded ? '100vh' : '100%'}
@@ -194,6 +200,11 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             </div>
           )}
         </div>
+        {skyOverlay && (
+          <div className="max-w-md mx-auto w-full px-4 mt-2">
+            <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
+          </div>
+        )}
         {!isExpanded && (
           <div className="flex flex-col gap-4 bg-card rounded-t-xl max-w-md mx-auto w-full p-4 mt-4">
             {/* Title and Date */}
@@ -404,7 +415,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               imageUrl={resolveZoomUrl(image)}
               tileInfoUrl={`/api/images/${image.id}/tile-info`}
               tileUrlBase={`/api/images/${image.id}/tile`}
-              annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+              annotations={!skyOverlay && showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                skyOverlay={skyOverlay}
+                skyLayers={skyLayers}
                 annotationSize={annotationsData?.imageDimensions}
               fullHeight={true}
               height="100vh"
@@ -422,6 +435,11 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 Collapse
               </Button>
             </div>
+            {skyOverlay && (
+              <div className="absolute bottom-16 right-4 z-50 max-w-md">
+                <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
+              </div>
+            )}
             {/* Show/Hide Annotations Button (bottom right) */}
             <div className="absolute bottom-4 right-4 z-50 flex gap-2">
               <Button
@@ -814,12 +832,19 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               imageUrl={resolveZoomUrl(image)}
               tileInfoUrl={`/api/images/${image.id}/tile-info`}
               tileUrlBase={`/api/images/${image.id}/tile`}
-              annotations={showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+              annotations={!skyOverlay && showAnnotations && !isPlateSolveProcessing && annotationsData?.annotations ? annotationsData.annotations : []}
+                skyOverlay={skyOverlay}
+                skyLayers={skyLayers}
                 annotationSize={annotationsData?.imageDimensions}
               fullHeight={false}
               height="100%"
               disableZoom={true}
             />
+            {skyOverlay && (
+              <div className="absolute bottom-16 right-4 z-10 max-w-md">
+                <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
+              </div>
+            )}
             {/* Show/Hide Annotations Button (desktop/tablet, not expanded) */}
             <div className="absolute bottom-4 right-4 z-10 flex gap-2">
               <Button

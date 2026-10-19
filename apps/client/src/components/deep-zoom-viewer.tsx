@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import OpenSeadragon from "openseadragon";
+import { SkyOverlayRenderer, DEFAULT_SKY_LAYERS, type SkyLayers, type SkyOverlayData } from "@/lib/sky-overlay-renderer";
 
 interface Annotation {
   pixelx: number;
@@ -38,6 +39,9 @@ interface DeepZoomViewerProps {
    * they stay correct whether the viewer shows full-resolution tiles or a resized fallback preview.
    */
   annotationSize?: { width: number | null; height: number | null } | null;
+  /** Full astro overlay (stars, deep-sky outlines, constellations, grid); replaces `annotations` when set. */
+  skyOverlay?: SkyOverlayData | null;
+  skyLayers?: SkyLayers;
 }
 
 if (typeof window !== 'undefined') {
@@ -54,7 +58,8 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(style);
 }
 
-export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase, annotationSize }: DeepZoomViewerProps) {
+export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase, annotationSize, skyOverlay, skyLayers = DEFAULT_SKY_LAYERS }: DeepZoomViewerProps) {
+  const skyRendererRef = useRef<SkyOverlayRenderer | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdViewer = useRef<OpenSeadragon.Viewer | null>(null);
   const overlayElements = useRef<HTMLDivElement[]>([]);
@@ -84,11 +89,15 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
 
     let cancelled = false;
 
+    // A bare URL string makes OpenSeadragon look for a DZI/IIIF descriptor, which a PNG/JPEG
+    // preview is not; declare plain images explicitly.
+    const singleImage = { type: 'image', url: imageUrl, buildPyramid: false } as unknown as OpenSeadragon.TileSourceOptions;
+
     async function resolveTileSources(): Promise<OpenSeadragon.TileSourceOptions | string> {
-      if (!tileInfoUrl || !tileUrlBase) return imageUrl;
+      if (!tileInfoUrl || !tileUrlBase) return singleImage;
       const response = await fetch(tileInfoUrl, { cache: 'no-store' });
       if (!response.ok) {
-        if (response.status === 404) return imageUrl;
+        if (response.status === 404) return singleImage;
         throw new Error(`tile info failed (${response.status})`);
       }
       const info: TileInfo = await response.json();
@@ -353,6 +362,22 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
     overlayElements.current.push(overlayContainer);
     osdViewer.current.forceRedraw();
   }, [annotations, disableZoom, annotationSize?.width, annotationSize?.height]);
+
+  // Astro overlay: rebuilt when the data changes, layers toggled in place.
+  useEffect(() => {
+    if (!osdViewer.current || !viewerReady || !skyOverlay) return;
+    const renderer = new SkyOverlayRenderer(osdViewer.current, skyOverlay, skyLayers);
+    skyRendererRef.current = renderer;
+    return () => {
+      renderer.destroy();
+      if (skyRendererRef.current === renderer) skyRendererRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skyOverlay, viewerReady]);
+
+  useEffect(() => {
+    skyRendererRef.current?.setLayers(skyLayers);
+  }, [skyLayers]);
 
   // Add/remove overlays when annotations change
   useEffect(() => {

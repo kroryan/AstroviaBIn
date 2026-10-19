@@ -3,6 +3,8 @@ import path from 'node:path';
 import { db, isPostgres, sqliteDbPath } from '../db';
 import { fitsCacheDirectory } from './fits';
 import { tileCacheDirectory } from './tiles';
+import { storage } from './storage';
+import { getConstellationFromCoordinates } from './constellation-utils';
 
 interface CacheFile {
   path: string;
@@ -96,4 +98,23 @@ export async function backupDatabase(now = new Date()): Promise<string | null> {
   const backups = (await readdir(directory)).filter(file => /^astroviabin-\d{4}-\d{2}-\d{2}\.db$/.test(file)).sort().reverse();
   for (const old of backups.slice(keep)) await rm(path.join(directory, old), { force: true });
   return output;
+}
+
+/**
+ * Re-derives the constellation of solved images from their stored centre with the exact IAU
+ * boundaries; earlier releases used rough rectangles and mislabelled some fields.
+ */
+export async function refreshImageConstellations(): Promise<number> {
+  let corrected = 0;
+  for (const image of await storage.getAstroImages()) {
+    const ra = Number(image.ra);
+    const dec = Number(image.dec);
+    if (!image.plateSolved || !image.ra || !image.dec || !Number.isFinite(ra) || !Number.isFinite(dec)) continue;
+    const constellation = getConstellationFromCoordinates(ra, dec);
+    if (constellation && constellation !== image.constellation) {
+      await storage.updateAstroImage(image.id, { constellation } as Parameters<typeof storage.updateAstroImage>[1]);
+      corrected++;
+    }
+  }
+  return corrected;
 }

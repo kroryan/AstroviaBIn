@@ -75,6 +75,28 @@ RUN apt-get update && \
       python3-astropy python3-scipy python3-numpy python3-venv libcfitsio10t64 && \
     rm -rf /var/lib/apt/lists/*
 
+# Offline sky-annotation data (stars, deep-sky outlines, constellations), built once at image
+# build time so annotating never contacts a third party. Sources are pinned to fixed revisions;
+# see /usr/share/astroviabin/sky/SOURCES.txt and LICENSES/ for provenance and licences.
+ARG HYG_REV=c7f7f883fe678cc7680169a50ccd7dcc49b060ce
+ARG OPENNGC_REV=be3cd6c5498806a2fbb2f7e0452ef802dbb02be0
+ARG D3_CELESTIAL_REV=7e720a3de062059d4c5400a379146a601d9010e0
+COPY tools/scripts/build_sky_catalog.py /tmp/build_sky_catalog.py
+RUN set -eu; src=/tmp/sky-src; out=/usr/share/astroviabin/sky; mkdir -p "$src" "$out/LICENSES"; cd "$src"; \
+    fetch() { curl -fsSL --retry 5 -o "$1" "$2"; }; \
+    fetch hyg.csv "https://raw.githubusercontent.com/astronexus/HYG-Database/${HYG_REV}/hyg/CURRENT/hygdata_v41.csv"; \
+    fetch "$out/LICENSES/HYG-LICENSE.md" "https://raw.githubusercontent.com/astronexus/HYG-Database/${HYG_REV}/LICENSE"; \
+    fetch hd.fits "https://data.astrometry.net/hd.fits"; \
+    fetch NGC.csv "https://raw.githubusercontent.com/mattiaverga/OpenNGC/${OPENNGC_REV}/database_files/NGC.csv"; \
+    fetch addendum.csv "https://raw.githubusercontent.com/mattiaverga/OpenNGC/${OPENNGC_REV}/database_files/addendum.csv"; \
+    fetch constellations.lines.json "https://raw.githubusercontent.com/ofrohn/d3-celestial/${D3_CELESTIAL_REV}/data/constellations.lines.json"; \
+    fetch constellations.json "https://raw.githubusercontent.com/ofrohn/d3-celestial/${D3_CELESTIAL_REV}/data/constellations.json"; \
+    fetch "$out/LICENSES/d3-celestial-LICENSE.txt" "https://raw.githubusercontent.com/ofrohn/d3-celestial/${D3_CELESTIAL_REV}/LICENSE"; \
+    for i in $(seq -w 0 19); do fetch "tyc2.dat.$i.gz" "https://cdsarc.cds.unistra.fr/ftp/I/259/tyc2.dat.$i.gz"; done; \
+    fetch "$out/LICENSES/Tycho-2-ReadMe.txt" "https://cdsarc.cds.unistra.fr/ftp/I/259/ReadMe"; \
+    /usr/bin/python3 /tmp/build_sky_catalog.py --src "$src" --out "$out"; \
+    cd /; rm -rf "$src" /tmp/build_sky_catalog.py
+
 # Photutils is an independent, BSD-3-Clause source-detection and photometry
 # library. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
 RUN /usr/bin/python3 -m venv --system-site-packages /opt/astroviabin-python && \

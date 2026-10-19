@@ -12,6 +12,8 @@ import { workerManager } from './services/worker-manager';
 import { catalogService } from './services/catalog';
 import { storage } from './services/storage';
 import { registerAuth } from './routes/auth';
+import { loadSkyCatalog } from './services/sky-catalog';
+import { refreshImageConstellations } from './services/maintenance';
 import { authDisabled, internalToken, usingDefaultCredentials } from './services/auth';
 
 const app = new Hono();
@@ -93,6 +95,12 @@ async function startServer() {
       console.log(`Catalog already loaded: ${status.count} objects`);
     }
   }).catch(err => console.error('Failed to check catalog status:', err));
+
+  // Warm the offline star/deep-sky data so the first annotated image opens instantly.
+  setTimeout(() => { loadSkyCatalog(); }, 1000);
+  refreshImageConstellations()
+    .then(count => { if (count > 0) console.log(`Corrected the constellation of ${count} solved image(s) using the IAU boundaries`); })
+    .catch(error => console.error('Could not refresh image constellations:', error));
 
   // Set WebSocket manager in services for real-time updates
   setWsManager(wsManager);

@@ -13,6 +13,7 @@ import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
 import { resolveLibraryAssetPath } from '../services/library';
 import { readFitsMetadata, resolveFitsFile } from '../services/fits';
 import { computeSkyAnnotations } from '../services/sky-annotations';
+import { computeSkyOverlay, overlayToAnnotations } from '../services/sky-overlay';
 import { wcsFromStored } from '../services/wcs';
 
 const app = new Hono();
@@ -307,8 +308,15 @@ app.get('/:id/annotations', async (c) => {
 
     const wcs = wcsFromStored(result.wcs);
     if (wcs) {
+      // Stars move: place them at the capture date (or today) using their proper motion.
+      const captured = image.captureDate ? new Date(image.captureDate) : null;
+      const epoch = captured && !Number.isNaN(captured.getTime())
+        ? captured.getUTCFullYear() + captured.getUTCMonth() / 12
+        : undefined;
+      const overlay = computeSkyOverlay(wcs, { epoch });
       return c.json({
-        annotations: await computeSkyAnnotations(wcs),
+        annotations: overlay ? overlayToAnnotations(overlay) : await computeSkyAnnotations(wcs),
+        overlay,
         calibration,
         imageDimensions: { width: wcs.imageWidth, height: wcs.imageHeight },
         source: 'wcs',

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Astro-style annotations: named stars (proper name, Bayer, Flamsteed), HD/HIP and Tycho-2 stars with magnitudes and proper motion, deep-sky outlines with catalogue size and position angle, constellation figures and names, and an RA/Dec grid — all projected through each image's WCS from an offline bundle built at image build time. Layer toggles, constant on-screen marker size and label decluttering in the viewer.
+
+### Fixed
+- Constellation lookup now uses the official IAU boundaries (Roman 1987); existing images are corrected on startup (it previously used rough rectangles).
+- OpenNGC entries that are single/double stars or "Other" are no longer drawn as deep-sky objects.
+- Non-tiled previews (FITS processing panel) failed to open in the viewer.
+
 ## [0.11.0] - 2026-10-19
 
 First release as **AstroviaBin** (formerly Sidereal; history below keeps the old name).
