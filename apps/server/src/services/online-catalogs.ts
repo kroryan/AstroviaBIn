@@ -59,14 +59,14 @@ async function fetchGaia(ra: number, dec: number, radiusDeg: number, magLimit: n
 
 /** Non-stellar SIMBAD objects (galaxies, nebulae, clusters, QSOs…) in the field, brightest first. */
 async function fetchSimbad(ra: number, dec: number, radiusDeg: number): Promise<OnlineObject[]> {
-  const query = `SELECT TOP 400 b.main_id, b.ra, b.dec, b.otype, f.V FROM basic AS b LEFT JOIN allfluxes AS f ON b.oid = f.oidref ` +
-    `WHERE CONTAINS(POINT('ICRS', b.ra, b.dec), CIRCLE('ICRS', ${ra.toFixed(6)}, ${dec.toFixed(6)}, ${radiusDeg.toFixed(5)})) = 1 ` +
-    // SIMBAD TAP rejects NOT LIKE on otype. The hierarchical type excludes stellar subtypes while
-    // retaining galaxies, nebulae, clusters and other non-stellar objects.
-    `AND b.ra IS NOT NULL AND b.otype != 'star..'`;
+  // SIMBAD's otype only supports equality, with "X.." meaning X and all its subtypes. Objects with a
+  // measured V or B magnitude are the notable ones; brightest first.
+  const query = `SELECT TOP 300 main_id, ra, dec, otype, V, B FROM basic JOIN allfluxes ON oid = oidref ` +
+    `WHERE CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', ${ra.toFixed(6)}, ${dec.toFixed(6)}, ${radiusDeg.toFixed(5)})) = 1 ` +
+    `AND (otype = 'G..' OR otype = 'ISM..' OR otype = 'Cl*..' OR otype = 'PN') AND (V < 18 OR B < 18) ORDER BY B`;
   const params = new URLSearchParams({ request: 'doQuery', lang: 'adql', format: 'json', query });
-  const json = JSON.parse(await fetchText(`https://simbad.cds.unistra.fr/simbad/sim-tap/sync?${params}`)) as { data?: Array<[string, number, number, string, number | null]> };
-  return (json.data ?? []).map(([name, r, d, type, v]) => ({ name: String(name).replace(/\s+/g, ' ').trim(), ra: Number(r), dec: Number(d), type: String(type), mag: v ?? null }))
+  const json = JSON.parse(await fetchText(`https://simbad.cds.unistra.fr/simbad/sim-tap/sync?${params}`)) as { data?: Array<[string, number, number, string, number | null, number | null]> };
+  return (json.data ?? []).map(([name, r, d, type, v, bMag]) => ({ name: String(name).replace(/\s+/g, ' ').trim(), ra: Number(r), dec: Number(d), type: String(type), mag: v ?? bMag ?? null }))
     .filter(object => Number.isFinite(object.ra) && Number.isFinite(object.dec));
 }
 
