@@ -937,10 +937,13 @@ export async function renderFitsTile(filePath: string, settings: FitsProcessingS
  * is kept next to it as "<name>.orig". Returns whether the file was rewritten.
  */
 export async function normalizeUploadedFits(filePath: string): Promise<boolean> {
+  let readError: unknown = null;
   try {
     const metadata = await readFitsMetadata(filePath);
     if (metadata.width > 0 && metadata.height > 0) return false;
-  } catch { /* not a primary-HDU image: try to normalize */ }
+  } catch (error) {
+    readError = error; // not a primary-HDU image: try to normalize
+  }
   const original = `${filePath}.orig`;
   const converted = `${filePath}.${randomUUID()}.tmp`;
   await rename(filePath, original);
@@ -958,8 +961,8 @@ export async function normalizeUploadedFits(filePath: string): Promise<boolean> 
         clearTimeout(timer);
         if (code === 0) return resolve(stdout);
         let message = '';
-        try { message = JSON.parse(stdout).error; } catch { /* use stderr */ }
-        reject(new Error(`Invalid FITS file: ${message || stderr.trim().split('\n').pop() || 'it could not be read'}`));
+        try { message = JSON.parse(stdout).error; } catch { /* no specific reason */ }
+        reject(message ? new Error(`Invalid FITS file: ${message}`) : null);
       });
     });
     await rename(converted, filePath);
@@ -969,6 +972,8 @@ export async function normalizeUploadedFits(filePath: string): Promise<boolean> 
   } catch (error) {
     await rm(converted, { force: true }).catch(() => undefined);
     await rename(original, filePath).catch(() => undefined);
-    throw error;
+    // A specific reason from the converter, else the original read error (e.g. a broken header).
+    if (error instanceof Error && error.message.startsWith('Invalid FITS file:')) throw error;
+    throw readError ?? error;
   }
 }
