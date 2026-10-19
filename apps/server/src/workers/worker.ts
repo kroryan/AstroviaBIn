@@ -151,10 +151,13 @@ class PlateSolvingWorker {
 
   async checkProcessingJobs() {
     const jobs = await storage.getPlateSolvingJobs();
-    const processingJobs = jobs.filter(job => job.status === "processing");
+    // Resume a job interrupted mid-solve first, then work through the queue oldest first.
+    const processingJobs = jobs
+      .filter(job => job.status === "processing" || job.status === "pending")
+      .sort((left, right) => (left.status === right.status ? 0 : left.status === "processing" ? -1 : 1) || left.id - right.id);
 
     if (processingJobs.length > 0) {
-      console.log(`Checking ${processingJobs.length} processing jobs`);
+      console.log(`Plate-solving queue: ${processingJobs.length} job(s)`);
     }
 
     for (const job of processingJobs) {

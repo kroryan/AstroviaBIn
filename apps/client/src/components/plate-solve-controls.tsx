@@ -28,7 +28,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
   const [scaleHigh, setScaleHigh] = useState("");
   const tags = image.tags?.map(tag => tag.trim().toLowerCase()) || [];
   const eligible = (tags.includes('deep sky') || Boolean(image.plateSolved)) && !tags.some(tag => SOLAR_SYSTEM_TAGS.has(tag));
-  const processing = job?.status === 'processing';
+  const processing = job?.status === 'processing' || job?.status === 'pending';
   const { canEdit } = useCurrentUser();
 
   const solve = useMutation({
@@ -70,7 +70,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
               className={dark ? "bg-black/50 text-white border-white/20 hover:bg-black/70" : undefined}
             >
               {processing || solve.isPending ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : <Crosshair className="mr-2 h-4 w-4" />}
-              {processing ? "Solving…" : image.plateSolved ? "Re-solve locally" : "Solve locally"}
+              {job?.status === 'pending' ? "Queued…" : processing ? "Solving…" : image.plateSolved ? "Re-solve locally" : "Solve locally"}
             </Button>
             <button type="button" onClick={() => setShowHint(value => !value)} className={`text-xs flex items-center gap-1 ${muted} hover:underline`}>
               {showHint ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}

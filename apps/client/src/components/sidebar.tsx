@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { 
@@ -33,6 +32,7 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
 
   const recentJobs = (plateSolvingJobs as PlateSolvingJob[]).slice(0, 4);
   const processingJobs = (plateSolvingJobs as PlateSolvingJob[]).filter((job: PlateSolvingJob) => job.status === "processing");
+  const queuedJobs = (plateSolvingJobs as PlateSolvingJob[]).filter((job: PlateSolvingJob) => job.status === "pending");
 
   return (
     <aside className="lg:w-80 space-y-6 overflow-hidden overflow-y-hidden">
@@ -42,25 +42,22 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
         <CardHeader>
           <CardTitle className="flex items-center text-foreground">
             <Crosshair className="mr-2 text-primary" />
-            Astrometry.net Status
+            Local plate solving
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Processing Jobs</span>
+            <span className="text-muted-foreground">Solving now</span>
             <span className="text-green-400">{processingJobs.length}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Avg Processing Time</span>
-            <span className="text-foreground">~3 min</span>
+            <span className="text-muted-foreground">Queued</span>
+            <span className="text-foreground">{queuedJobs.length}</span>
           </div>
-          {processingJobs.length > 0 && (
-            <>
-              <Progress value={75} className="h-2" />
-              <p className="text-xs text-muted-foreground">
-                {processingJobs.length} job(s) in progress
-              </p>
-            </>
+          {(processingJobs.length > 0 || queuedJobs.length > 0) && (
+            <p className="text-xs text-muted-foreground">
+              Images are solved one at a time on this server; large or sparse frames can take several minutes each.
+            </p>
           )}
           <div>
             <Link href="/plate-solving">
@@ -88,13 +85,15 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
                 <div className={`w-2 h-2 rounded-full ${
                   job.status === "success" ? "bg-green-400" :
                   job.status === "processing" ? "bg-yellow-400" :
+                  job.status === "pending" ? "bg-blue-400" :
                   job.status === "failed" ? "bg-red-400" :
                   "bg-gray-400"
                 }`} />
                 <div className="flex-1">
                   <p className="text-foreground">
                     {job.status === "success" ? "Plate solved successfully" :
-                     job.status === "processing" ? "Processing..." :
+                     job.status === "processing" ? "Solving..." :
+                     job.status === "pending" ? "Queued" :
                      job.status === "failed" ? "Plate solving failed" :
                      "Submitted for solving"}
                   </p>

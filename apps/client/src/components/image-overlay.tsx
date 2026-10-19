@@ -105,9 +105,9 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
       return response.json();
     },
     enabled: !!currentImage.id,
-    refetchInterval: query => query.state.data?.status === "processing" ? 5_000 : false,
+    refetchInterval: query => ["processing", "pending"].includes(query.state.data?.status) ? 5_000 : false,
   });
-  const isPlateSolveProcessing = plateSolvingJob?.status === "processing";
+  const isPlateSolveProcessing = plateSolvingJob?.status === "processing" || plateSolvingJob?.status === "pending";
 
   // Group equipment by type
   const equipmentByType = equipment.reduce((acc, item) => {

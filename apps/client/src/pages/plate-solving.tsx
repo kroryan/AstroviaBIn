@@ -453,7 +453,7 @@ export default function PlateSolvingPage() {
                           {job.status === "success" && <CheckCircle className="mr-1 h-3 w-3" />}
                           {job.status === "failed" && <XCircle className="mr-1 h-3 w-3" />}
                           {job.status === "pending" && <Clock className="mr-1 h-3 w-3" />}
-                          {job.status === "processing" ? "Solving locally" : job.status === "success" ? "Complete" : job.status === "failed" ? "Failed" : "Pending"}
+                          {job.status === "processing" ? "Solving locally" : job.status === "success" ? "Complete" : job.status === "failed" ? "Failed" : "Queued"}
                         </Badge>
                       )}
                     </div>

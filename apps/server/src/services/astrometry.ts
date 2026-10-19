@@ -117,13 +117,14 @@ export class AstrometryService {
       imageId: image.id,
       astrometrySubmissionId: submissionId,
       astrometryJobId: null,
-      status: 'processing',
+      // Queued; the worker marks it 'processing' when it actually starts solving (one at a time).
+      status: 'pending',
       result: hint ? { hint } : null,
     });
     this.localSubmissionJobs.set(submissionId, job.id);
     if (wsManager) wsManager.broadcast('plate-solving-update', {
       jobId: job.id,
-      status: 'processing',
+      status: 'pending',
       imageId: image.id,
       message: 'Image queued for private local plate solving',
     });
@@ -244,6 +245,10 @@ export class AstrometryService {
     if (this.activeSolves.has(job.id)) return { status: 'processing' };
     this.activeSolves.add(job.id);
     try {
+      if (job.status === 'pending') {
+        await storage.updatePlateSolvingJob(job.id, { status: 'processing' });
+        if (wsManager) wsManager.broadcast('plate-solving-update', { jobId: job.id, status: 'processing', imageId: job.imageId });
+      }
       const result = await solveImageLocally(image, { hint: hintFromStoredJob(job.result) });
       await this.updateJobAndImage(job.id, result);
       return { status: 'success', result };
