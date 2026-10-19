@@ -455,7 +455,9 @@ export function mergeOnlineCatalog(overlay: SkyOverlay, wcs: WcsSolution, online
   for (const entry of online.simbad) {
     const point = project(wcs, entry.ra, entry.dec);
     if (!point || !insideFrame(point, width, height)) continue;
-    const match = objects.find(object => Math.hypot(object.x - point[0], object.y - point[1]) <= Math.max(objectRadius, Math.min(object.rx, object.ry)));
+    // Same object only when close to the catalogue centre (≤ 60"): clusters and HII regions inside a
+    // large galaxy's outline are separate objects.
+    const match = objects.find(object => Math.hypot(object.x - point[0], object.y - point[1]) <= Math.max(objectRadius, Math.min(object.ry, 60 / 3600 / scaleDeg)));
     if (match) {
       match.names = [entry.name, ...match.names.filter(name => name !== entry.name)];
       match.label = entry.name;
