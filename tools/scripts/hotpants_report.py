@@ -368,7 +368,8 @@ def verdict_for(entry, candidate):
         return 'known_variable_star', f"Known variable star {vsx['name']} ({vsx.get('type') or 'type ?'}), {vsx['separationArcsec']}\" away: variability, not a new object."
     if gaia and gaia['separationArcsec'] <= max(1.5, 3 * position_error):
         return 'stellar_variability', (f"Coincides with Gaia DR3 {gaia['source']} (G {gaia['g']:.2f}, {gaia['separationArcsec']}\"): "
-                                       "a brightening of an existing star (variable or flare), not a supernova.")
+                                       "an existing star, so the difference is variability, a flare or a subtraction residual "
+                                       "of a bright star; not a supernova.")
     if host:
         return 'possible_extragalactic_transient', (f"No stellar counterpart; {host['separationArcsec']}\" from galaxy {host['name']} "
                                                     f"({host['type']}). Consistent with a supernova or other extragalactic transient: "
