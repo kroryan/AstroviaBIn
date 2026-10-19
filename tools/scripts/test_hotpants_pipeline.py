@@ -8,8 +8,9 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from hotpants_pipeline import (binned_wcs, check_candidate, detect_candidates, flag_known_objects,
-                               reduced_image, write_candidate_products)
+from hotpants_pipeline import (auto_reference_order, binned_wcs, check_candidate, default_hotpants_args,
+                               detect_candidates, estimate_fwhm, flag_known_objects, reduced_image,
+                               science_band, write_candidate_products)
 
 
 class CandidateValidationTests(unittest.TestCase):
@@ -202,6 +203,45 @@ class KnownObjectTests(unittest.TestCase):
         self.assertEqual(candidates[0]['status'], 'known_solar_system_object')
         self.assertEqual(candidates[0]['knownObject']['name'], '(1620) Geographos')
         self.assertEqual(candidates[1]['status'], 'needs_followup')
+
+
+class ReferenceAndDefaultsTests(unittest.TestCase):
+    def test_filter_names_map_to_survey_bands(self):
+        cases = {'rp': 'r', 'zs': 'z', 'gp': 'g', 'ip': 'i', 'R': 'r', 'Ic': 'i', 'V': 'r', 'Ha': 'r', 'OIII': 'g', 'L': 'r', 'Ks': 'K'}
+        for value, band in cases.items():
+            self.assertEqual(science_band({'FILTER': value})[0], band, value)
+        self.assertEqual(science_band({})[0], 'r')
+
+    def test_auto_order_prefers_deep_matching_band_surveys(self):
+        self.assertEqual(auto_reference_order('r', 26.7, 0.3)[:3], ['Pan-STARRS1 r stack', 'Legacy Surveys DR10 r', 'SDSS r'])
+        wide = auto_reference_order('z', 26.7, 0.8)
+        self.assertNotIn('Pan-STARRS1 z stack', wide, 'PS1 cutouts are limited to ~25 arcmin')
+        self.assertEqual(wide[0], 'Legacy Surveys DR10 z')
+        south = auto_reference_order('g', -45, 0.2)
+        self.assertNotIn('Pan-STARRS1 g stack', south)
+        self.assertEqual(south[-1], 'DSS2 Red')
+
+    def test_fwhm_is_measured_from_isolated_stars(self):
+        rng = np.random.default_rng(1)
+        size = 400
+        image = rng.normal(100, 3, (size, size))
+        yy, xx = np.mgrid[:size, :size]
+        sigma = 4.0 / 2.3548
+        for x, y in rng.uniform(30, size - 30, (40, 2)):
+            image += 2000 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * sigma ** 2))
+        fwhm = estimate_fwhm(image.astype(np.float32))
+        self.assertIsNotNone(fwhm)
+        self.assertAlmostEqual(fwhm, 4.0, delta=0.4)
+
+    def test_user_hotpants_flags_override_automatic_ones(self):
+        science = np.random.default_rng(2).normal(0, 1, (64, 64)).astype(np.float32)
+        args, info = default_hotpants_args(['-r', '12'], science, {'GAIN': 1.5, 'RDNOISE': 3.0, 'NCOMBINE': 4},
+                                           science, np.zeros((64, 64), dtype=np.uint8), 3.0, 4.5,
+                                           np.zeros((64, 64), dtype=bool))
+        self.assertNotIn('-r', args)
+        self.assertIn('-rss', args)
+        self.assertEqual(args[args.index('-ig') + 1], '6')
+        self.assertLess(float(args[args.index('-il') + 1]), 0, 'negative background-subtracted values stay valid')
 
 if __name__ == '__main__':
     unittest.main()

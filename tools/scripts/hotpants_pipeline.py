@@ -22,6 +22,7 @@ from astropy.io import fits
 from astropy.wcs import WCS, Sip
 from photutils.detection import DAOStarFinder
 from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter
+from scipy.optimize import least_squares
 
 
 def write_state(work, stage, **extra):
@@ -100,13 +101,20 @@ def reduced_image(source, output, max_dimension):
         else:
             data = block_sum
         invalid = valid_count != factor ** 2
+        saturation = header.get('SATURATE') or header.get('SATLEVEL')
+        if saturation:
+            # A block containing any saturated pixel is not photometric; mask it for HOTPANTS.
+            saturated = np.where(valid_crop, crop, 0) >= 0.95 * float(saturation)
+            invalid |= saturated.reshape(block_height, factor, block_width, factor).any(axis=(1, 3))
         if WCS(header).has_celestial:
             with warnings.catch_warnings():
                 warnings.simplefilter('ignore')
                 wcs = binned_wcs(WCS(header).celestial, factor)
             source_header = header
             header = fits.Header()
-            for keyword in ('OBJECT', 'DATE-OBS', 'EXPTIME', 'FILTER', 'INSTRUME', 'TELESCOP', 'GAIN', 'BUNIT'):
+            for keyword in ('OBJECT', 'DATE-OBS', 'MJD-OBS', 'EXPTIME', 'FILTER', 'INSTRUME', 'TELESCOP', 'GAIN', 'RDNOISE',
+                            'SATURATE', 'NCOMBINE', 'BUNIT', 'SITEID', 'SITE', 'MPCCODE', 'OBSCODE',
+                            'LATITUDE', 'LONGITUD', 'HEIGHT'):
                 if keyword in source_header:
                     header[keyword] = source_header[keyword]
             header.update(wcs.to_header(relax=True))
@@ -163,24 +171,66 @@ def ensure_wcs(image_path, original_path, hint, work):
     return solution
 
 
-def fetch_reference(wcs, shape, destination, survey):
-    if survey == 'Pan-STARRS1 r stack':
-        return fetch_pan_starrs_reference(wcs, shape, destination)
-    if survey not in ('DSS2 Red', 'DSS2 Blue', 'DSS2 IR'):
-        raise ValueError('Unsupported survey')
+# Reference surveys. Keys are what the UI sends; "Auto" picks the best match for the science filter.
+SKYVIEW_SURVEYS = {
+    'DSS2 Red': 'DSS2 Red', 'DSS2 Blue': 'DSS2 Blue', 'DSS2 IR': 'DSS2 IR', 'DSS1 Red': 'DSS1 Red',
+    'SDSS u': 'SDSSu', 'SDSS g': 'SDSSg', 'SDSS r': 'SDSSr', 'SDSS i': 'SDSSi', 'SDSS z': 'SDSSz',
+    '2MASS J': '2MASS-J', '2MASS H': '2MASS-H', '2MASS K': '2MASS-K',
+}
+PAN_STARRS_SURVEYS = {f'Pan-STARRS1 {band} stack': band for band in 'grizy'}
+LEGACY_SURVEYS = {f'Legacy Surveys DR10 {band}': band for band in 'griz'}
+
+
+def science_band(header):
+    """Photometric band of the science frame from its FILTER keyword (LCO, SDSS, Johnson-Cousins, narrowband)."""
+    value = str(header.get('FILTER') or header.get('FILTER1') or '').strip().lower().replace('-', '').replace('_', '')
+    if not value:
+        return 'r', 'no FILTER keyword; assumed r'
+    table = [
+        (('ha', 'halpha', 'h-alpha', 'sii', 's2', 'rp', 'r', 'r\'', 'sdssr', 'rc', 'rj', 'l', 'lum', 'luminance', 'clear', 'cl', 'w', 'none'), 'r'),
+        (('oiii', 'o3', 'hb', 'hbeta', 'gp', 'g', 'g\'', 'sdssg', 'b', 'bj'), 'g'),
+        (('v', 'vj'), 'r'),
+        (('ip', 'i', 'i\'', 'sdssi', 'ic', 'ij'), 'i'),
+        (('zp', 'zs', 'z', 'z\'', 'sdssz'), 'z'),
+        (('y', 'ys'), 'y'),
+        (('up', 'u', 'u\'', 'sdssu', 'uj'), 'u'),
+        (('j',), 'J'), (('h',), 'H'), (('k', 'ks'), 'K'),
+    ]
+    for names, band in table:
+        if value in names:
+            return band, f'FILTER {header.get("FILTER")} → {band}'
+    return 'r', f'unrecognised FILTER {header.get("FILTER")}; assumed r'
+
+
+def auto_reference_order(band, dec, field_degrees):
+    """Best-first reference candidates: deep CCD stacks in the matching band, then SDSS, then DSS."""
+    order = []
+    if band in 'grizy' and dec >= -30 and field_degrees * 60 <= 25:
+        order.append(f'Pan-STARRS1 {band} stack')
+    if band in 'griz':
+        order.append(f'Legacy Surveys DR10 {band}')
+    if band in 'ugriz':
+        order.append(f'SDSS {band}')
+    if band in ('J', 'H', 'K'):
+        order.append(f'2MASS {band}')
+    order.append('DSS2 Blue' if band in ('u', 'g') else 'DSS2 IR' if band in ('z', 'y', 'J', 'H', 'K') else 'DSS2 Red')
+    if 'DSS2 Red' not in order:
+        order.append('DSS2 Red')
+    return order
+
+
+def _field_geometry(wcs, shape):
     height, width = shape
     ra, dec = wcs.pixel_to_world_values((width - 1) / 2, (height - 1) / 2)
     corners = wcs.pixel_to_world_values(np.array([0, width - 1, 0, width - 1]),
                                        np.array([0, 0, height - 1, height - 1]))
     offsets = np.hypot((np.mod(corners[0] - ra + 180, 360) - 180) * math.cos(math.radians(dec)), corners[1] - dec)
-    fov = float(max(offsets) * 2.3)
-    if not 0 < fov <= 8:
-        raise ValueError('The FITS field is too large for an automatic DSS reference; choose a local FITS reference')
-    query = urllib.parse.urlencode({'Survey': survey, 'Position': f'{ra:.8f},{dec:.8f}',
-                                    'Return': 'FITS', 'Size': f'{fov:.6f}', 'Pixels': '2048'})
-    url = 'https://skyview.gsfc.nasa.gov/cgi-bin/images?' + query
+    return float(ra), float(dec), float(max(offsets) * 2.3)
+
+
+def _download(url, destination, label, timeout=180):
     request = urllib.request.Request(url, headers={'User-Agent': 'AstroviaBin private FITS analysis/1.0'})
-    with urllib.request.urlopen(request, timeout=180) as response, destination.open('wb') as output:
+    with urllib.request.urlopen(request, timeout=timeout) as response, destination.open('wb') as output:
         total = 0
         while True:
             chunk = response.read(1024 * 1024)
@@ -188,16 +238,74 @@ def fetch_reference(wcs, shape, destination, survey):
                 break
             total += len(chunk)
             if total > 120 * 1024 * 1024:
-                raise ValueError('The survey reference exceeds the 120 MB safety limit')
+                raise ValueError(f'The {label} reference exceeds the 120 MB safety limit')
             output.write(chunk)
     with destination.open('rb') as reference:
         if reference.read(9) != b'SIMPLE  =':
-            raise ValueError('The reference survey did not return a FITS file')
-    return {'survey': survey, 'url': url, 'ra': float(ra), 'dec': float(dec), 'fieldDegrees': fov}
+            raise ValueError(f'{label} did not return a FITS image')
 
 
-def fetch_pan_starrs_reference(wcs, shape, destination):
-    """Fetch a PS1 DR2 r-band stack cutout; send only WCS coordinates to MAST."""
+def _require_coverage(destination, label):
+    """Survey services return blank images outside their footprint; treat that as no coverage."""
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        data, _ = mono_data(destination)
+    finite = np.isfinite(data)
+    useful = finite & (data != 0)
+    if data.size == 0 or useful.mean() < 0.5 or float(np.nanstd(data[finite])) == 0.0:
+        raise ValueError(f'{label} has no coverage of this field')
+
+
+def fetch_skyview_reference(wcs, shape, destination, survey):
+    ra, dec, fov = _field_geometry(wcs, shape)
+    if not 0 < fov <= 8:
+        raise ValueError('The FITS field is too large for an automatic survey reference; choose a local FITS reference')
+    query = urllib.parse.urlencode({'Survey': SKYVIEW_SURVEYS[survey], 'Position': f'{ra:.8f},{dec:.8f}',
+                                    'Return': 'FITS', 'Size': f'{fov:.6f}', 'Pixels': '2048'})
+    url = 'https://skyview.gsfc.nasa.gov/cgi-bin/images?' + query
+    _download(url, destination, survey)
+    _require_coverage(destination, survey)
+    return {'survey': survey, 'url': url, 'ra': ra, 'dec': dec, 'fieldDegrees': fov}
+
+
+def fetch_legacy_reference(wcs, shape, destination, survey):
+    """DESI Legacy Imaging Surveys DR10 cutout (0.262"/px native; coarser for big fields, max 3000 px)."""
+    band = LEGACY_SURVEYS[survey]
+    ra, dec, fov = _field_geometry(wcs, shape)
+    pixscale = max(0.262, fov * 3600 / 3000)
+    size = min(3000, math.ceil(fov * 3600 / pixscale))
+    url = 'https://www.legacysurvey.org/viewer/fits-cutout?' + urllib.parse.urlencode({
+        'ra': f'{ra:.8f}', 'dec': f'{dec:.8f}', 'layer': 'ls-dr10', 'pixscale': f'{pixscale:.4f}',
+        'bands': band, 'size': str(size)})
+    _download(url, destination, survey)
+    _require_coverage(destination, survey)
+    return {'survey': survey, 'url': url, 'ra': ra, 'dec': dec, 'fieldDegrees': fov, 'pixelScaleArcsec': pixscale}
+
+
+def fetch_reference(wcs, shape, destination, survey, science_header=None):
+    if survey == 'Auto':
+        band, reason = science_band(science_header or {})
+        _, dec, fov = _field_geometry(wcs, shape)
+        tried = []
+        for candidate in auto_reference_order(band, dec, fov):
+            try:
+                provenance = fetch_reference(wcs, shape, destination, candidate)
+                provenance['autoSelection'] = {'band': band, 'reason': reason, 'skipped': tried}
+                return provenance
+            except Exception as error:  # try the next-best survey
+                tried.append(f'{candidate}: {error}')
+        raise ValueError('No survey reference covers this field: ' + ' | '.join(tried))
+    if survey in PAN_STARRS_SURVEYS:
+        return fetch_pan_starrs_reference(wcs, shape, destination, PAN_STARRS_SURVEYS[survey])
+    if survey in LEGACY_SURVEYS:
+        return fetch_legacy_reference(wcs, shape, destination, survey)
+    if survey in SKYVIEW_SURVEYS:
+        return fetch_skyview_reference(wcs, shape, destination, survey)
+    raise ValueError('Unsupported survey')
+
+
+def fetch_pan_starrs_reference(wcs, shape, destination, band='r'):
+    """Fetch a PS1 DR2 stack cutout in one band; send only WCS coordinates to MAST."""
     height, width = shape
     ra, dec = wcs.pixel_to_world_values((width - 1) / 2, (height - 1) / 2)
     corners = wcs.pixel_to_world_values(np.array([0, width - 1, 0, width - 1]),
@@ -212,14 +320,14 @@ def fetch_pan_starrs_reference(wcs, shape, destination):
         raise ValueError('Pan-STARRS1 cutouts cover fields up to about 25 arcmin. Choose DSS2 or a local FITS reference for this field.')
 
     lookup_url = 'https://ps1images.stsci.edu/cgi-bin/ps1filenames.py?' + urllib.parse.urlencode({
-        'ra': f'{ra:.8f}', 'dec': f'{dec:.8f}', 'filters': 'r', 'type': 'stack', 'sep': 'comma'})
+        'ra': f'{ra:.8f}', 'dec': f'{dec:.8f}', 'filters': band, 'type': 'stack', 'sep': 'comma'})
     headers = {'User-Agent': 'AstroviaBin private FITS analysis/1.0'}
     request = urllib.request.Request(lookup_url, headers=headers)
     with urllib.request.urlopen(request, timeout=30) as response:
         rows = list(csv.DictReader(StringIO(response.read(2_000_000).decode('utf-8'))))
-    row = next((item for item in rows if item.get('filter') == 'r' and item.get('filename')), None)
+    row = next((item for item in rows if item.get('filter') == band and item.get('filename')), None)
     if row is None:
-        raise ValueError('Pan-STARRS1 has no r-band stack coverage at this position. Choose DSS2 or a local FITS reference.')
+        raise ValueError(f'Pan-STARRS1 has no {band}-band stack coverage at this position. Choose another survey or a local FITS reference.')
 
     cutout_url = 'https://ps1images.stsci.edu/cgi-bin/fitscut.cgi?' + urllib.parse.urlencode({
         'size': str(pixels), 'format': 'fits', 'red': row['filename'],
@@ -238,7 +346,8 @@ def fetch_pan_starrs_reference(wcs, shape, destination):
     with destination.open('rb') as reference:
         if reference.read(9) != b'SIMPLE  =':
             raise ValueError('Pan-STARRS1 did not return a FITS image cutout')
-    return {'survey': 'Pan-STARRS1 DR2 r stack (MAST)', 'url': cutout_url,
+    _require_coverage(destination, f'Pan-STARRS1 {band}')
+    return {'survey': f'Pan-STARRS1 DR2 {band} stack (MAST)', 'url': cutout_url,
             'ra': float(ra), 'dec': float(dec), 'fieldDegrees': field_degrees,
             'pixelScaleArcsec': 0.25, 'referenceEpoch': 'multi-epoch stack'}
 
@@ -296,6 +405,112 @@ def align_reference(reference_path, science_wcs, science_header, shape, output):
         raise ValueError(f'Reference overlaps only {coverage:.0%} of the science image; choose a matching field')
     fits.writeto(output, aligned, header=science_wcs.to_header(relax=True), overwrite=True)
     return coverage, mask, area_scale
+
+
+def estimate_fwhm(data, invalid=None):
+    """Median FWHM in pixels of bright, isolated, unsaturated point sources (second moments)."""
+    finite = np.isfinite(data) if invalid is None else (np.isfinite(data) & ~invalid)
+    if finite.sum() < 1000:
+        return None
+    median = float(np.median(data[finite]))
+    sigma = float(1.4826 * np.median(np.abs(data[finite] - median)))
+    if not np.isfinite(sigma) or sigma <= 0:
+        return None
+    clean = np.where(finite, data, median) - median
+    finder = DAOStarFinder(threshold=15 * sigma, fwhm=3.0, sharpness_range=(0.2, 1.0),
+                           roundness_range=(-0.5, 0.5), exclude_border=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sources = finder(clean)
+    if sources is None or len(sources) < 5:
+        return None
+    sources.sort('flux', reverse=True)
+    fwhm_guess = 3.0
+    for _ in range(2):
+        radius = int(max(6, math.ceil(2.5 * fwhm_guess)))
+        values = []
+        yy, xx = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+        for source in sources[:300]:
+            x, y = int(round(float(source['x_centroid']))), int(round(float(source['y_centroid'])))
+            stamp = clean[y - radius:y + radius + 1, x - radius:x + radius + 1]
+            mask = finite[y - radius:y + radius + 1, x - radius:x + radius + 1]
+            if stamp.shape != yy.shape or not mask.all():
+                continue
+            peak = float(stamp.max())
+            # Saturated (clipped) stars have a flat top: several pixels at essentially the peak value.
+            if peak <= 0 or np.count_nonzero(stamp >= peak * 0.995) >= 4:
+                continue
+            edge = np.concatenate([stamp[0], stamp[-1], stamp[:, 0], stamp[:, -1]])
+            background = float(np.median(edge))
+            # Circular Gaussian + constant, least squares: unbiased by background noise, unlike moments.
+            def residual(parameters):
+                amplitude, cx, cy, width, offset = parameters
+                model = amplitude * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * width ** 2)) + offset
+                return (model - stamp).ravel()
+            start = [peak - background, 0.0, 0.0, fwhm_guess / 2.3548, background]
+            try:
+                fit = least_squares(residual, start, bounds=([0, -radius, -radius, 0.3, -np.inf],
+                                                             [np.inf, radius, radius, radius, np.inf]))
+            except ValueError:
+                continue
+            if not fit.success or math.hypot(fit.x[1], fit.x[2]) > 2:
+                continue
+            fwhm = 2.3548 * float(fit.x[3])
+            if 0.8 < fwhm < 25:
+                values.append(fwhm)
+            if len(values) >= 60:
+                break
+        if len(values) < 5:
+            return None
+        fwhm_guess = float(np.median(values))
+    return round(fwhm_guess, 2)
+
+
+def default_hotpants_args(user_args, science, science_header, template, template_mask, fwhm_science, fwhm_template, science_invalid):
+    """Data-driven HOTPANTS settings; any flag the user passed explicitly is left to the user."""
+    present = {value for value in user_args if isinstance(value, str) and value.startswith('-')}
+    args, info = [], {}
+
+    def add(flag, *values):
+        if flag not in present:
+            args.extend([flag, *[str(value) for value in values]])
+            info[flag] = ' '.join(str(value) for value in values)
+
+    def valid_range(data, invalid):
+        good = np.isfinite(data) & ~invalid
+        if not good.any():
+            return None
+        median = float(np.median(data[good]))
+        sigma = float(1.4826 * np.median(np.abs(data[good] - median))) or 1.0
+        # Background-subtracted images are legitimately negative; saturation is handled by masks.
+        return median - 50 * sigma, float(np.max(data[good])) + sigma
+
+    science_range = valid_range(science, science_invalid)
+    template_range = valid_range(template, template_mask > 0)
+    if science_range:
+        add('-il', f'{science_range[0]:.6g}')
+        add('-iu', f'{science_range[1]:.6g}')
+    if template_range:
+        add('-tl', f'{template_range[0]:.6g}')
+        add('-tu', f'{template_range[1]:.6g}')
+    gain = science_header.get('GAIN')
+    frames = float(science_header.get('NCOMBINE') or 1)
+    factor = float(science_header.get('DOWNSAMP') or 1)
+    if gain:
+        # A mean of N frames has N times the effective gain; block sums add read noise in quadrature.
+        add('-ig', f'{float(gain) * frames:.6g}')
+    if science_header.get('RDNOISE'):
+        add('-ir', f'{float(science_header["RDNOISE"]) * factor / math.sqrt(frames):.6g}')
+    if fwhm_science and fwhm_template:
+        widest = max(fwhm_science, fwhm_template)
+        radius = int(min(25, max(5, round(2.5 * widest))))
+        add('-r', radius)
+        add('-rss', int(min(40, max(radius + 2, round(1.5 * radius)))))
+        sigma_match = math.sqrt(max(abs((fwhm_science / 2.3548) ** 2 - (fwhm_template / 2.3548) ** 2), 0.25))
+        add('-ng', 3, 6, f'{max(0.5, 0.5 * sigma_match):.3f}', 4, f'{max(0.7, sigma_match):.3f}', 2, f'{max(1.0, 2 * sigma_match):.3f}')
+    info['fwhmSciencePx'] = fwhm_science
+    info['fwhmReferencePx'] = fwhm_template
+    return args, info
 
 
 def local_point_source(data, x, y, fwhm, detection_sigma=5):
@@ -618,7 +833,7 @@ def main(config_path):
     science_data, science_header = mono_data(science)
     write_state(work, 'reference')
     if config['referenceMode'] == 'survey':
-        provenance = fetch_reference(science_wcs, science_data.shape, reference, config['survey'])
+        provenance = fetch_reference(science_wcs, science_data.shape, reference, config['survey'], science_header)
     else:
         reference_factor = reduced_image(config['reference'], reference, int(config['maxDimension']))
         ref_hint = dict(config.get('referenceHint') or {}, factor=reference_factor)
@@ -628,9 +843,20 @@ def main(config_path):
     coverage, mask, reference_flux_scale = align_reference(reference, science_wcs, science_header, science_data.shape, aligned)
     fits.writeto(work / 'reference-mask.fits', mask, overwrite=True)
     write_state(work, 'subtracting')
+    science_invalid_path = work / 'science-invalid-mask.fits'
+    science_invalid = (mono_data(science_invalid_path)[0] > 0) if science_invalid_path.exists() else ~np.isfinite(science_data)
+    aligned_data, _ = mono_data(aligned)
+    fwhm_science = estimate_fwhm(science_data, science_invalid)
+    fwhm_reference = estimate_fwhm(aligned_data, mask > 0)
+    user_args = config.get('hotpantsArgs', [])
+    auto_args, auto_settings = default_hotpants_args(user_args, science_data, science_header, aligned_data, mask,
+                                                     fwhm_science, fwhm_reference, science_invalid)
     command = ['hotpants', '-inim', str(science), '-tmplim', str(aligned), '-outim', str(difference),
                '-oni', str(noise), '-oci', str(convolved), '-omi', str(bad_mask),
-               '-tmi', str(work / 'reference-mask.fits'), '-hki', '-n', 'i'] + config.get('hotpantsArgs', [])
+               '-tmi', str(work / 'reference-mask.fits')]
+    if science_invalid_path.exists():
+        command += ['-imi', str(science_invalid_path)]
+    command += ['-hki', '-n', 'i'] + auto_args + user_args
     result = subprocess.run(command, capture_output=True, text=True, timeout=int(config.get('timeoutSeconds', 900)), check=False)
     (work / 'hotpants.log').write_text((result.stdout + '\n' + result.stderr)[-300000:])
     if result.returncode or not difference.exists():
@@ -638,7 +864,8 @@ def main(config_path):
     write_state(work, 'detecting')
     candidates, detected_total, rejected = detect_candidates(
         difference, noise, bad_mask, mask, science, aligned, science_wcs,
-        float(config['thresholdSigma']), int(config['maxCandidates']), float(config.get('sourceFwhm', 3)))
+        float(config['thresholdSigma']), int(config['maxCandidates']),
+        float(config.get('sourceFwhm') or fwhm_science or 3))
     solar_system_objects, solar_system_note = known_solar_system_objects(science_wcs, science_data.shape, science_header)
     flag_known_objects(candidates, solar_system_objects, science_wcs, float(science_header.get('EXPTIME') or 0))
     write_candidate_products(difference, candidates, work / 'difference-candidates.fits',
@@ -657,6 +884,8 @@ def main(config_path):
             'width': science_data.shape[1], 'height': science_data.shape[0],
             'candidates': candidates, 'detectedTotal': detected_total,
             'solarSystemObjects': solar_system_objects, 'solarSystemCheck': solar_system_note,
+            'autoSettings': {**auto_settings, 'detectionFwhmPx': float(config.get('sourceFwhm') or fwhm_science or 3),
+                             'hotpantsArgs': auto_args},
             'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,
             'files': ['science.fits', 'reference.fits', 'reference-aligned.fits', 'difference.fits',
                       'difference-candidates.fits', 'difference-candidates.reg',

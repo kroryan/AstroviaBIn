@@ -20,9 +20,10 @@ type Report = {
   analysisVersion?: number; sourceFilter?: string; comparisonWarning?: string;
   rejectedCandidates?: Record<string, number>;
   candidateChecks?: Record<string, CandidateCheck>;
-  files?: string[]; reference?: { survey?: string; localImageId?: number }; catalogCheck?: string;
+  files?: string[]; reference?: { survey?: string; localImageId?: number; autoSelection?: { band: string; reason: string; skipped: string[] } }; catalogCheck?: string;
   settings?: { thresholdSigma: number; maxDimension: number; sourceFwhm?: number };
   solarSystemObjects?: SolarSystemObject[]; solarSystemCheck?: string;
+  autoSettings?: { fwhmSciencePx?: number | null; fwhmReferencePx?: number | null; detectionFwhmPx?: number; hotpantsArgs?: string[] };
 };
 
 async function jsonResponse<T>(response: Response): Promise<T> {
@@ -38,10 +39,11 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
   const [referenceMode, setReferenceMode] = useState<'survey' | 'local'>('survey');
   const [referenceImageId, setReferenceImageId] = useState('');
   const [followupImageId, setFollowupImageId] = useState('');
-  const [survey, setSurvey] = useState('DSS2 Red');
+  const [survey, setSurvey] = useState('Auto');
   const [maxDimension, setMaxDimension] = useState(2048);
   const [thresholdSigma, setThresholdSigma] = useState(6);
-  const [sourceFwhm, setSourceFwhm] = useState(3);
+  // Empty = measured from the image.
+  const [sourceFwhm, setSourceFwhm] = useState('');
   const [hotpantsOptions, setHotpantsOptions] = useState('');
   const [attachmentError, setAttachmentError] = useState('');
   const [activeRun, setActiveRun] = useState<string | null>(null);
@@ -67,7 +69,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     mutationFn: () => fetch(`${base}/analyses`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ referenceMode, referenceImageId: referenceMode === 'local' ? Number(referenceImageId) : undefined,
-        survey, maxDimension, thresholdSigma, sourceFwhm, maxCandidates: 100, hotpantsOptions }),
+        survey, maxDimension, thresholdSigma, sourceFwhm: sourceFwhm.trim() ? Number(sourceFwhm) : null, maxCandidates: 100, hotpantsOptions }),
     }).then(jsonResponse<Report>),
     onSuccess: report => { setActiveRun(report.runId); client.invalidateQueries({ queryKey: [base, 'analyses'] }); },
   });
@@ -113,13 +115,27 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-sm space-y-1">Reference source
         <select className="w-full rounded-md border bg-background p-2" value={referenceMode} onChange={event => setReferenceMode(event.target.value as 'survey' | 'local')}>
-          <option value="survey">Historical sky survey (DSS2)</option><option value="local">Another local FITS</option>
+          <option value="survey">Sky survey reference</option><option value="local">Another local FITS</option>
         </select>
       </label>
       {referenceMode === 'survey' ? <label className="text-sm space-y-1">Survey / band
         <select className="w-full rounded-md border bg-background p-2" value={survey} onChange={event => setSurvey(event.target.value)}>
-          <option>DSS2 Red</option><option>DSS2 Blue</option><option>DSS2 IR</option>
-          <option value="Pan-STARRS1 r stack">Pan-STARRS1 DR2 · r stack (≤25′, Dec &gt; −30°)</option>
+          <option value="Auto">Auto — best survey in your filter's band (recommended)</option>
+          <optgroup label="Pan-STARRS1 DR2 stacks · deep CCD · Dec > −30° · fields ≤ 25′">
+            {['g', 'r', 'i', 'z', 'y'].map(band => <option key={band} value={`Pan-STARRS1 ${band} stack`}>Pan-STARRS1 {band}</option>)}
+          </optgroup>
+          <optgroup label="DESI Legacy Surveys DR10 · deep CCD · any field size">
+            {['g', 'r', 'i', 'z'].map(band => <option key={band} value={`Legacy Surveys DR10 ${band}`}>Legacy Surveys {band}</option>)}
+          </optgroup>
+          <optgroup label="SDSS · CCD · SDSS footprint only">
+            {['u', 'g', 'r', 'i', 'z'].map(band => <option key={band} value={`SDSS ${band}`}>SDSS {band}</option>)}
+          </optgroup>
+          <optgroup label="Digitized Sky Survey · photographic · whole sky">
+            <option>DSS2 Red</option><option>DSS2 Blue</option><option>DSS2 IR</option><option>DSS1 Red</option>
+          </optgroup>
+          <optgroup label="2MASS · near-infrared · whole sky">
+            {['J', 'H', 'K'].map(band => <option key={band} value={`2MASS ${band}`}>2MASS {band}</option>)}
+          </optgroup>
         </select>
       </label> : <label className="text-sm space-y-1">Reference FITS
         <select className="w-full rounded-md border bg-background p-2" value={referenceImageId} onChange={event => setReferenceImageId(event.target.value)}>
@@ -136,7 +152,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
         <Input type="number" min={3} max={30} step={0.5} value={thresholdSigma} onChange={event => setThresholdSigma(Number(event.target.value))} />
       </label>
       <label className="text-sm space-y-1">Point-source width (FWHM, pixels)
-        <Input type="number" min={1.5} max={12} step={0.5} value={sourceFwhm} onChange={event => setSourceFwhm(Number(event.target.value))} />
+        <Input type="number" min={1.5} max={12} step={0.5} value={sourceFwhm} placeholder="Auto (measured)" onChange={event => setSourceFwhm(event.target.value)} />
       </label>
     </div>
     <details className="text-sm"><summary className="cursor-pointer font-medium">Advanced HOTPANTS controls and auxiliary files</summary>
@@ -174,6 +190,8 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           <p className="text-xs text-muted-foreground">Rejected raw peaks: {Object.entries(report.rejectedCandidates || {}).map(([reason, count]) => `${reason.replace(/([A-Z])/g, ' $1').toLowerCase()} ${count}`).join(' · ') || 'none'}.</p>
         </>}
         <p className="text-xs text-muted-foreground">Catalog check: {report.catalogCheck || 'not available'}. A nearby catalog object is not a transient identification.</p>
+        {report.reference?.autoSelection && <p className="text-xs text-muted-foreground">Auto reference: band {report.reference.autoSelection.band} ({report.reference.autoSelection.reason}){report.reference.autoSelection.skipped.length ? `; skipped ${report.reference.autoSelection.skipped.map(item => item.split(':')[0]).join(', ')}` : ''}.</p>}
+        {report.autoSettings && <p className="text-xs text-muted-foreground">Measured seeing: science {report.autoSettings.fwhmSciencePx ?? '?'} px, reference {report.autoSettings.fwhmReferencePx ?? '?'} px · detection FWHM {report.autoSettings.detectionFwhmPx} px · HOTPANTS auto: <code>{report.autoSettings.hotpantsArgs?.join(' ') || 'defaults'}</code></p>}
         {report.solarSystemCheck && <p className="text-xs text-muted-foreground">Known asteroids and comets: {report.solarSystemCheck}{report.solarSystemObjects?.length ? ` ${report.solarSystemObjects.map(item => `${item.name}${item.vmag != null ? ` (V ${item.vmag})` : ''}`).join(', ')}.` : ''}</p>}
         <div className="grid gap-2 sm:grid-cols-3">
           {(['science.fits', 'reference-aligned.fits', 'difference.fits'] as const).map(name => <div key={name}>

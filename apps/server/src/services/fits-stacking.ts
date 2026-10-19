@@ -292,7 +292,9 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
     fitsCard('NAXIS2', String(height)),
   ];
   if (channels === 3) cards.push(fitsCard('NAXIS3', '3'));
-  for (const key of ['OBJECT', 'DATE-OBS', 'INSTRUME', 'TELESCOP', 'FILTER', 'FOCALLEN', 'XPIXSZ', 'YPIXSZ']) {
+  // Observatory keywords let HOTPANTS's SkyBoT check use the right site; GAIN/RDNOISE/SATURATE describe the noise model.
+  for (const key of ['OBJECT', 'DATE-OBS', 'MJD-OBS', 'INSTRUME', 'TELESCOP', 'FILTER', 'FOCALLEN', 'XPIXSZ', 'YPIXSZ',
+    'GAIN', 'RDNOISE', 'SATURATE', 'SITEID', 'SITE', 'MPCCODE', 'OBSCODE', 'LATITUDE', 'LONGITUD', 'HEIGHT']) {
     const value = copyHeaderValue(reference.headers, key);
     if (value !== undefined) cards.push(fitsCard(key, value));
   }
@@ -305,6 +307,7 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
       cards.push(rawCard);
     }
   }
+  cards.push(fitsCard('NCOMBINE', String(frames.length)));
   cards.push(fitsCard('HISTORY', `AstroviaBin stack of ${frames.length} frames (method=${method})`));
   for (let index = 0; index < offsets.length; index++) {
     cards.push(fitsCard('HISTORY', `frame ${index}: dx=${offsets[index].dx} dy=${offsets[index].dy}`));

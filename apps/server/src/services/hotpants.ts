@@ -14,10 +14,16 @@ import { sanitizedUploadFilename, writeUploadBody } from './upload-stream';
 export const analysisRequestSchema = z.object({
   referenceMode: z.enum(['survey', 'local']).default('survey'),
   referenceImageId: z.number().int().positive().optional(),
-  survey: z.enum(['DSS2 Red', 'DSS2 Blue', 'DSS2 IR', 'Pan-STARRS1 r stack']).default('DSS2 Red'),
+  // "Auto" picks the deepest survey in the band matching the science FILTER (Pan-STARRS1, Legacy Surveys, SDSS, then DSS).
+  survey: z.enum(['Auto',
+    'Pan-STARRS1 g stack', 'Pan-STARRS1 r stack', 'Pan-STARRS1 i stack', 'Pan-STARRS1 z stack', 'Pan-STARRS1 y stack',
+    'Legacy Surveys DR10 g', 'Legacy Surveys DR10 r', 'Legacy Surveys DR10 i', 'Legacy Surveys DR10 z',
+    'SDSS u', 'SDSS g', 'SDSS r', 'SDSS i', 'SDSS z',
+    'DSS2 Red', 'DSS2 Blue', 'DSS2 IR', 'DSS1 Red', '2MASS J', '2MASS H', '2MASS K']).default('Auto'),
   maxDimension: z.union([z.literal(1024), z.literal(2048), z.literal(4096), z.literal(8192)]).default(2048),
   thresholdSigma: z.number().min(3).max(30).default(6),
-  sourceFwhm: z.number().min(1.5).max(12).default(3),
+  // Omitted or null: measured from the science image.
+  sourceFwhm: z.number().min(1.5).max(12).nullable().optional(),
   maxCandidates: z.number().int().min(1).max(500).default(100),
   hotpantsOptions: z.string().max(3000).default(''),
 });
@@ -284,7 +290,8 @@ export async function checkHotpantsCandidate(
   await writeJson(path.join(work, 'config.json'), {
     mode: 'candidate-check', work, comparison, comparisonHint: hint(followup),
     comparisonImageId: followupImageId, ra: candidate.ra, dec: candidate.dec,
-    maxDimension: report.settings.maxDimension, sourceFwhm: report.settings.sourceFwhm || 3,
+    maxDimension: report.settings.maxDimension,
+    sourceFwhm: report.settings.sourceFwhm || report.autoSettings?.detectionFwhmPx || 3,
     sourceFilter: report.sourceFilter, sourceDate: report.sourceDate,
   });
   verifying.add(key);

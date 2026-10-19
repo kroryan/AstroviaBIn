@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The HOTPANTS pipeline's own plate solve uses the narrow-field indexes and the pixel-scale hint.
 
 ### Added
+- HOTPANTS reference surveys: Pan-STARRS1 g/r/i/z/y, DESI Legacy Surveys DR10 g/r/i/z, SDSS u/g/r/i/z, DSS1/DSS2 and 2MASS J/H/K, with an "Auto" default that picks the deepest survey covering the field in the band matching the science FILTER (blank out-of-footprint cutouts are detected and skipped).
+- Data-driven HOTPANTS defaults: seeing measured by Gaussian fits on both images sets the kernel half-width, stamp size and Gaussian basis; valid-data ranges come from the data (negative, background-subtracted references stay valid); saturated blocks are masked; gain and read noise come from GAIN/RDNOISE/NCOMBINE. Explicit user flags always win.
 - HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT, observer-site aware for LCO) and flag candidates that coincide with one.
 
 ### Added
