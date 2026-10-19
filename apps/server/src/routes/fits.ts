@@ -22,6 +22,8 @@ import { runStackInThread, type StackMethod } from '../services/fits-stacking';
 import { wcsFromStored } from '../services/wcs';
 import { tileInfo } from '../services/tiles';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
+import { astrometryService } from '../services/astrometry';
+import { configService } from '../services/config';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -358,7 +360,17 @@ app.post('/stack', async (c) => {
     }));
     const frameNames = images.map((image, index) => image?.title ? `${image.title} (#${imageIds[index]})` : `#${imageIds[index]}`);
     const result = await runStackInThread(framePaths, outputPath, { method, sigmaClipThreshold, register, frameWcs, frameNames });
-    const stacked = await importFits(outputPath, fitsDerivedDirectory(), 'derived');
+    let stacked = await importFits(outputPath, fitsDerivedDirectory(), 'derived');
+    const referenceImage = images[0];
+    if (stacked && referenceImage) {
+      // The stack shows the reference frame's field: keep its target and tags (e.g. object names).
+      const tags = [...new Set([...(stacked.tags ?? []), ...(referenceImage.tags ?? [])].filter(tag => tag !== 'FITS uploaded'))];
+      stacked = await storage.updateAstroImage(stacked.id, { tags, targetName: referenceImage.targetName ?? stacked.targetName }) ?? stacked;
+      // Solve the stack too (annotations, HOTPANTS) when the reference was solvable.
+      if (referenceImage.plateSolved && (await configService.getAstrometryConfig()).enabled) {
+        astrometryService.completePlateSolvingWorkflow(stacked).catch(error => console.warn(`Could not queue plate solving for stack ${stacked?.id}:`, error));
+      }
+    }
     return c.json({ image: stacked, output: outputName, frameCount: result.frameCount, offsets: result.offsets,
       frames: result.frames, warnings: result.warnings });
   } catch (error) {
