@@ -171,11 +171,11 @@ def ensure_wcs(image_path, original_path, hint, work):
     config = work / 'backend.cfg'
     # Same index set as the main solver, including downloaded narrow-field indexes.
     directories = [os.environ.get('ASTROMETRY_INDEX_DIR', '/usr/share/astrometry')]
-    directories += [d for d in os.environ.get('ASTROMETRY_EXTRA_INDEX_DIRS', '/app/config/astrometry-index').split(':') if d]
+    directories += [d for d in os.environ.get('ASTROMETRY_EXTRA_INDEX_DIRS', '/app/config/astrometry-index').split(os.pathsep) if d]
     directories = [d for d in directories if os.path.isdir(d)]
     config.write_text(''.join(f'add_path {d}\n' for d in directories) + 'autoindex\n')
     wcs_path = work / 'local.wcs'
-    base = ['solve-field', '--overwrite', '--no-plots', '--downsample', '1',
+    base = [os.environ.get('ASTROMETRY_SOLVE_FIELD', 'solve-field'), '--overwrite', '--no-plots', '--downsample', '1',
             '--backend-config', str(config), '--dir', str(work), '--wcs', str(wcs_path),
             '--cpulimit', '120']
     attempts = []
@@ -1182,7 +1182,7 @@ def main(config_path):
     user_args = config.get('hotpantsArgs', [])
     auto_args, auto_settings = default_hotpants_args(user_args, science_data, science_header, aligned_data, mask,
                                                      fwhm_science, fwhm_reference, science_invalid)
-    command = ['hotpants', '-inim', str(science), '-tmplim', str(aligned), '-outim', str(difference),
+    command = [os.environ.get('HOTPANTS_BIN', 'hotpants'), '-inim', str(science), '-tmplim', str(aligned), '-outim', str(difference),
                '-oni', str(noise), '-oci', str(convolved), '-omi', str(bad_mask),
                '-tmi', str(work / 'reference-mask.fits')]
     if science_invalid_path.exists():

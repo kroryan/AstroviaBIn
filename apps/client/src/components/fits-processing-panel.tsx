@@ -79,13 +79,17 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
     setOutputName(image.filename.replace(/\.(fit|fits|fts)$/i, '') + '-processed');
   }, [image.id, image.filename]);
 
-  const debouncedPreviewUrl = useDebounce(previewUrl, 90);
+  const settledPreviewUrl = useDebounce(previewUrl, 90);
+  // A failed render (server busy or restarting, dropped connection) is retried twice before an error shows.
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const debouncedPreviewUrl = previewAttempt ? `${settledPreviewUrl}&retry=${previewAttempt}` : settledPreviewUrl;
 
   useEffect(() => {
     if (!fitsImage) return;
     setPreviewLoading(true);
     setPreviewError(null);
-  }, [fitsImage, debouncedPreviewUrl]);
+    setPreviewAttempt(0);
+  }, [fitsImage, settledPreviewUrl]);
 
   const handlePreviewLoad = useCallback(() => {
     setPreviewLoading(false);
@@ -94,9 +98,13 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
   }, []);
 
   const handlePreviewError = useCallback(() => {
+    if (previewAttempt < 2) {
+      window.setTimeout(() => setPreviewAttempt(attempt => attempt + 1), 1200 * (previewAttempt + 1));
+      return;
+    }
     setPreviewLoading(false);
-    setPreviewError('Preview failed');
-  }, []);
+    setPreviewError('Preview failed: the server did not return an image (it may be restarting or busy). Change a setting to try again.');
+  }, [previewAttempt]);
 
   useEffect(() => {
     if (!fullscreen) return;

@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compact gallery: albums, unclassified images and album contents use the same small square tiles (about a third of the previous width), laid out so only whole tiles fit on each row; FITS/WCS status shows as small chips on the thumbnail and the catalog bar wraps instead of scrolling.
 - The gallery shows catalogs as folders with only the unclassified images below ("Group by catalog", on by default); searching or filtering lists matching images flat. Stacks inherit the reference frame's tags and target and are queued for plate solving.
 
+### Fixed (plate solving)
+- Frames without coordinates in their header (e.g. Slooh) were solved blind over every field size from 5′ to 33° and could time out after 15 minutes. The pixel scale is now read from the header — INSTRUME text such as "2.94arcsec/pix @ Binning 1x1", or FOCALLEN and XPIXSZ, with binning handled correctly (XPIXSZ already includes it in the SBIG/MaxIm convention; it was counted twice) — and used for every attempt, including blind ones. A real Slooh frame that had failed after 15 minutes now solves in under a minute.
+- Position hints come from more places: another frame of the same session that is already solved (same "<target>_<date>" file-name prefix), M/NGC/IC designations in names with underscores ("m45_2026…" was not recognized), HD/HIP numbers and proper star names from the offline catalogue ("hd19373", "algolbetapersei"), coordinates written in the file name ("095102p115201") and, online, CDS Sesame name resolution. A hint only tells Astrometry.net where to look first: every solution is still verified by its star matching, and when no hinted attempt verifies, the blind search runs as before.
+- FITS previews that fail (server restarting or busy) are retried automatically before an error is shown, and the error says why.
+
 ### Fixed (uploads)
 - FITS whose image is not in the primary HDU — an IMAGE extension or a tile-compressed (RICE/GZIP/HCOMPRESS, fpack) image, as in Slooh "_cal.fit" files — failed to upload ("NAXIS1 is required"). They are now rewritten on upload as a standard FITS (pixels unchanged, observation keywords from all headers merged) and the original file is kept beside it as "<name>.orig". Unreadable FITS return a clear 400 error instead of a server error.
 

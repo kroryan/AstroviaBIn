@@ -49,6 +49,8 @@ async function startServer() {
   const server = serve({
     fetch: app.fetch,
     port: PORT,
+    // HOST=127.0.0.1 keeps the server private to this computer; the default listens on every interface.
+    ...(process.env.HOST ? { hostname: process.env.HOST } : {}),
   });
 
   // Create WebSocket manager attached to the Node HTTP server

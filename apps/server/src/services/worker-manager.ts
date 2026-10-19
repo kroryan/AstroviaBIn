@@ -49,7 +49,7 @@ export class WorkerManager extends EventEmitter {
       const workerPath = path.resolve(process.cwd(), 'dist/worker.js');
       console.log(`Starting worker process: ${workerPath}`);
       
-      this.workerProcess = spawn('node', [workerPath], {
+      this.workerProcess = spawn(process.execPath, [workerPath], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,

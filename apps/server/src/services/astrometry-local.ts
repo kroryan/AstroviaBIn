@@ -12,6 +12,7 @@ import { readFitsMetadata, readFitsHeader, resolveFitsFile } from './fits';
 import { computeSkyAnnotations } from './sky-annotations';
 import { computeSkyOverlay, overlayToAnnotations } from './sky-overlay';
 import { parseWcsHeaders, pixelScaleArcsec, pixelToSky, type WcsSolution } from './wcs';
+import { loadSkyCatalog } from './sky-catalog';
 import type { AstrometryCalibration, PlateSolvingResult } from './astrometry';
 
 interface LocalImage {
@@ -110,35 +111,63 @@ function headerNumber(headers: Record<string, string | number | boolean> | undef
   return undefined;
 }
 
+interface ScaleRange { scaleLowArcsec: number; scaleHighArcsec: number }
+
+/**
+ * Pixel-scale range (arcsec/px) from the FITS header, used to narrow every search — including
+ * blind ones, which otherwise try every field size from 5′ to 33°.
+ *  - an existing WCS (CD matrix) pins the scale;
+ *  - PIXSCALE/SECPIX/SCALE give it directly;
+ *  - "2.94arcsec/pix @ Binning 1x1" in INSTRUME/TELESCOP (Slooh), times the actual binning;
+ *  - FOCALLEN and XPIXSZ: in the SBIG/MaxIm convention XPIXSZ already includes binning, but some
+ *    software writes the unbinned size, so with binning the range covers both readings.
+ */
+export function headerScale(headers: Record<string, string | number | boolean> | undefined): ScaleRange | null {
+  if (!headers) return null;
+  const cd11 = headerNumber(headers, 'CD1_1');
+  const cd22 = headerNumber(headers, 'CD2_2');
+  if (headers.CRVAL1 !== undefined && cd11 !== undefined && cd22 !== undefined) {
+    const scale = Math.sqrt(Math.abs(cd11 * cd22 - (headerNumber(headers, 'CD1_2') ?? 0) * (headerNumber(headers, 'CD2_1') ?? 0))) * 3600;
+    if (scale > 0) return { scaleLowArcsec: scale * 0.9, scaleHighArcsec: scale * 1.1 };
+  }
+  const binning = Math.max(1, headerNumber(headers, 'XBINNING') ?? 1);
+  const direct = headerNumber(headers, 'PIXSCALE', 'SECPIX', 'SCALE');
+  if (direct && direct > 0) return { scaleLowArcsec: direct * 0.85, scaleHighArcsec: direct * 1.2 };
+  for (const key of ['INSTRUME', 'TELESCOP', 'NOTES']) {
+    const match = String(headers[key] ?? '').match(/([\d.]+)\s*(?:arcsec|"|″)\s*\/\s*pix(?:el)?(?:\s*@\s*binning\s*(\d+)\s*x)?/i);
+    const unbinned = match ? Number(match[1]) / Math.max(1, Number(match[2] || 1)) : NaN;
+    if (unbinned > 0) return { scaleLowArcsec: unbinned * binning * 0.9, scaleHighArcsec: unbinned * binning * 1.12 };
+  }
+  const focal = headerNumber(headers, 'FOCALLEN');
+  const pixel = headerNumber(headers, 'XPIXSZ', 'PIXSIZE1');
+  if (focal && pixel && focal > 0 && pixel > 0) {
+    const scale = 206.265 * pixel / focal;
+    return { scaleLowArcsec: scale * 0.85, scaleHighArcsec: scale * binning * 1.2 };
+  }
+  return null;
+}
+
 function fitsHeaderHint(headers: Record<string, string | number | boolean> | undefined): HintAttempt | null {
   if (!headers) return null;
   // Numeric RA values are degrees; sexagesimal strings (RA/OBJCTRA) are hours.
   const ra = parseCoordinate(headers.RA ?? headers.OBJCTRA ?? headers.CRVAL1, 'ra');
   const dec = parseCoordinate(headers.DEC ?? headers.OBJCTDEC ?? headers.CRVAL2, 'dec');
   if (ra === undefined || dec === undefined || !validPosition(ra, dec)) return null;
-  let scale = headerNumber(headers, 'PIXSCALE', 'SECPIX', 'SCALE');
-  const focal = headerNumber(headers, 'FOCALLEN');
-  const pixel = headerNumber(headers, 'XPIXSZ', 'PIXSIZE1');
-  const binning = headerNumber(headers, 'XBINNING') ?? 1;
-  if (!scale && focal && pixel) scale = 206.265 * pixel * binning / focal;
   // An existing WCS (observatory pipelines, earlier solves, stacks registered to a solved frame)
   // pins both scale and position, so search tightly around it.
-  const cd11 = headerNumber(headers, 'CD1_1');
-  const cd12 = headerNumber(headers, 'CD1_2') ?? 0;
-  const cd21 = headerNumber(headers, 'CD2_1') ?? 0;
-  const cd22 = headerNumber(headers, 'CD2_2');
-  const fromWcs = headers.CRVAL1 !== undefined && cd11 !== undefined && cd22 !== undefined;
-  if (fromWcs) scale = Math.sqrt(Math.abs(cd11! * cd22! - cd12 * cd21)) * 3600 || scale;
-  return {
-    label: fromWcs ? 'FITS header WCS' : 'FITS header pointing',
-    ra, dec, radiusDeg: fromWcs ? 1 : 3,
-    ...(scale ? { scaleLowArcsec: scale * (fromWcs ? 0.9 : 0.8), scaleHighArcsec: scale * (fromWcs ? 1.1 : 1.25) } : {}),
-  };
+  const fromWcs = headers.CRVAL1 !== undefined && headerNumber(headers, 'CD1_1') !== undefined && headerNumber(headers, 'CD2_2') !== undefined;
+  return { label: fromWcs ? 'FITS header WCS' : 'FITS header pointing', ra, dec, radiusDeg: fromWcs ? 1 : 3, ...(headerScale(headers) ?? {}) };
 }
 
-/** Finds M/NGC/IC designations in the title, filename, target and tags and resolves them in OpenNGC. */
-async function catalogHint(image: LocalImage): Promise<HintAttempt | null> {
-  const labels = [image.targetName, image.title, image.filename, ...(image.tags || [])].filter(Boolean) as string[];
+/** Text the image is known by, with separators (_ - .) turned into spaces so "m45_2026…" reads as "m45". */
+function nameLabels(image: LocalImage, headers?: Record<string, string | number | boolean>): string[] {
+  return [image.targetName, typeof headers?.OBJECT === 'string' ? headers.OBJECT : null, image.title, image.filename, ...(image.tags || [])]
+    .filter((label): label is string => Boolean(label && label.trim()))
+    .map(label => label.replace(/\.(fits?|fts|png|jpe?g|tiff?|gif|webp)$/i, '').replace(/[_\-.()[\],]+/g, ' ').trim());
+}
+
+/** M/NGC/IC designations in the labels, resolved in OpenNGC. */
+async function catalogHint(labels: string[]): Promise<HintAttempt | null> {
   const designations = new Set<string>();
   for (const label of labels) {
     for (const match of label.matchAll(/\b(NGC|IC|M)\s*0*(\d+)([A-Z]?)\b/gi)) {
@@ -151,9 +180,77 @@ async function catalogHint(image: LocalImage): Promise<HintAttempt | null> {
       .where(or(eq(schema.catalogObjects.name, designation), eq(schema.catalogObjects.messier, messier)))
       .execute();
     const row = (rows as Array<{ raDeg: number | null; decDeg: number | null }>).find(item => item.raDeg !== null && item.decDeg !== null);
-    if (row) return { label: `catalog target ${designation}`, ra: row.raDeg!, dec: row.decDeg!, radiusDeg: 3 };
+    if (row) return { label: `catalogue target ${designation}`, ra: row.raDeg!, dec: row.decDeg!, radiusDeg: 3 };
   }
   return null;
+}
+
+/** HD/HIP numbers and proper star names ("Algol…") resolved in the offline star catalogue. */
+export function starHint(labels: string[]): HintAttempt | null {
+  const catalog = loadSkyCatalog();
+  if (!catalog) return null;
+  const stars = catalog.stars;
+  for (const label of labels) {
+    for (const match of label.matchAll(/\b(HD|HIP)\s*0*(\d{1,6})\b/gi)) {
+      const number = Number(match[2]);
+      const column = match[1].toUpperCase() === 'HD' ? stars.hd : stars.hip;
+      const index = column.indexOf(number);
+      if (index >= 0) return { label: `star ${match[1].toUpperCase()} ${number}`, ra: stars.ra[index], dec: stars.dec[index], radiusDeg: 3 };
+    }
+  }
+  // Proper names at the start of a word ("algolbetapersei" → Algol), at least 4 letters.
+  // Only real words: random file-name ids ("ko6dnc") contain digits and are skipped.
+  const words = labels.flatMap(label => label.toLowerCase().split(/\s+/)).filter(word => word.length >= 4 && /^[a-z]+$/.test(word));
+  let best: { index: number; length: number } | null = null;
+  for (let index = 0; index < stars.count; index++) {
+    const name = stars.name[index];
+    if (!name) continue;
+    const compact = name.toLowerCase().replace(/[^a-z]/g, '');
+    if (compact.length >= 4 && words.some(word => word.startsWith(compact)) && (!best || compact.length > best.length)) best = { index, length: compact.length };
+  }
+  return best ? { label: `star ${stars.name[best.index]}`, ra: stars.ra[best.index], dec: stars.dec[best.index], radiusDeg: 3 } : null;
+}
+
+/** Coordinates written into a name, as surveys and Slooh do: "095102p115201", "J095102+115201". */
+export function coordinateNameHint(labels: string[]): HintAttempt | null {
+  for (const label of labels) {
+    const match = label.match(/(?:^|[^\d])J?(\d{2})(\d{2})(\d{2}(?:\.\d+)?)\s*([pm+-])\s*(\d{2})(\d{2})(\d{2}(?:\.\d+)?)(?!\d)/i);
+    if (!match) continue;
+    const ra = (Number(match[1]) + Number(match[2]) / 60 + Number(match[3]) / 3600) * 15;
+    const dec = (/[m-]/i.test(match[4]) ? -1 : 1) * (Number(match[5]) + Number(match[6]) / 60 + Number(match[7]) / 3600);
+    if (validPosition(ra, dec) && Number(match[2]) < 60 && Number(match[6]) < 60) return { label: `coordinates in the name (${match[0].trim()})`, ra, dec, radiusDeg: 2 };
+  }
+  return null;
+}
+
+/** Name resolution by CDS Sesame (SIMBAD/NED/VizieR) for names the offline catalogues do not know, e.g. "barnard33". */
+async function sesameHint(labels: string[]): Promise<HintAttempt | null> {
+  if (process.env.ASTROVIABIN_ONLINE_CATALOGS === 'false') return null;
+  const names = new Set<string>();
+  for (const label of labels.slice(0, 3)) {
+    const first = label.split(/\s+/)[0];
+    if (!first || /^\d+$/.test(first) || first.length < 3) continue;
+    names.add(first.replace(/([a-z])(\d)/gi, '$1 $2'));
+  }
+  for (const name of names) {
+    try {
+      const response = await fetch(`https://cds.unistra.fr/cgi-bin/nph-sesame/-oI/A?${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(8000) });
+      const match = (await response.text()).match(/^%J\s+([\d.]+)\s+([+-]?[\d.]+)/m);
+      if (match && validPosition(Number(match[1]), Number(match[2]))) return { label: `name "${name}" (CDS Sesame)`, ra: Number(match[1]), dec: Number(match[2]), radiusDeg: 3 };
+    } catch { /* offline or unknown name */ }
+  }
+  return null;
+}
+
+/** Other frames of the same session (same "<target>_<date>" file-name prefix) that are already solved. */
+async function siblingHint(image: LocalImage): Promise<HintAttempt | null> {
+  const prefix = (image.filename || '').toLowerCase().split('_').slice(0, 2).join('_');
+  if (!/^[a-z0-9+-]{2,}_\d{6,8}$/.test(prefix)) return null;
+  const solved = await storage.getAstroImages({ plateSolved: true });
+  const sibling = solved.find(other => other.id !== image.id && (other.filename || '').toLowerCase().startsWith(`${prefix}_`) && other.ra && other.dec);
+  if (!sibling) return null;
+  const ra = Number(sibling.ra), dec = Number(sibling.dec);
+  return validPosition(ra, dec) ? { label: `same session as image ${sibling.id}`, ra, dec, radiusDeg: 2 } : null;
 }
 
 async function hintAttempts(image: LocalImage, source: SolveSource, userHint?: SolveHint): Promise<HintAttempt[]> {
@@ -169,17 +266,30 @@ async function hintAttempts(image: LocalImage, source: SolveSource, userHint?: S
   }
   const header = fitsHeaderHint(source.headers);
   if (header) attempts.push(header);
-  const catalog = await catalogHint(image).catch(() => null);
-  if (catalog) attempts.push(catalog);
+  // Names only say where to look first: every hinted attempt must still be verified by
+  // Astrometry.net's star matching, and when none verifies the blind search runs as usual.
+  const labels = nameLabels(image, source.headers);
+  for (const hint of [await siblingHint(image).catch(() => null), await catalogHint(labels).catch(() => null), starHint(labels),
+    coordinateNameHint(labels)]) {
+    if (hint) attempts.push(hint);
+  }
+  if (attempts.length === 0) {
+    const online = await sesameHint(labels).catch(() => null);
+    if (online) attempts.push(online);
+  }
+  // Every hint also gets the header's pixel scale when it has none of its own.
+  const scale = headerScale(source.headers);
   const unique: HintAttempt[] = [];
   for (const attempt of attempts) {
-    if (!unique.some(item => Math.abs(item.ra - attempt.ra) < 0.05 && Math.abs(item.dec - attempt.dec) < 0.05)) unique.push(attempt);
+    if (!unique.some(item => Math.abs(item.ra - attempt.ra) < 0.05 && Math.abs(item.dec - attempt.dec) < 0.05)) {
+      unique.push(attempt.scaleLowArcsec ? attempt : { ...attempt, ...(scale ?? {}) });
+    }
   }
-  return unique.slice(0, 3);
+  return unique.slice(0, 4);
 }
 
 function indexDirectories(): string[] {
-  const extra = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(':').filter(Boolean);
+  const extra = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(path.delimiter).filter(Boolean);
   return [path.resolve(process.env.ASTROMETRY_INDEX_DIR || '/usr/share/astrometry'), ...extra.map(dir => path.resolve(dir))];
 }
 
@@ -281,7 +391,7 @@ async function solveFieldAttempt(
     args.push('--downsample', String(Math.max(source.width, source.height) > 4000 ? 4 : 2));
   }
   const hint = options.hint;
-  if (hint) args.push('--ra', String(hint.ra), '--dec', String(hint.dec), '--radius', String(hint.radiusDeg ?? 3));
+  if (hint && Number.isFinite(hint.ra) && Number.isFinite(hint.dec)) args.push('--ra', String(hint.ra), '--dec', String(hint.dec), '--radius', String(hint.radiusDeg ?? 3));
   if (hint?.scaleLowArcsec && hint.scaleHighArcsec) {
     args.push('--scale-units', 'arcsecperpix', '--scale-low', String(hint.scaleLowArcsec), '--scale-high', String(hint.scaleHighArcsec));
   } else {
@@ -336,9 +446,15 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
     const xylist = await extractStars(source, workDirectory);
     const hints = await hintAttempts(image, source, options.hint);
     const attempts: Array<{ label: string; xylist: string | null; hint?: HintAttempt; budgetMs: number }> = [];
-    const hintBudget = Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 120_000);
+    const hintBudget = Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 90_000);
     for (const hint of hints) {
       attempts.push({ label: `${hint.label} (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist, hint, budgetMs: hintBudget });
+    }
+    const scale = headerScale(source.headers);
+    if (scale) {
+      // Position unknown but the scale is: a blind search over one field size is far faster.
+      attempts.push({ label: `blind at the header scale (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist,
+        hint: { label: 'header scale', ra: Number.NaN, dec: Number.NaN, ...scale }, budgetMs: 300_000 });
     }
     attempts.push({ label: `blind (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist, budgetMs: Infinity });
     if (xylist) attempts.push({ label: 'blind (solve-field extraction)', xylist: null, budgetMs: Infinity });

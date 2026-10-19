@@ -29,6 +29,16 @@ export const analysisRequestSchema = z.object({
 });
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
 
+/** The Python with the analysis stack (astropy, photutils…). */
+function analysisPython(): string {
+  return process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python';
+}
+
+/** A HOTPANTS helper program from HOTPANTS_BIN_DIR (the Docker image installs them in /usr/local/bin). */
+function hotpantsTool(name: string): string {
+  return path.join(process.env.HOTPANTS_BIN_DIR || '/usr/local/bin', process.platform === 'win32' ? `${name}.exe` : name);
+}
+
 const root = () => path.resolve(process.env.FITS_ANALYSIS_DIR || (process.env.NODE_ENV === 'production' ? '/app/fits-analysis' : './data/fits-analysis'));
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILES = new Set(['science.fits', 'reference.fits', 'reference-aligned.fits', 'reference-mask.fits', 'difference.fits', 'difference-candidates.fits', 'difference-candidates.reg', 'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log', 'kernel.fits', 'kernel-stamps.txt', 'noise-scaled.fits']);
@@ -201,7 +211,7 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
   await writeJson(path.join(directory, 'config.json'), config);
   running.set(activeKey, runId);
   const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
-  const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
+  const child = spawn(analysisPython(),
     [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   let errors = '';
@@ -306,7 +316,7 @@ export async function checkHotpantsCandidate(
   try {
     const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
       const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
-      const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
+      const child = spawn(analysisPython(),
         [script, path.join(work, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '';
       let stderr = '';
@@ -347,7 +357,7 @@ export async function buildVerification(imageId: number, runId: string): Promise
     const image = await storage.getAstroImage(imageId);
     const script = process.env.HOTPANTS_REPORT_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_report.py');
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python',
+      const child = spawn(analysisPython(),
         [script, directory, image?.title || `FITS #${imageId}`], { stdio: ['ignore', 'ignore', 'pipe'] });
       let errors = '';
       child.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-6000); });
@@ -447,7 +457,7 @@ export async function runAnalysisHelper(imageId: number, runId: string, request:
       args.push('-xy', String(request.x), String(request.y));
     } else if (request.mode === 'full') {
       const lattice = path.join(directory, 'kernel-lattice.fits');
-      await runHelper('/usr/bin/python3', [path.resolve(process.cwd(), 'tools/scripts/hotpants_aux.py'),
+      await runHelper(analysisPython(), [path.resolve(process.cwd(), 'tools/scripts/hotpants_aux.py'),
         'lattice', path.join(directory, 'difference.fits'), lattice]);
       args.push('-im', lattice);
     }
@@ -456,10 +466,10 @@ export async function runAnalysisHelper(imageId: number, runId: string, request:
       args.push('-im', path.join(directory, request.imageLayer));
     }
     args.push(path.join(directory, 'difference.fits'), output);
-    await runHelper('/usr/local/bin/extractkern-ones', args);
-    await runHelper('/usr/bin/python3', [path.resolve(process.cwd(), 'tools/scripts/hotpants_aux.py'), 'validate', output]);
+    await runHelper(hotpantsTool('extractkern-ones'), args);
+    await runHelper(analysisPython(), [path.resolve(process.cwd(), 'tools/scripts/hotpants_aux.py'), 'validate', output]);
   } else {
-    await runHelper('/usr/local/bin/maskim', ['-inim', path.join(directory, request.imageLayer),
+    await runHelper(hotpantsTool('maskim'), ['-inim', path.join(directory, request.imageLayer),
       '-maskim', path.join(directory, 'bad-pixels.fits'), '-outim', output,
       '-fi', String(request.fillValue), '-mask', String(request.mask)]);
   }

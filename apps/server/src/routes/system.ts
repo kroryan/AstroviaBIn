@@ -54,7 +54,7 @@ export default function systemRoutes(wsManager?: WsManager) {
   // Astrometry.net software and index-data notices as installed in the image (Debian copyright
   // files) plus the 4200-series index license kept next to any extra downloaded index files.
   app.get('/licenses/astrometry/:document', async c => {
-    const extraIndexDir = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(':').filter(Boolean)[0];
+    const extraIndexDir = (process.env.ASTROMETRY_EXTRA_INDEX_DIRS ?? '/app/config/astrometry-index').split(path.delimiter).filter(Boolean)[0];
     const documents: Record<string, string> = {
       software: '/usr/share/doc/astrometry.net/copyright',
       'index-2mass': '/usr/share/doc/astrometry-data-2mass-08-19/copyright',

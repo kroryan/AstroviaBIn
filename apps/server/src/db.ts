@@ -58,6 +58,7 @@ async function initializeDatabase() {
       const sqliteSchema = await import('@shared/db/sqlite-schema');
 
       sqliteDbPath = dbPath;
+      if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
       const sqlite = new Database(dbPath);
       schema = sqliteSchema;
       db = sqliteDrizzle(sqlite, { schema });
@@ -72,7 +73,9 @@ async function initializeDatabase() {
       }
     } catch (error) {
       throw new Error(
-        'No database configuration found. Please set DATABASE_URL environment variable for PostgreSQL connection.'
+        `The SQLite database could not be opened (${error instanceof Error ? error.message : String(error)}). ` +
+        'Check SQLITE_DB_PATH and its folder permissions, or set DATABASE_URL for PostgreSQL.',
+        { cause: error },
       );
     }
   }
