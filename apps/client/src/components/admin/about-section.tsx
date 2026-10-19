@@ -117,9 +117,11 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">Reference surveys</h3>
-        <p className="text-muted-foreground">Automatic HOTPANTS references can use DSS2 through NASA SkyView or Pan-STARRS1 DR2 r-band stacks through STScI/MAST. Only sky coordinates and cutout parameters are sent; your image, FITS, and thumbnails stay local. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25 arcminutes. Survey imagery retains its provider's rights and citation requirements. Analysis results are candidates, not verified discoveries.</p>
+        <p className="text-muted-foreground">Automatic HOTPANTS references can use DSS1/DSS2, SDSS and 2MASS through NASA SkyView, Pan-STARRS1 DR2 g/r/i/z/y stacks through STScI/MAST, and DESI Legacy Imaging Surveys DR10 g/r/i/z cutouts through the Legacy Surveys viewer. This work can use data from the Pan-STARRS1 Surveys, the Sloan Digital Sky Survey, the Two Micron All Sky Survey and the DESI Legacy Imaging Surveys; follow each provider's acknowledgement requirements when publishing results. Only sky coordinates and cutout parameters are sent; your image, FITS, and thumbnails stay local. Pan-STARRS stack coverage is primarily north of Dec −30° and cutouts are limited to about 25 arcminutes. Survey imagery retains its provider's rights and citation requirements. Analysis results are candidates, not verified discoveries.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://skyview.gsfc.nasa.gov/current/docs/credits.html" target="_blank" rel="noreferrer">SkyView credits and survey acknowledgements</a>
+          <a className="text-primary underline" href="https://www.legacysurvey.org/acknowledgment/" target="_blank" rel="noreferrer">Legacy Surveys acknowledgement</a>
+          <a className="text-primary underline" href="https://panstarrs.stsci.edu/" target="_blank" rel="noreferrer">Pan-STARRS1 at MAST</a>
           <a className="text-primary underline" href="https://outerspace.stsci.edu/pages/viewpage.action?pageId=392364125" target="_blank" rel="noreferrer">Pan-STARRS image cutout documentation</a>
         </div>
       </div>
