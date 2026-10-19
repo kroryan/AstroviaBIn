@@ -73,7 +73,7 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
 
   return (
     <div className="mb-4 space-y-2">
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="flex flex-wrap items-center gap-2 pb-1">
         <Library className="h-4 w-4 text-muted-foreground shrink-0" />
         <button className={chip(!selectedId)} onClick={() => onSelect(undefined)}>All images</button>
         {catalogs.map(catalog => (

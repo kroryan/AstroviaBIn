@@ -7,12 +7,13 @@ import { angularDistanceDegrees } from './wcs';
 /**
  * Automatic gallery catalogs:
  *  - planets, Sun, Moon and other Solar System frames go to one "Solar System" catalog;
- *  - plate-solved images of the same field — overlapping solutions or the same identified target
- *    (mosaic panels, a moving asteroid's fields) — share a catalog named after the target.
+ *  - every plate-solved image gets the catalog of its field — overlapping solutions or the same
+ *    identified target (mosaic panels, a moving asteroid's fields) share it, and a field seen once
+ *    gets its own catalog that later images of that field join.
  *
  * Only images that are in no catalog yet are added, so manual organisation is never undone:
- * when some images of a field are already in one of the user's catalogs, the rest join it. An
- * image with no solved companion stays loose until another image of its field arrives.
+ * when some images of a field are already in one of the user's catalogs, the rest join it.
+ * Unsolved images stay loose until they are solved.
  */
 
 export const SOLAR_SYSTEM_CATALOG = 'Solar System';
@@ -26,6 +27,7 @@ export interface FieldImage {
   size: number;
   target: string | null;
   constellation: string | null;
+  title?: string | null;
 }
 
 /** "29.8' × 29.8'" (or degrees/arcsec) → largest dimension in degrees. */
@@ -77,14 +79,56 @@ function mostCommon<T>(values: T[]): T | undefined {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 
-/** "M 42 (NGC 1976)" when the target is a Messier object, the target name otherwise, or the field position. */
-async function clusterName(members: FieldImage[]): Promise<string> {
+/** A user-given title without the file extension and site/copy suffixes, or null for generic file names. */
+export function descriptiveTitle(title: string | null | undefined, constellation?: string | null): string | null {
+  const cleaned = (title ?? '')
+    .replace(/\.(png|jpe?g|gif|tiff?|fits?|fts|webp|heic|xisf)$/i, '')
+    .replace(/\s+canarias$/i, '')
+    .replace(/\s+\d{1,2}$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length < 3 || cleaned.length > 60 || !/[a-zà-ÿ]/i.test(cleaned)) return null;
+  // Camera/observatory file names and coordinate dumps are not names.
+  if (/^coordenadas|^celestial coordinates|_|\d{5,}/i.test(cleaned)) return null;
+  if (constellation && cleaned.toLowerCase() === constellation.toLowerCase()) return null;
+  return cleaned;
+}
+
+function compact(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** Whether a title names the target itself (its designation, "M 42", "Messier 42"). */
+export function titleReferencesTarget(title: string, target: string, messier?: string | null): boolean {
+  const name = compact(title);
+  const designations = [compact(target)];
+  const number = messier?.match(/\d+/)?.[0];
+  if (number) designations.push(`m${number}`, `messier${number}`);
+  return designations.some(designation => designation.length >= 2 && name.includes(designation));
+}
+
+/**
+ * Catalog name for a field: the identified target ("M 42 (NGC 1976)") when an image title names
+ * it or no title is descriptive; otherwise the user's own title ("Tau Canis Majoris"), since the
+ * identified target can be an incidental object in the field; else the field position.
+ */
+export async function clusterName(members: FieldImage[]): Promise<string> {
   const target = mostCommon(members.map(member => member.target?.trim()).filter((value): value is string => Boolean(value)));
+  let messier: string | null = null;
   if (target) {
     const rows = await db.select({ name: schema.catalogObjects.name, messier: schema.catalogObjects.messier })
       .from(schema.catalogObjects).where(inArray(schema.catalogObjects.name, [target])).execute() as Array<{ name: string; messier: string | null }>;
-    const messier = rows[0]?.messier?.trim();
-    return messier ? `${messier} (${target})` : target;
+    messier = rows[0]?.messier?.trim() || null;
+  }
+  const titles = members.map(member => descriptiveTitle(member.title, member.constellation)).filter((value): value is string => Boolean(value));
+  const targetName = target ? (messier ? `${messier} (${target})` : target) : null;
+  if (targetName && (!titles.length || members.some(member => member.title && titleReferencesTarget(member.title, target!, messier)))) {
+    return targetName;
+  }
+  if (titles.length) {
+    const counts = new Map<string, number>();
+    for (const title of titles) counts.set(title, (counts.get(title) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)[0][0];
   }
   const ra = members.reduce((sum, member) => sum + member.ra, 0) / members.length;
   const dec = members.reduce((sum, member) => sum + member.dec, 0) / members.length;
@@ -94,17 +138,29 @@ async function clusterName(members: FieldImage[]): Promise<string> {
   return `${constellation ? `${constellation} field` : 'Field'} ${String(hours).padStart(2, '0')}h${String(minutes).padStart(2, '0')} ${dec >= 0 ? '+' : '−'}${Math.abs(Math.round(dec))}°`;
 }
 
-async function catalogNamed(name: string, description: string): Promise<{ id: number; created: boolean }> {
-  const existing = await storage.getGalleryCatalogByName(name);
-  if (existing) return { id: existing.id, created: false };
-  return { id: (await storage.createGalleryCatalog({ name, description })).id, created: true };
+/**
+ * A catalog with this name: the user's own catalog of that name is reused; an automatic one only
+ * when it holds images of the same field (`members`), otherwise a numbered name is used so two
+ * different fields that happen to share a title are never mixed.
+ */
+async function catalogNamed(name: string, description: string, members: number[] = [], catalogsOf?: Map<number, number[]>): Promise<{ id: number; created: boolean; name: string }> {
+  for (let suffix = 1; suffix < 100; suffix++) {
+    const candidate = suffix === 1 ? name : `${name} (${suffix})`;
+    const existing = await storage.getGalleryCatalogByName(candidate);
+    if (!existing) return { id: (await storage.createGalleryCatalog({ name: candidate, description })).id, created: true, name: candidate };
+    const automatic = existing.description === AUTO_DESCRIPTION;
+    if (!automatic || !catalogsOf || members.some(id => catalogsOf.get(id)?.includes(existing.id))) {
+      return { id: existing.id, created: false, name: candidate };
+    }
+  }
+  throw new Error(`Too many catalogs named ${name}`);
 }
 
 /**
  * Classifies the whole gallery, or only the group of `imageId` (after it is solved or tagged).
  * Returns how many images were added and which catalogs were created.
  */
-export async function classifyGallery(options: { imageId?: number } = {}): Promise<{ added: number; created: string[] }> {
+export async function classifyGallery(options: { imageId?: number } = {}): Promise<{ added: number; created: string[]; renamed: string[] }> {
   const images = await storage.getAstroImages();
   const memberships = await db.select({ catalogId: schema.galleryCatalogImages.catalogId, imageId: schema.galleryCatalogImages.imageId })
     .from(schema.galleryCatalogImages).execute() as Array<{ catalogId: number; imageId: number }>;
@@ -113,6 +169,7 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
   const loose = (id: number) => !catalogsOf.has(id);
   let added = 0;
   const created: string[] = [];
+  const renamed: string[] = [];
 
   const solar = images.filter(image => isSolarSystemTagged(image.tags) && loose(image.id)
     && (options.imageId === undefined || image.id === options.imageId)).map(image => image.id);
@@ -126,11 +183,10 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
     const ra = Number(image.ra), dec = Number(image.dec);
     const size = fieldSizeDegrees(image.fieldOfView);
     if (!image.plateSolved || isSolarSystemTagged(image.tags) || !image.ra || !image.dec || !Number.isFinite(ra) || !Number.isFinite(dec) || !size) return [];
-    return [{ id: image.id, ra, dec, size, target: image.targetName ?? null, constellation: image.constellation ?? null }];
+    return [{ id: image.id, ra, dec, size, target: image.targetName ?? null, constellation: image.constellation ?? null, title: image.title }];
   });
   const byId = new Map(fields.map(field => [field.id, field]));
   for (const group of clusterFields(fields)) {
-    if (group.length < 2) continue;
     if (options.imageId !== undefined && !group.includes(options.imageId)) continue;
     // Join the catalog that already holds most of this field's images (the user's naming wins).
     const existing = mostCommon(group.flatMap(id => catalogsOf.get(id) ?? []));
@@ -142,13 +198,28 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
     if (!toAdd.length) continue;
     let catalogId = existing;
     if (catalogId === undefined) {
-      const name = await clusterName(group.map(id => byId.get(id)!));
-      const catalog = await catalogNamed(name, AUTO_DESCRIPTION);
-      if (catalog.created) created.push(name);
+      const catalog = await catalogNamed(await clusterName(group.map(id => byId.get(id)!)), AUTO_DESCRIPTION, group, catalogsOf);
+      if (catalog.created) created.push(catalog.name);
       catalogId = catalog.id;
     }
     added += await storage.addImagesToGalleryCatalog(catalogId, toAdd);
     for (const id of toAdd) catalogsOf.set(id, [catalogId]);
   }
-  return { added, created };
+  // Automatic catalogs still carrying a generated position name get a better name once one exists
+  // (a descriptive title or an identified target). A name the user typed is never changed.
+  if (options.imageId === undefined) {
+    for (const catalog of await storage.getGalleryCatalogs()) {
+      if (catalog.description !== AUTO_DESCRIPTION || !GENERATED_FIELD_NAME.test(catalog.name)) continue;
+      const members = catalog.imageIds.map(id => byId.get(id)).filter((member): member is FieldImage => Boolean(member));
+      if (!members.length) continue;
+      const name = await clusterName(members);
+      if (name !== catalog.name && !GENERATED_FIELD_NAME.test(name) && !await storage.getGalleryCatalogByName(name)) {
+        await storage.updateGalleryCatalog(catalog.id, { name });
+        renamed.push(`${catalog.name} → ${name}`);
+      }
+    }
+  }
+  return { added, created, renamed };
 }
+
+const GENERATED_FIELD_NAME = /^(?:[A-Za-z ]+ )?field \d{2}h\d{2} [+−]\d+°$/;

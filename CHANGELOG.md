@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (gallery)
 - Automatic gallery catalogs: plate-solved images of the same field (overlapping solutions) or the same identified target (mosaic panels, a moving asteroid) are filed together in a catalog named after the target (e.g. "M 42 (NGC 1976)"), and planets, Sun and Moon go to a "Solar System" catalog. Runs after every plate solve, when an image is tagged as Solar System, and from the new "Auto-classify" button. Only images in no catalog are filed: when part of a field is already in one of your catalogs the rest joins it, and images you take out by hand are not put back. A field with a single image stays loose until a second one arrives.
+- Every plate-solved image now gets an album, even when it is the only image of its field; later images of that field join it. Albums are named after a descriptive image title (e.g. "Tau Canis Majoris") unless a title names the identified target ("M 42 (NGC 1976)"), since the identified target can be an incidental object in the field; generated position names are replaced once a better name exists, never a name you typed.
+- Compact gallery: albums, unclassified images and album contents use the same small square tiles (about a third of the previous width), laid out so only whole tiles fit on each row; FITS/WCS status shows as small chips on the thumbnail and the catalog bar wraps instead of scrolling.
 - The gallery shows catalogs as folders with only the unclassified images below ("Group by catalog", on by default); searching or filtering lists matching images flat. Stacks inherit the reference frame's tags and target and are queued for plate solving.
 
 ### Fixed (stacking)
