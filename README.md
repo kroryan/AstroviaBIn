@@ -15,7 +15,10 @@
 AstroviaBin is a fork of [Sidereal](https://github.com/sidereal-io/sidereal) (MIT). It does **not** require Immich or an Astrometry.net account; existing Immich assets can be migrated, but new uploads go directly to AstroviaBin. Original photos and FITS are never submitted to an external plate-solving service.
 
 <div align="center">
-  <img width="90%" src="assets/images/screenshots/01_gallery.png" alt="AstroviaBin gallery" />
+  <img width="90%" src="assets/images/screenshots/02_admin_users.png" alt="AstroviaBin admin: users and roles" />
+  <br/><br/>
+  <img width="44%" src="assets/images/screenshots/01_login.png" alt="AstroviaBin sign-in" />
+  <img width="44%" src="assets/images/screenshots/03_about_notices.png" alt="AstroviaBin third-party notices" />
   <br/>
   <a href="assets/images/screenshots">View all screenshots</a>
 </div>
