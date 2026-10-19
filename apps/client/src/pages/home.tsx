@@ -4,6 +4,8 @@ import { Header } from "@/components/header";
 import { SearchFilters } from "@/components/search-filters";
 import { ImageGallery, isFitsImage } from "@/components/image-gallery";
 import { SOLAR_SYSTEM_SECTIONS, solarSystemSection } from "@shared/solar-system";
+import { groupByDateAndFilter } from "@shared/fits-groups";
+import { formatDayHeading } from "@/lib/datetime";
 import { Sidebar } from "@/components/sidebar";
 import { ImageOverlay } from "@/components/image-overlay";
 import { GalleryCatalogBar } from "@/components/gallery-catalog-bar";
@@ -187,15 +189,28 @@ export default function Home() {
                   <h2 className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
                     {section.name} ({section.images.length})
                   </h2>
-                  <ImageGallery
-                    images={section.images}
-                    equipment={[]}
-                    onImageClick={(image) => {
-                      setSelectedImage(image);
-                      setLocation(`/?image=${image.id}`, { replace: true });
-                    }}
-                    isLoading={false}
-                  />
+                  {section.name === "FITS" ? groupByDateAndFilter(section.images).map(day => (
+                    <div key={day.date ?? "unknown"} className="mb-4 border-l-2 border-primary/40 pl-3">
+                      <h3 className="mb-2 text-xs font-semibold text-foreground">{formatDayHeading(day.date)} <span className="font-normal text-muted-foreground">· {day.count} frame{day.count === 1 ? "" : "s"}</span></h3>
+                      {day.filters.map(group => (
+                        <div key={group.filter.code} className="mb-3">
+                          <h4 className="mb-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{group.filter.label} ({group.frames.length})</h4>
+                          <ImageGallery images={group.frames} equipment={[]} showTime isLoading={false}
+                            onImageClick={(image) => { setSelectedImage(image); setLocation(`/?image=${image.id}`, { replace: true }); }} />
+                        </div>
+                      ))}
+                    </div>
+                  )) : (
+                    <ImageGallery
+                      images={section.images}
+                      equipment={[]}
+                      onImageClick={(image) => {
+                        setSelectedImage(image);
+                        setLocation(`/?image=${image.id}`, { replace: true });
+                      }}
+                      isLoading={false}
+                    />
+                  )}
                 </section>
               ))
             ) : showFolders && catalogued.size > 0 && !imagesLoading && listedImages.length === 0 ? (

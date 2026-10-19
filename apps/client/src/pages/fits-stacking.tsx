@@ -15,7 +15,9 @@ import type { GalleryCatalogSummary } from '@/components/gallery-catalog-picker'
 
 type StackFrameReport = { name: string; used: boolean; method?: string; matchedStars?: number; rmsPx?: number | null; dx?: number; dy?: number; reason?: string };
 type StackResponse = { frameCount: number; frames?: StackFrameReport[]; warnings?: string[] };
-import { formatDate } from "@/lib/datetime";
+import { formatDayHeading, formatTime } from "@/lib/datetime";
+import { filterInfo, groupByDateAndFilter } from "@shared/fits-groups";
+import { GALLERY_GRID } from "@/components/image-gallery";
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 /** Frame size as written by the FITS importer into the description ("FITS 9576×6388 · mono · 16-bit"). */
@@ -78,6 +80,32 @@ export default function FitsStackingPage() {
   const toggle = (id: number) => setSelected(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
   const makeReference = (id: number) => setSelected(previous => [id, ...previous.filter(item => item !== id)]);
   const addAll = (ids: number[]) => setSelected(previous => [...previous, ...ids.filter(id => !previous.includes(id))]);
+  const only = (ids: number[]) => setSelected(ids);
+
+  // Frames of the same field (plate solutions close together share an album) → night → filter.
+  const fieldGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; name: string; frames: AstroImage[]; unsolved: boolean }>();
+    for (const image of visible) {
+      const catalog = catalogs.find(item => item.name !== 'Solar System' && item.imageIds?.includes(image.id))
+        ?? catalogs.find(item => item.imageIds?.includes(image.id));
+      const key = catalog ? `catalog-${catalog.id}` : 'unclassified';
+      const group = groups.get(key) ?? { key, name: catalog?.name ?? 'Not classified yet', frames: [], unsolved: !catalog };
+      group.frames.push(image);
+      groups.set(key, group);
+    }
+    const latest = (frames: AstroImage[]) => Math.max(...frames.map(image => image.captureDate ? new Date(image.captureDate).getTime() : 0));
+    return [...groups.values()].sort((a, b) => Number(a.unsolved) - Number(b.unsolved) || latest(b.frames) - latest(a.frames));
+  }, [visible, catalogs]);
+
+  // The server refuses stacks that mix filters; say so before submitting.
+  const selectedFilters = [...new Set(selected.map(id => filterInfo(byId.get(id)?.filters).code))];
+
+  const GroupButtons = ({ ids }: { ids: number[] }) => (
+    <span className="ml-auto flex gap-1" onClick={event => event.preventDefault()}>
+      <button type="button" className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground" onClick={() => addAll(ids)} title="Add these frames to the selection">+ select</button>
+      <button type="button" className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground" onClick={() => only(ids)} title="Select only these frames">only these</button>
+    </span>
+  );
 
   const stackMutation = useMutation<StackResponse>({
     mutationFn: async () => {
@@ -172,6 +200,12 @@ export default function FitsStackingPage() {
                 })}
               </div>
             )}
+            {selectedFilters.length > 1 && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>The selection mixes filters ({selectedFilters.join(', ')}). Stack one filter at a time — e.g. use “only these” on a filter group.</AlertDescription>
+              </Alert>
+            )}
             {mismatched.length > 0 && (
               <Alert>
                 <AlertCircle className="h-4 w-4" />
@@ -231,7 +265,7 @@ export default function FitsStackingPage() {
             <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
               <Button
                 onClick={() => stackMutation.mutate()}
-                disabled={!canEdit || selected.length < 2 || (mismatched.length > 0 && !register) || stackMutation.isPending || !outputName.trim()}
+                disabled={!canEdit || selected.length < 2 || selectedFilters.length > 1 || (mismatched.length > 0 && !register) || stackMutation.isPending || !outputName.trim()}
                 className="sky-button-primary"
               >
                 {stackMutation.isPending ? <Loader className="mr-2 h-4 w-4 animate-spin" /> : <Layers className="mr-2 h-4 w-4" />}
@@ -266,53 +300,82 @@ export default function FitsStackingPage() {
           </Card>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-          {visible.map(image => {
-            const position = selected.indexOf(image.id);
-            const isSelected = position >= 0;
-            const size = frameSize(image);
-            const sizeMismatch = Boolean(referenceSize && size && size !== referenceSize);
-            return (
-              <Card
-                key={image.id}
-                className={`cursor-pointer transition-all hover:shadow-md overflow-hidden ${isSelected ? 'ring-2 ring-primary' : ''} ${sizeMismatch && !isSelected ? 'opacity-50' : ''}`}
-                onClick={() => toggle(image.id)}
-                title={sizeMismatch ? `Different size from the reference (${size} vs ${referenceSize})` : undefined}
-              >
-                <CardContent className="p-0">
-                  <div className="relative">
-                    <div className="aspect-square bg-muted flex items-center justify-center">
-                      {image.thumbnailUrl ? <img src={image.thumbnailUrl} alt={image.title} loading="lazy" className="w-full h-full object-cover" /> : <Info className="h-6 w-6 text-muted-foreground" />}
-                    </div>
-                    <div className="absolute top-2 left-2 flex items-center gap-1">
-                      <Checkbox checked={isSelected} onClick={event => event.stopPropagation()} onCheckedChange={() => toggle(image.id)} className="bg-white/90" />
-                      {isSelected && (
-                        <span className={`text-xs font-bold rounded px-1 ${position === 0 ? 'bg-yellow-400 text-black' : 'bg-black/70 text-white'}`}>
-                          {position === 0 ? '★ ref' : position + 1}
-                        </span>
-                      )}
-                    </div>
-                    {isSelected && position > 0 && (
-                      <button
-                        className="absolute top-2 right-2 text-[10px] bg-black/70 text-white rounded px-1 hover:bg-black"
-                        onClick={event => { event.stopPropagation(); makeReference(image.id); }}
-                        title="Use this frame as the alignment reference"
-                      >
-                        ★ make ref
-                      </button>
-                    )}
-                    <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
-                      <p className="text-xs text-white truncate">{image.title}</p>
-                      <p className="text-[10px] text-gray-300 truncate">
-                        {[size, image.filters, image.exposureTime, image.captureDate ? formatDate(image.captureDate) : null].filter(Boolean).join(' · ')}
-                      </p>
-                    </div>
+        {fieldGroups.map(field => (
+          <details key={field.key} open className="rounded-lg border border-border bg-card/40 p-3">
+            <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm">
+              <Library className="h-4 w-4 text-primary" />
+              <span className="font-semibold">{field.name}</span>
+              <span className="text-xs text-muted-foreground">{field.frames.length} frame{field.frames.length === 1 ? '' : 's'}{field.unsolved ? ' · not plate-solved or not classified yet' : ''}</span>
+              <GroupButtons ids={field.frames.map(image => image.id)} />
+            </summary>
+            <div className="mt-3 space-y-3">
+              {groupByDateAndFilter(field.frames).map(day => (
+                <div key={day.date ?? 'unknown'} className="border-l-2 border-primary/40 pl-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-semibold text-foreground">{formatDayHeading(day.date)}</span>
+                    <span className="text-muted-foreground">{day.count} frame{day.count === 1 ? '' : 's'} · {day.filters.map(group => `${group.frames.length}×${group.filter.code}`).join(' ')}</span>
+                    <GroupButtons ids={day.filters.flatMap(group => group.frames.map(image => image.id))} />
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  {day.filters.map(group => (
+                    <div key={group.filter.code} className="mb-3">
+                      <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{group.filter.label} ({group.frames.length})</span>
+                        <GroupButtons ids={group.frames.map(image => image.id)} />
+                      </div>
+                      <div className={GALLERY_GRID}>
+                        {group.frames.map(image => {
+            const position = selected.indexOf(image.id);
+                          const isSelected = position >= 0;
+                          const size = frameSize(image);
+                          const sizeMismatch = Boolean(referenceSize && size && size !== referenceSize);
+                          return (
+                            <Card
+                              key={image.id}
+                              className={`cursor-pointer transition-all hover:shadow-md overflow-hidden ${isSelected ? 'ring-2 ring-primary' : ''} ${sizeMismatch && !isSelected ? 'opacity-50' : ''}`}
+                              onClick={() => toggle(image.id)}
+                              title={sizeMismatch ? `Different size from the reference (${size} vs ${referenceSize})` : undefined}
+                            >
+                              <CardContent className="p-0">
+                                <div className="relative">
+                                  <div className="aspect-square bg-muted flex items-center justify-center">
+                                    {image.thumbnailUrl ? <img src={image.thumbnailUrl} alt={image.title} loading="lazy" className="w-full h-full object-cover" /> : <Info className="h-6 w-6 text-muted-foreground" />}
+                                  </div>
+                                  <div className="absolute top-2 left-2 flex items-center gap-1">
+                                    <Checkbox checked={isSelected} onClick={event => event.stopPropagation()} onCheckedChange={() => toggle(image.id)} className="bg-white/90" />
+                                    {isSelected && (
+                                      <span className={`text-xs font-bold rounded px-1 ${position === 0 ? 'bg-yellow-400 text-black' : 'bg-black/70 text-white'}`}>
+                                        {position === 0 ? '★ ref' : position + 1}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {isSelected && position > 0 && (
+                                    <button
+                                      className="absolute top-2 right-2 text-[10px] bg-black/70 text-white rounded px-1 hover:bg-black"
+                                      onClick={event => { event.stopPropagation(); makeReference(image.id); }}
+                                      title="Use this frame as the alignment reference"
+                                    >
+                                      ★ make ref
+                                    </button>
+                                  )}
+                                  <div className="absolute bottom-0 inset-x-0 bg-black/60 px-2 py-1">
+                                    <p className="text-xs text-white truncate">{image.title}</p>
+                                    <p className="text-[10px] text-gray-300 truncate">
+                                      {[image.captureDate ? formatTime(image.captureDate) : null, image.exposureTime, size, image.originalPath?.startsWith('fits-derived://') ? 'stack' : null].filter(Boolean).join(' · ')}
+                                    </p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </details>
+        ))}
       </div>
     </div>
   );

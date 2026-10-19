@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Heart, Share, Plus, Settings } from "lucide-react";
 import type { AstroImage, Equipment } from "@shared/schema";
 import { isDeepSkyTagged } from "@shared/solar-system";
-import { formatDate } from "@/lib/datetime";
+import { formatDate, formatTime } from "@/lib/datetime";
 import { RemoteImage } from "./remote-image";
 
 export function isFitsImage(image: AstroImage): boolean {
@@ -36,6 +36,8 @@ interface ImageGalleryProps {
   onLoadMore?: () => void;
   totalImages?: number;
   visibleCount?: number;
+  /** Show the capture time instead of the date (inside a date group). */
+  showTime?: boolean;
 }
 
 export function ImageGallery({ 
@@ -46,7 +48,8 @@ export function ImageGallery({
   hasMoreImages = false,
   onLoadMore,
   totalImages = 0,
-  visibleCount = 0
+  visibleCount = 0,
+  showTime = false,
 }: ImageGalleryProps) {
   const formatExposureData = (image: AstroImage) => {
     const parts = [];
@@ -108,7 +111,7 @@ export function ImageGallery({
               <h3 className="truncate text-[11px] font-semibold leading-tight text-foreground">
                 {image.title || "Untitled"}
               </h3>
-              <p className="truncate text-[10px] text-muted-foreground">{formatDate(image.captureDate, "Unknown date")}</p>
+              <p className="truncate text-[10px] text-muted-foreground">{showTime ? formatTime(image.captureDate, "Unknown time") : formatDate(image.captureDate, "Unknown date")}</p>
             </CardContent>
           </Card>
         ))}

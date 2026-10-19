@@ -70,3 +70,18 @@ export function fromDateTimeInput(value: string): Date | null {
 export function timeZoneLabel(): string {
   return timeZoneMode() === "utc" ? "UTC" : Intl.DateTimeFormat().resolvedOptions().timeZone || "local time";
 }
+
+/** "01:40:51 UTC" (or local time). */
+export function formatTime(value: string | number | Date | null | undefined, fallback = "—"): string {
+  const date = valid(value);
+  if (!date) return fallback;
+  const text = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", ...zone() });
+  return timeZoneMode() === "utc" ? `${text} UTC` : text;
+}
+
+/** A UTC calendar day ("2026-10-17") as a readable heading. */
+export function formatDayHeading(day: string | null): string {
+  if (!day) return "Unknown date";
+  const date = new Date(`${day}T12:00:00Z`);
+  return `${date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })} (UTC)`;
+}

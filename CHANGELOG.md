@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT with the observatory's topocentric position, sent as `-observer`) and flag candidates that coincide with one — verified on 1620 Geographos to 0.7".
 
 ### Changed
+- FITS are organized by observation date (UTC) and filter: inside an album the FITS section lists each night, then each filter (L, R, G, B, Hα, OIII, SII, SDSS r′…, colour composites) with the frames in time order and their UTC time. Filter names from different observatories are normalized (Luminance/L, Red/R, Halpha/Hα, rp/r′…).
+- The Stack page groups frames by field (frames whose plate solutions match share an album), then night, then filter, with "+ select" / "only these" for any group, the UTC time on each frame, and a warning (the Stack button is disabled) when a selection mixes filters.
 - One Upload button for everything: pick (or drop anywhere on the page) any number of photos and FITS together; each file goes to the right library by its extension, one at a time, with per-file progress, a summary at the end and the reason for any file that fails.
 - Inside an album, images are grouped into categories: the Solar System album has one section per body (Sun, Moon, each planet, comets, asteroids, other Solar System), every other album separates FITS from photos.
 - Dates and times are shown in UTC by default (with a "UTC" suffix), including the capture-time editor, which now reads and writes UTC; each browser can switch to local time in Admin → Dates and times.
