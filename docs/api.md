@@ -423,7 +423,7 @@ Checks that `solve-field` is installed and counts the available index files (bun
 ```json
 {
   "success": true,
-  "message": "Local Astrometry.net solver ready (144 index files)"
+  "message": "Local solver ready with 144 index files. Images stay on this server."
 }
 ```
 
