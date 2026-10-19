@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed (HOTPANTS)
 - New sources were discarded wherever HOTPANTS set the informational FLAG_OK_CONV bit; only FLAG_OUTPUT_ISBAD pixels are excluded now.
+- Survey holes (exact 0.0 pixels where Legacy/PS1 coadds masked saturated star cores) were used as real sky, so those stars appeared as new sources; they are now treated as missing reference data.
+- Single exposures are cleaned of cosmic rays and hot pixels (astroscrappy / L.A.Cosmic) at native resolution before binning; on a real single frame they had produced ~1500 detections and 10 false candidates.
+- The science-to-reference registration is refined with matched stars (sigma-clipped polynomial) before subtracting; plate solutions of wide fields were off by up to 2.4 px at the edges, turning every edge star into a false candidate (residual 1.0 → 0.2 px on NGC 253).
+- A candidate on top of any significant reference peak counts as an existing object even when the survey star is saturated or bleeding (cross-shaped DECam stars passed the PSF-shape test).
+- The bleed-trail mask measured close star pairs as trails and covered ~8% of undersampled fields; it now measures only the connected blob of each star (1%).
+- The subtraction-dipole test only looks for a negative lobe adjacent to the source, so candidates on a galaxy's disk are no longer discarded by unrelated residuals.
+- Verified with fake sources injected into real frames: zero false candidates on the test images; recovered 4/6 on the NGC 253 frame (the two misses fell on existing sources) and every source with peak ≥ 10σ on a stack.
+- Star masks never cover extended galaxies (nucleus and disk stay searchable for supernovae); the bleed mask only applies to thin, bright, compact trails.
 
 ### Added
 - Online catalogues for annotations when the server has internet: Gaia DR3 stars (VizieR) and named SIMBAD objects, merged without duplicates and cached per image on disk (`AppData/online-catalog-cache`); a "Rescan annotations" button next to "Re-solve locally" refreshes them (online when reachable, otherwise offline). Only field coordinates are sent; `ASTROVIABIN_ONLINE_CATALOGS=false` disables it.

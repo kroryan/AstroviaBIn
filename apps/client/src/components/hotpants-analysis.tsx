@@ -24,6 +24,8 @@ type Report = {
   settings?: { thresholdSigma: number; maxDimension: number; sourceFwhm?: number };
   solarSystemObjects?: SolarSystemObject[]; solarSystemCheck?: string;
   brightStarMaskFraction?: number;
+  cosmicRayPixels?: number | null;
+  registration?: { matchedStars?: number; rmsBeforePx?: number; rmsAfterPx?: number; maxCorrectionPx?: number; applied?: boolean; note?: string };
   autoSettings?: { fwhmSciencePx?: number | null; fwhmReferencePx?: number | null; detectionFwhmPx?: number; hotpantsArgs?: string[] };
 };
 
@@ -192,6 +194,8 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
         </>}
         <p className="text-xs text-muted-foreground">Catalog check: {report.catalogCheck || 'not available'}. A nearby catalog object is not a transient identification.</p>
         {report.reference?.autoSelection && <p className="text-xs text-muted-foreground">Auto reference: band {report.reference.autoSelection.band} ({report.reference.autoSelection.reason}){report.reference.autoSelection.skipped.length ? `; skipped ${report.reference.autoSelection.skipped.map(item => item.split(':')[0]).join(', ')}` : ''}.</p>}
+        {report.registration?.applied && <p className="text-xs text-muted-foreground">Registration refined with {report.registration.matchedStars} matched stars: residual {report.registration.rmsBeforePx?.toFixed(2)} px → {report.registration.rmsAfterPx?.toFixed(2)} px (largest correction {report.registration.maxCorrectionPx?.toFixed(1)} px).</p>}
+        {report.cosmicRayPixels != null && report.cosmicRayPixels > 0 && <p className="text-xs text-muted-foreground">Cosmic-ray/hot pixels removed from the single exposure (L.A.Cosmic): {report.cosmicRayPixels.toLocaleString()}.</p>}
         {report.brightStarMaskFraction != null && report.brightStarMaskFraction > 0 && <p className="text-xs text-muted-foreground">Masked around bright, saturated or bleeding stars: {(report.brightStarMaskFraction * 100).toFixed(1)}% of the field (transients there cannot be detected reliably).</p>}
         {report.autoSettings && <p className="text-xs text-muted-foreground">Measured seeing: science {report.autoSettings.fwhmSciencePx ?? '?'} px, reference {report.autoSettings.fwhmReferencePx ?? '?'} px · detection FWHM {report.autoSettings.detectionFwhmPx} px · HOTPANTS auto: <code>{report.autoSettings.hotpantsArgs?.join(' ') || 'defaults'}</code></p>}
         {report.solarSystemCheck && <p className="text-xs text-muted-foreground">Known asteroids and comets: {report.solarSystemCheck}{report.solarSystemObjects?.length ? ` ${report.solarSystemObjects.map(item => `${item.name}${item.vmag != null ? ` (V ${item.vmag})` : ''}`).join(', ')}.` : ''}</p>}

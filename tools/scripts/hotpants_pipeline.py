@@ -21,7 +21,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS, Sip
 from photutils.detection import DAOStarFinder
-from scipy.ndimage import binary_dilation, map_coordinates, maximum_filter
+from scipy.ndimage import binary_dilation, find_objects, label, map_coordinates, maximum_filter
 from scipy.optimize import least_squares
 
 
@@ -80,8 +80,38 @@ def binned_wcs(source_wcs, factor):
     return wcs
 
 
+def clean_cosmic_rays(data, header):
+    """L.A.Cosmic (astroscrappy) on a single exposure at native resolution, before any binning.
+
+    Cosmic-ray hits and hot pixels are sharper than the PSF and absent from any reference, so
+    every one would otherwise be a "new source". Stacks (NCOMBINE > 1) are already rejected.
+    Returns the cleaned image and the number of replaced pixels (None when skipped)."""
+    if int(header.get('NCOMBINE') or 1) > 1:
+        return data, None
+    try:
+        import astroscrappy
+    except ImportError:
+        print('astroscrappy unavailable; cosmic rays are not removed', file=sys.stderr)
+        return data, None
+    valid = np.isfinite(data)
+    if valid.sum() < 1000:
+        return data, None
+    fill = float(np.median(data[valid]))
+    saturation = float(header.get('SATURATE') or header.get('SATLEVEL') or 0) or float(np.nanmax(data)) + 1
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        flagged, cleaned = astroscrappy.detect_cosmics(
+            np.where(valid, data, fill).astype(np.float32), inmask=~valid,
+            gain=float(header.get('GAIN') or 1.0), readnoise=float(header.get('RDNOISE') or 6.5),
+            satlevel=saturation, sigclip=4.5, sigfrac=0.3, objlim=5.0, niter=4,
+            cleantype='medmask', sepmed=True)
+    cleaned = np.where(valid, cleaned, data).astype(np.float32)
+    return cleaned, int(np.count_nonzero(flagged & valid))
+
+
 def reduced_image(source, output, max_dimension):
     data, header = mono_data(source)
+    data, cosmic_pixels = clean_cosmic_rays(data, header)
     height, width = data.shape
     factor = max(1, math.ceil(max(height, width) / max_dimension))
     valid = np.isfinite(data)
@@ -125,6 +155,8 @@ def reduced_image(source, output, max_dimension):
         invalid = ~valid
         replacement = float(np.median(data[valid])) if np.any(valid) else 0.0
         data = np.where(valid, data, replacement).astype(np.float32)
+    if cosmic_pixels is not None:
+        header['COSMICPX'] = (cosmic_pixels, 'Cosmic-ray/hot pixels replaced (astroscrappy)')
     fits.writeto(output, data, header=header, overwrite=True)
     invalid_path = output.with_name(output.stem + '-invalid-mask.fits')
     fits.writeto(invalid_path, invalid.astype(np.uint8), header=header, overwrite=True)
@@ -362,7 +394,11 @@ def _surface_brightness_units(header):
     return any(marker in unit for marker in ('/sr', 'sr-1', 'sr**-1', '/arcsec2', 'arcsec-2', 'deg-2'))
 
 
-def align_reference(reference_path, science_wcs, science_header, shape, output):
+def align_reference(reference_path, science_wcs, science_header, shape, output, correction=None):
+    """Resample the reference onto the science pixel grid through both WCS solutions.
+
+    `correction(x, y) -> (dx, dy)` optionally shifts where each science pixel samples the sky,
+    from `registration_correction`, so the reference is interpolated only once."""
     reference, header = mono_data(reference_path)
     reference_wcs = WCS(header).celestial
     if not reference_wcs.has_celestial:
@@ -378,6 +414,13 @@ def align_reference(reference_path, science_wcs, science_header, shape, output):
         reference_invalid = binary_dilation(reference_invalid > 0, iterations=1)
     else:
         reference_invalid = ~np.isfinite(reference)
+        if int(header.get('BITPIX', -32)) < 0:
+            # Survey coadds write exactly 0.0 where every exposure was masked (saturated star
+            # cores, bleeds, gaps). Real floating-point sky is never exactly zero, so treat those
+            # holes, plus the resampled pixels around them, as missing reference data.
+            holes = reference == 0
+            if holes.any():
+                reference_invalid |= binary_dilation(holes, iterations=2)
     science_invalid_path = output.with_name('science-invalid-mask.fits')
     if science_invalid_path.exists():
         science_invalid, _ = mono_data(science_invalid_path)
@@ -390,7 +433,11 @@ def align_reference(reference_path, science_wcs, science_header, shape, output):
     for row in range(0, height, 64):
         stop = min(row + 64, height)
         yy, xx = np.mgrid[row:stop, 0:width]
-        ra, dec = science_wcs.pixel_to_world_values(xx, yy)
+        if correction is not None:
+            dx, dy = correction(xx, yy)
+            ra, dec = science_wcs.pixel_to_world_values(xx + dx, yy + dy)
+        else:
+            ra, dec = science_wcs.pixel_to_world_values(xx, yy)
         rx, ry = reference_wcs.world_to_pixel_values(ra, dec)
         good = np.isfinite(rx) & np.isfinite(ry) & (rx >= 1) & (ry >= 1) & (rx < reference.shape[1] - 2) & (ry < reference.shape[0] - 2)
         safe_rx, safe_ry = np.nan_to_num(rx), np.nan_to_num(ry)
@@ -405,6 +452,94 @@ def align_reference(reference_path, science_wcs, science_header, shape, output):
         raise ValueError(f'Reference overlaps only {coverage:.0%} of the science image; choose a matching field')
     fits.writeto(output, aligned, header=science_wcs.to_header(relax=True), overwrite=True)
     return coverage, mask, area_scale
+
+
+def _registration_stars(data, invalid, fwhm, limit=2500):
+    good = np.isfinite(data) & ~invalid
+    if good.sum() < 1000:
+        return np.empty((0, 2))
+    median = float(np.median(data[good]))
+    sigma = float(1.4826 * np.median(np.abs(data[good] - median)))
+    if not np.isfinite(sigma) or sigma <= 0:
+        return np.empty((0, 2))
+    finder = DAOStarFinder(threshold=10 * sigma, fwhm=max(1.5, fwhm), sharpness_range=(0.2, 1.0),
+                           roundness_range=(-0.5, 0.5), exclude_border=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sources = finder(np.where(good, data, median) - median)
+    if sources is None:
+        return np.empty((0, 2))
+    sources.sort('flux', reverse=True)
+    points = np.c_[sources['x_centroid'], sources['y_centroid']][:limit]
+    keep = ~invalid[np.clip(points[:, 1].round().astype(int), 0, data.shape[0] - 1),
+                    np.clip(points[:, 0].round().astype(int), 0, data.shape[1] - 1)]
+    return points[keep]
+
+
+def registration_correction(science, science_invalid, aligned, aligned_invalid, fwhm):
+    """Residual science-to-reference misregistration from matched stars, as a smooth polynomial.
+
+    Plate solutions of wide or distorted fields can be off by pixels near the edges; with a
+    seeing of 1-2 px that turns every star there into a false "new source". Stars matched between
+    the science image and the aligned reference give the residual offset field, fitted with a
+    sigma-clipped 2D polynomial whose order grows with the number of matches.
+    Returns (correction or None, report)."""
+    from scipy.spatial import cKDTree
+    stars_science = _registration_stars(science, science_invalid, fwhm)
+    stars_reference = _registration_stars(aligned, aligned_invalid, fwhm)
+    report = {'scienceStars': int(len(stars_science)), 'referenceStars': int(len(stars_reference))}
+    if len(stars_science) < 6 or len(stars_reference) < 6:
+        report['note'] = 'Too few stars to refine the registration'
+        return None, report
+    height, width = science.shape
+    half_w, half_h = width / 2, height / 2
+
+    def design(points, order):
+        u, v = (points[:, 0] - half_w) / half_w, (points[:, 1] - half_h) / half_h
+        return np.column_stack([u ** i * v ** j for i in range(order + 1) for j in range(order + 1 - i)])
+
+    tree = cKDTree(stars_reference)
+    distance, index = tree.query(stars_science, distance_upper_bound=4.0)
+    matched = np.isfinite(distance)
+    if matched.sum() < 6:
+        report['note'] = 'Too few matched stars to refine the registration'
+        return None, report
+    source, offsets = stars_science[matched], stars_reference[index[matched]] - stars_science[matched]
+    report['rmsBeforePx'] = round(float(np.sqrt(np.mean(np.sum(offsets ** 2, axis=1)))), 3)
+    order = 3 if len(source) >= 80 else 2 if len(source) >= 30 else 1 if len(source) >= 10 else 0
+    coefficients = None
+    for _ in range(3):  # fit, re-match tightly against the corrected positions, refit
+        use = np.ones(len(source), dtype=bool)
+        for _ in range(5):
+            matrix = design(source[use], order)
+            coefficients = np.linalg.lstsq(matrix, offsets[use], rcond=None)[0]
+            residual = np.hypot(*(offsets - design(source, order) @ coefficients).T)
+            limit = max(0.3, 3 * 1.4826 * float(np.median(residual[use])))
+            if np.array_equal(residual <= limit, use):
+                break
+            use = residual <= limit
+        predicted = stars_science + design(stars_science, order) @ coefficients
+        distance, index = tree.query(predicted, distance_upper_bound=1.5)
+        matched = np.isfinite(distance)
+        if matched.sum() < 6:
+            break
+        source, offsets = stars_science[matched], stars_reference[index[matched]] - stars_science[matched]
+    final = offsets - design(source, order) @ coefficients
+    rms_after = float(np.sqrt(np.mean(np.sum(final ** 2, axis=1))))
+    report.update({'matchedStars': int(len(source)), 'polynomialOrder': order,
+                   'rmsAfterPx': round(rms_after, 3)})
+    grid = np.array([[x, y] for x in np.linspace(0, width - 1, 9) for y in np.linspace(0, height - 1, 9)])
+    report['maxCorrectionPx'] = round(float(np.max(np.hypot(*(design(grid, order) @ coefficients).T))), 3)
+    if report['maxCorrectionPx'] < 0.05 or not rms_after < report['rmsBeforePx']:
+        report['note'] = 'Registration already consistent; no correction applied'
+        return None, report
+
+    def correction(x, y):
+        points = np.column_stack([np.ravel(x), np.ravel(y)])
+        shift = design(points, order) @ coefficients
+        return shift[:, 0].reshape(np.shape(x)), shift[:, 1].reshape(np.shape(y))
+    report['applied'] = True
+    return correction, report
 
 
 def estimate_fwhm(data, invalid=None):
@@ -481,6 +616,18 @@ def bright_source_mask(data, invalid, fwhm):
     if not brightest > median:
         return np.zeros(data.shape, dtype=bool)
     core = good & (data > median + 0.5 * (brightest - median))
+    # Keep only star-like cores and thin trails; a wide bright blob is a galaxy or nebula, which
+    # is exactly where transients are searched for and must stay unmasked.
+    labels, count = label(core)
+    width_limit = 4 * (fwhm or 3)
+    keep = np.zeros(count + 1, dtype=bool)
+    for index, region in enumerate(find_objects(labels), start=1):
+        if region is None:
+            continue
+        height = region[0].stop - region[0].start
+        width = region[1].stop - region[1].start
+        keep[index] = min(height, width) <= width_limit
+    core = keep[labels] & core
     return binary_dilation(core, iterations=max(3, math.ceil(3 * (fwhm or 3))))
 
 
@@ -502,6 +649,9 @@ def elongated_source_mask(data, invalid, fwhm, axis_ratio_limit=1.35):
     mask = np.zeros(data.shape, dtype=bool)
     if sources is None:
         return mask
+    # Only stars bright enough to saturate bleed: the top of the reference's stellar range.
+    brightest = float(np.percentile(clean[good], 99.999))
+    bright_level = 0.05 * brightest
     radius = int(max(6, math.ceil(4 * (fwhm or 3))))
     yy, xx = np.mgrid[-radius:radius + 1, -radius:radius + 1]
     height, width = data.shape
@@ -511,6 +661,13 @@ def elongated_source_mask(data, invalid, fwhm, axis_ratio_limit=1.35):
             continue
         stamp = np.clip(clean[y - radius:y + radius + 1, x - radius:x + radius + 1], 0, None)
         stamp = np.where(stamp > 0.1 * stamp.max(), stamp, 0)
+        # Only the blob containing the star: two neighbouring stars otherwise look like a trail.
+        pieces, _ = label(stamp > 0)
+        centre = pieces[radius - 1:radius + 2, radius - 1:radius + 2]
+        centre = centre[centre > 0]
+        if centre.size == 0:
+            continue
+        stamp = np.where(pieces == np.bincount(centre).argmax(), stamp, 0)
         total = stamp.sum()
         if total <= 0:
             continue
@@ -520,9 +677,16 @@ def elongated_source_mask(data, invalid, fwhm, axis_ratio_limit=1.35):
         mxy = ((xx - cx) * (yy - cy) * stamp).sum() / total
         root = math.sqrt(max(((mxx - myy) / 2) ** 2 + mxy ** 2, 0))
         major, minor = (mxx + myy) / 2 + root, max((mxx + myy) / 2 - root, 1e-6)
-        if math.sqrt(major / minor) < axis_ratio_limit:
+        psf_sigma = (fwhm or 3) / 2.3548
+        # Bleed trails are as narrow as a star; galaxy disks, knots and nebulae are not.
+        if math.sqrt(major / minor) < axis_ratio_limit or math.sqrt(minor) > 1.6 * psf_sigma:
             continue
-        extent = 3 * math.sqrt(major) + 2 * (fwhm or 3)
+        # ...and clearly longer than the PSF: moments of undersampled round stars look elongated.
+        if math.sqrt(major) < 2.0 * psf_sigma:
+            continue
+        if float(source['peak']) < bright_level:
+            continue
+        extent = min(80.0, 3 * math.sqrt(major) + 2 * (fwhm or 3))
         y0, y1 = max(0, int(y - extent)), min(height, int(y + extent) + 2)
         x0, x1 = max(0, int(x - extent)), min(width, int(x + extent) + 2)
         oy, ox = np.ogrid[y0:y1, x0:x1]
@@ -672,6 +836,26 @@ def local_point_source(data, x, y, fwhm, detection_sigma=5):
             'roundness': round(float(nearest['roundness2']), 3)}
 
 
+def reference_peak_present(reference, x, y, fwhm, detection_sigma=5):
+    """Whether the reference already has a significant local maximum within ~1 FWHM, whatever
+    its shape: survey stars that saturated (bleeds, flat or cross-shaped cores) fail a PSF shape
+    test but are still existing objects, not new ones."""
+    radius = max(16, math.ceil(fwhm * 4))
+    patch = np.asarray(reference[y - radius:y + radius + 1, x - radius:x + radius + 1], dtype=np.float64)
+    if patch.shape != (2 * radius + 1, 2 * radius + 1) or not np.all(np.isfinite(patch)):
+        return False
+    yy, xx = np.ogrid[-radius:radius + 1, -radius:radius + 1]
+    distance = np.hypot(xx, yy)
+    annulus = patch[(distance >= radius * 0.65) & (distance <= radius)]
+    background = float(np.median(annulus))
+    sigma = float(1.4826 * np.median(np.abs(annulus - background)))
+    if not np.isfinite(sigma) or sigma <= 0:
+        return False
+    near = distance <= max(1.5, 0.8 * fwhm)
+    peaks = (patch == maximum_filter(patch, size=3)) & (patch - background >= detection_sigma * sigma)
+    return bool(np.any(peaks & near))
+
+
 def has_subtraction_dipole(difference, x, y, fwhm):
     radius = max(8, math.ceil(fwhm * 3))
     patch = difference[y - radius:y + radius + 1, x - radius:x + radius + 1]
@@ -681,7 +865,10 @@ def has_subtraction_dipole(difference, x, y, fwhm):
     distance = np.hypot(xx, yy)
     sky = float(np.median(patch[distance >= radius * 0.75]))
     core = float(patch[radius, radius] - sky)
-    opposite = float(np.min(patch[(distance >= max(2, fwhm * 0.8)) & (distance <= radius)] - sky))
+    # A misregistration dipole's negative lobe touches the source (offset < 1 FWHM); farther
+    # negative pixels are unrelated residuals, e.g. of a host galaxy's disk.
+    lobe = max(3.0, 2 * fwhm)
+    opposite = float(np.min(patch[(distance >= max(2, fwhm * 0.8)) & (distance <= lobe)] - sky))
     return core <= 0 or opposite < -0.45 * core
 
 
@@ -732,7 +919,7 @@ def detect_candidates(difference_path, noise_path, bad_mask_path, mask, science_
         if science_source is None:
             rejected['notPointSourceInScience'] += 1
             continue
-        if local_point_source(reference, int(x), int(y), fwhm):
+        if local_point_source(reference, int(x), int(y), fwhm) or reference_peak_present(reference, int(x), int(y), fwhm):
             rejected['presentInReference'] += 1
             continue
         if has_subtraction_dipole(difference, int(x), int(y), fwhm):
@@ -968,12 +1155,19 @@ def main(config_path):
         provenance = {'localImageId': config['referenceImageId']}
     write_state(work, 'aligning')
     coverage, mask, reference_flux_scale = align_reference(reference, science_wcs, science_header, science_data.shape, aligned)
-    fits.writeto(work / 'reference-mask.fits', mask, overwrite=True)
-    write_state(work, 'subtracting')
     science_invalid_path = work / 'science-invalid-mask.fits'
     science_invalid = (mono_data(science_invalid_path)[0] > 0) if science_invalid_path.exists() else ~np.isfinite(science_data)
     aligned_data, _ = mono_data(aligned)
     fwhm_science = estimate_fwhm(science_data, science_invalid)
+    # Refine the WCS-only registration with matched stars, then resample the reference once more.
+    correction, registration = registration_correction(science_data, science_invalid, aligned_data, mask > 0,
+                                                       fwhm_science or 2.5)
+    if correction is not None:
+        coverage, mask, reference_flux_scale = align_reference(reference, science_wcs, science_header,
+                                                               science_data.shape, aligned, correction)
+        aligned_data, _ = mono_data(aligned)
+    fits.writeto(work / 'reference-mask.fits', mask, overwrite=True)
+    write_state(work, 'subtracting')
     fwhm_reference = estimate_fwhm(aligned_data, mask > 0)
     # Mask clipped bright stars and bleed trails in the reference before subtracting and detecting.
     bright = bright_source_mask(aligned_data, mask > 0, fwhm_reference)
@@ -1022,6 +1216,8 @@ def main(config_path):
             'candidates': candidates, 'detectedTotal': detected_total,
             'solarSystemObjects': solar_system_objects, 'solarSystemCheck': solar_system_note,
             'brightStarMaskFraction': round(float(bright.mean()), 5),
+            'cosmicRayPixels': science_header.get('COSMICPX'),
+            'registration': registration,
             'autoSettings': {**auto_settings, 'detectionFwhmPx': float(config.get('sourceFwhm') or fwhm_science or 3),
                              'hotpantsArgs': auto_args},
             'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,

@@ -85,6 +85,7 @@ class CandidateValidationTests(unittest.TestCase):
     def test_downsample_conserves_integrated_flux_and_keeps_wcs_pixel_grid_exact(self):
         header = self.wcs.to_header()
         header['BUNIT'] = 'adu'
+        header['NCOMBINE'] = 2  # a one-pixel source is a cosmic ray in a single exposure
         source_data = np.zeros((96, 96), dtype=np.float32)
         source_data[49, 49] = 1000
         source = self.work / 'large.fits'
@@ -271,6 +272,118 @@ class BrightStarMaskTests(unittest.TestCase):
         mask = elongated_source_mask(image, np.zeros(image.shape, dtype=bool), 3.0)
         self.assertTrue(mask[60, 60] and mask[60, 72])
         self.assertFalse(mask[170, 170])
+
+
+class GalaxyIsNeverMaskedTests(unittest.TestCase):
+    def test_extended_bright_galaxy_stays_unmasked(self):
+        """Transients are searched in galaxies: a wide, elongated, bright disk must not be masked."""
+        rng = np.random.default_rng(6)
+        image = rng.normal(0, 1, (300, 300))
+        yy, xx = np.mgrid[:300, :300]
+        angle = np.radians(50)
+        u = (xx - 150) * np.cos(angle) + (yy - 150) * np.sin(angle)
+        v = -(xx - 150) * np.sin(angle) + (yy - 150) * np.cos(angle)
+        image += 3000 * np.exp(-(u ** 2 / (2 * 60 ** 2) + v ** 2 / (2 * 12 ** 2)))  # galaxy disk
+        image += 5000 * np.exp(-((xx - 40) ** 2 + (yy - 260) ** 2) / (2 * 1.3 ** 2))  # a bright star
+        invalid = np.zeros(image.shape, dtype=bool)
+        mask = bright_source_mask(image, invalid, 3.0) | elongated_source_mask(image, invalid, 3.0)
+        self.assertFalse(mask[150, 150], 'galaxy nucleus must stay searchable')
+        self.assertLess(mask[100:200, 100:200].mean(), 0.01)
+        self.assertTrue(mask[260, 40], 'the bright star is still masked')
+
+class ReferenceHoleTests(unittest.TestCase):
+    def test_zero_filled_survey_holes_are_masked_after_alignment(self):
+        """Regression: Legacy coadds zero saturated star cores; a science star there is not new."""
+        from hotpants_pipeline import align_reference
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            wcs = WCS(naxis=2)
+            wcs.wcs.crpix = [50, 50]
+            wcs.wcs.cdelt = [-0.001, 0.001]
+            wcs.wcs.crval = [10, -20]
+            wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+            reference = np.random.default_rng(7).normal(1, 0.1, (100, 100)).astype(np.float32)
+            reference[60:63, 30:33] = 0.0
+            fits.writeto(work / 'reference.fits', reference, wcs.to_header(), overwrite=True)
+            _, mask, _ = align_reference(work / 'reference.fits', wcs, fits.Header(), (100, 100), work / 'aligned.fits')
+            self.assertTrue(mask[59:64, 29:34].all(), 'hole and its resampled edge are invalid')
+            self.assertFalse(mask[20:40, 60:80].any(), 'normal sky stays valid')
+
+
+class RegistrationTests(unittest.TestCase):
+    def test_edge_misregistration_is_measured_and_corrected(self):
+        """Regression: a WCS off by ~2 px at the edge made every star there a false candidate."""
+        from hotpants_pipeline import registration_correction
+        rng = np.random.default_rng(10)
+        size = 400
+        yy, xx = np.mgrid[:size, :size]
+        positions = rng.uniform(15, size - 15, (220, 2))
+        offset = lambda x, y: (2.0 * ((x - 200) / 200) ** 2, -0.8 * (y - 200) / 200)
+
+        def render(shift):
+            image = rng.normal(0, 1, (size, size))
+            for x, y in positions:
+                dx, dy = offset(x, y) if shift else (0, 0)
+                image += 400 * np.exp(-((xx - x - dx) ** 2 + (yy - y - dy) ** 2) / (2 * 0.9 ** 2))
+            return image
+        science, reference = render(False), render(True)
+        invalid = np.zeros((size, size), dtype=bool)
+        correction, report = registration_correction(science, invalid, reference, invalid, 2.1)
+        self.assertIsNotNone(correction)
+        self.assertGreater(report['rmsBeforePx'], 0.8)
+        self.assertLess(report['rmsAfterPx'], 0.15)
+        for x, y in ((20, 30), (380, 200), (200, 380)):
+            expected = offset(x, y)
+            actual = correction(np.array([x]), np.array([y]))
+            self.assertAlmostEqual(float(actual[0][0]), expected[0], delta=0.15)
+            self.assertAlmostEqual(float(actual[1][0]), expected[1], delta=0.15)
+
+
+class SaturatedReferenceStarTests(unittest.TestCase):
+    def test_bleeding_reference_star_counts_as_present(self):
+        """Regression: a DECam star with a cross-shaped bleed failed the PSF test and its
+        subtraction residual was reported as a new source."""
+        from hotpants_pipeline import reference_peak_present
+        rng = np.random.default_rng(11)
+        reference = rng.normal(0, 1, (96, 96))
+        yy, xx = np.mgrid[:96, :96]
+        reference += np.minimum(500, 3000 * np.exp(-((xx - 48) ** 2 + (yy - 48) ** 2) / (2 * 1.0 ** 2)))
+        reference[48, 40:57] += 400  # bleed trail
+        self.assertTrue(reference_peak_present(reference, 48, 48, 1.5))
+        self.assertFalse(reference_peak_present(rng.normal(0, 1, (96, 96)), 48, 48, 1.5))
+
+
+class DoubleStarTests(unittest.TestCase):
+    def test_close_star_pairs_are_not_bleed_trails(self):
+        """Regression: two neighbouring round stars masked ~8% of an undersampled field."""
+        rng = np.random.default_rng(9)
+        image = rng.normal(0, 1, (200, 200))
+        yy, xx = np.mgrid[:200, :200]
+        for x, y in ((60, 60), (66, 63), (140, 120), (145, 126)):
+            image += 3000 * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 0.8 ** 2))
+        mask = elongated_source_mask(image, np.zeros(image.shape, dtype=bool), 1.9)
+        self.assertFalse(mask.any())
+
+
+class CosmicRayTests(unittest.TestCase):
+    def test_single_exposure_hits_are_removed_and_stars_kept(self):
+        """Regression: cosmic rays and hot pixels in single frames became hundreds of candidates."""
+        from hotpants_pipeline import clean_cosmic_rays
+        rng = np.random.default_rng(8)
+        image = rng.normal(500, 10, (200, 200)).astype(np.float32)
+        yy, xx = np.mgrid[:200, :200]
+        star = 4000 * np.exp(-((xx - 100) ** 2 + (yy - 60) ** 2) / (2 * 2.5 ** 2))
+        image += star.astype(np.float32)
+        hits = [(30, 40), (150, 170), (120, 20)]
+        for y, x in hits:
+            image[y, x] += 3000
+        cleaned, count = clean_cosmic_rays(image, fits.Header({'GAIN': 1.0, 'RDNOISE': 10.0}))
+        self.assertGreaterEqual(count, len(hits))
+        for y, x in hits:
+            self.assertLess(cleaned[y, x], 600)
+        self.assertGreater(cleaned[60, 100], 4000, 'the star core is untouched')
+        _, skipped = clean_cosmic_rays(image, fits.Header({'NCOMBINE': 7}))
+        self.assertIsNone(skipped, 'stacks are already cosmic-ray rejected')
 
 
 class SkyBotQueryTests(unittest.TestCase):

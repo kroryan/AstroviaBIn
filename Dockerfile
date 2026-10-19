@@ -97,10 +97,11 @@ RUN set -eu; src=/tmp/sky-src; out=/usr/share/astroviabin/sky; mkdir -p "$src" "
     /usr/bin/python3 /tmp/build_sky_catalog.py --src "$src" --out "$out"; \
     cd /; rm -rf "$src" /tmp/build_sky_catalog.py
 
-# Photutils is an independent, BSD-3-Clause source-detection and photometry
-# library. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
+# Photutils (source detection/photometry) and astroscrappy (L.A.Cosmic cosmic-ray
+# rejection) are BSD-3-Clause. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
 RUN /usr/bin/python3 -m venv --system-site-packages /opt/astroviabin-python && \
-    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1
+    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1 && \
+    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps --only-binary=:all: astroscrappy==1.3.0
 
 COPY --from=hotpants-builder /opt/hotpants/hotpants /usr/local/bin/hotpants
 COPY --from=hotpants-builder /opt/hotpants/extractkern /usr/local/bin/extractkern

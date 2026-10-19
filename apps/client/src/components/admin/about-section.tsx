@@ -31,6 +31,14 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">astroscrappy</h3>
+        <p className="text-muted-foreground">Cosmic-ray and hot-pixel rejection for single exposures before HOTPANTS uses astroscrappy by Curtis McCully and contributors, an implementation of the L.A.Cosmic algorithm (van Dokkum 2001, PASP 113, 1420). astroscrappy is distributed under the BSD 3-Clause license.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://github.com/astropy/astroscrappy/blob/main/LICENSE.rst" target="_blank" rel="noreferrer">astroscrappy license</a>
+          <a className="text-primary underline" href="https://github.com/astropy/astroscrappy" target="_blank" rel="noreferrer">astroscrappy source and documentation</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">HOTPANTS</h3>
         <p className="text-muted-foreground">High Order Transform of PSF ANd Template Subtraction by Andrew Becker and contributors. AstroviaBin vendors and builds the upstream C source without scientific or mathematical changes, including the alternative extractkernOnes helper for PSF visualization. The upstream repository contains both an MIT LICENSE notice and a GPL version 2 COPYING document; both are retained and offered here verbatim. Review the upstream notices for redistribution obligations.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
