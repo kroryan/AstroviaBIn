@@ -11,7 +11,21 @@ http://localhost:5000/api
 
 ## Authentication
 
-Currently, AstroviaBin does not require authentication for API access. All endpoints are publicly accessible when the server is running.
+Every page and API route requires a signed-in session, except `GET /api/health`, `GET /api/auth/status` and the login page.
+
+- `GET /login` — HTML sign-in form. `POST /login` with form fields `user`, `password` and optional `next` sets the `astroviabin_session` cookie (HttpOnly, SameSite=Lax, 30 days). Ten failed attempts per client address within 15 minutes are throttled.
+- `POST /api/auth/logout` — clears the session cookie.
+- `GET /api/auth/me` — `{ "username": "krory90", "role": "admin", "builtin": true, "authEnabled": true }`.
+
+Requests without a valid session receive `401`. Roles are checked on every request:
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything, including `/api/admin/*`, `/api/users/*`, catalog reloads and solver checks |
+| `editor` | Read everything and change content (uploads, edits, plate solving, catalogs, stacking, HOTPANTS) |
+| `viewer` | Read-only (`GET`/`HEAD`) |
+
+Forbidden actions return `403`. The built-in administrator comes from `ASTROVIABIN_ADMIN_USER` / `ASTROVIABIN_ADMIN_PASSWORD` (default `admin` / `admin`). The WebSocket at `/ws` requires the same session cookie.
 
 ## Response Format
 
@@ -107,40 +121,29 @@ PATCH /api/images/{id}
 
 #### Submit Image for Plate Solving
 ```
-POST /api/images/{id}/plate-solve
+POST /api/plate-solving/images/{id}/plate-solve
 ```
 
-**Parameters:**
-- `id` (integer) - Image ID
+Queues a private local Astrometry.net solve (`202`). Images need the `Deep Sky` tag or an existing stellar solution; Solar System images are rejected.
 
-**Response:**
+**Optional request body** (RA as degrees or `hh:mm:ss`, Dec as degrees or `±dd:mm:ss`; scale in arcsec/pixel):
+```json
+{ "hint": { "ra": "12:05:15", "dec": "+76:54:21", "radius": 3, "scaleLow": 0.5, "scaleHigh": 1.5 } }
+```
+
+Without a hint the solver tries the previous solution, the FITS pointing keywords and M/NGC/IC names in the title, then searches blind.
+
+**Response (`202`):**
 ```json
 {
-  "message": "Image plate solving completed successfully",
-  "result": {
-    "calibration": {
-      "ra": 10.684,
-      "dec": 41.269,
-      "pixscale": 2.77,
-      "radius": 0.5,
-      "orientation": 90.0,
-      "parity": 1
-    },
-    "annotations": [
-      {
-        "type": "star",
-        "names": ["HD 12345"],
-        "ra": 10.684,
-        "dec": 41.269,
-        "pixelx": 1024,
-        "pixely": 768,
-        "radius": 10
-      }
-    ],
-    "machineTags": ["galaxy", "andromeda", "messier"]
-  }
+  "status": "processing",
+  "jobId": 54,
+  "submissionId": "local-3146aa61-13e5-4aa1-9e55-45c1c9ba1ee0",
+  "message": "Queued for private local solving. This can take several minutes for large images."
 }
 ```
+
+Jobs are `pending` while queued and `processing` while the worker solves them (one at a time).
 
 #### Get Plate Solving Jobs
 ```
@@ -168,6 +171,9 @@ GET /api/plate-solving/jobs
 ```
 
 #### Bulk Submit for Plate Solving
+
+Body: `{ "imageIds": [1, 2], "force": false }`. `force: true` re-solves images that already have a solution (the previous solution is kept until the new one succeeds).
+
 ```
 POST /api/plate-solving/bulk
 ```
@@ -205,34 +211,29 @@ POST /api/plate-solving/bulk
 GET /api/images/{id}/annotations
 ```
 
-**Parameters:**
-- `id` (integer) - Image ID
+For local solves (`"source": "wcs"`) every OpenNGC object overlapping the field is projected through the stored WCS (TAN + SIP). `pixelx`/`pixely` are native-image content coordinates: `(0, 0)` is the top-left corner of the first pixel, so an overlay sits at `pixelx / imageDimensions.width`. `radius` is in pixels (half the catalogue major axis).
+
+Imported solutions without a stored WCS return `"source": "legacy"` with positions scaled to native pixels and a `message` suggesting a local re-solve.
 
 **Response:**
 ```json
 {
   "annotations": [
     {
-      "type": "star",
-      "names": ["HD 12345"],
-      "ra": 10.684,
-      "dec": 41.269,
-      "pixelx": 1024,
-      "pixely": 768,
-      "radius": 10
+      "type": "ngc",
+      "objectType": "G",
+      "names": ["NGC 253", "Sculptor Filament", "Silver Coin"],
+      "ra": 11.888,
+      "dec": -25.288222,
+      "pixelx": 4785.88,
+      "pixely": 3182.44,
+      "radius": 1077.1,
+      "vmag": 7.09
     }
   ],
-  "calibration": {
-    "ra": 10.684,
-    "dec": 41.269,
-    "pixscale": 2.77,
-    "radius": 0.5,
-    "orientation": 90.0
-  },
-  "imageDimensions": {
-    "width": 2048,
-    "height": 1536
-  }
+  "calibration": { "ra": 11.8876, "dec": -25.2858, "pixscale": 0.746, "radius": 1.19, "orientation": 180.2, "parity": -1 },
+  "imageDimensions": { "width": 9576, "height": 6388 },
+  "source": "wcs"
 }
 ```
 
@@ -383,25 +384,16 @@ GET /api/admin/settings
 **Response:**
 ```json
 {
-  "immich": {
-    "host": "http://localhost:2283",
-    "apiKey": "your-api-key",
-    "autoSync": true,
-    "syncFrequency": "0 */4 * * *",
-    "syncByAlbum": true,
-    "selectedAlbumIds": ["uuid1", "uuid2"]
-  },
   "astrometry": {
-    "apiKey": "your-api-key",
     "enabled": true,
+    "autoEnabled": false,
     "checkInterval": 30,
     "pollInterval": 5,
     "maxConcurrent": 3,
     "autoResubmit": false
   },
-  "app": {
-    "debugMode": false
-  }
+  "sidecar": { "enabled": true, "outputPath": "/app/sidecars", "organizeByDate": true },
+  "app": { "debugMode": false }
 }
 ```
 
@@ -420,50 +412,20 @@ POST /api/admin/settings
 }
 ```
 
-#### Test Immich Connection
-```
-POST /api/test-immich-connection
-```
-
-**Request Body:**
-```json
-{
-  "host": "http://localhost:2283",
-  "apiKey": "your-api-key"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Connection successful!"
-}
-```
-
-#### Test Astrometry Connection
+#### Check Local Solver
 ```
 POST /api/test-astrometry-connection
 ```
 
-**Request Body:**
-```json
-{
-  "apiKey": "your-api-key"
-}
-```
+Checks that `solve-field` is installed and counts the available index files (bundled plus `ASTROMETRY_EXTRA_INDEX_DIRS`). No request body and no external service.
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Connection successful!"
+  "message": "Local Astrometry.net solver ready (144 index files)"
 }
 ```
-
-### Sync & Integration
-
-> **Note:** These endpoints are also available under `/api/immich/*`. See the [Immich Integration](#immich-integration) section for the full set of Immich-related endpoints including metadata sync.
 
 ### Statistics & Data
 
@@ -598,22 +560,6 @@ GET /api/health
   "nodeVersion": "v20.10.0"
 }
 ```
-
-### Asset Proxy
-
-#### Get Asset
-```
-GET /api/assets/{assetId}/{type}
-```
-
-**Parameters:**
-- `assetId` (string) - Immich asset ID
-- `type` (string) - Asset type (`thumbnail`, `original`, etc.)
-
-**Query Parameters:**
-- `size` (string) - Size parameter (e.g., `preview`)
-
-**Response:** Binary image data
 
 ### Catalog
 
@@ -797,98 +743,9 @@ DELETE /api/user-targets/{catalogName}
 
 ---
 
-### Immich Integration
-
-#### Sync Images from Immich
-```
-POST /api/immich/sync-immich
-```
-
-**Response:**
-```json
-{
-  "message": "Successfully synced 25 new images from Immich. Removed 2 images no longer in Immich.",
-  "syncedCount": 25,
-  "removedCount": 2
-}
-```
-
-#### Test Immich Connection
-```
-POST /api/immich/test-immich-connection
-```
-
-**Request Body:**
-```json
-{
-  "host": "http://localhost:2283",
-  "apiKey": "your-api-key"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Connection successful!"
-}
-```
-
-#### Get Immich Albums
-```
-POST /api/immich/albums
-```
-
-**Request Body:**
-```json
-{
-  "host": "http://localhost:2283",
-  "apiKey": "your-api-key"
-}
-```
-
-**Response:**
-```json
-[
-  { "id": "uuid1", "albumName": "Astrophotography" },
-  { "id": "uuid2", "albumName": "Deep Sky Objects" }
-]
-```
-
-#### Sync Metadata to Immich (Single Image)
-```
-POST /api/immich/sync-metadata/{imageId}
-```
-
-**Parameters:**
-- `imageId` (integer) - Image ID
-
-**Response:**
-```json
-{
-  "message": "Metadata synced to Immich"
-}
-```
-
-#### Sync Metadata to Immich (All Images)
-```
-POST /api/immich/sync-metadata-all
-```
-
-**Response:**
-```json
-{
-  "message": "Synced 120 images, 2 failed",
-  "synced": 120,
-  "failed": 2
-}
-```
-
----
-
 ### Locations
 
-Manage saved observing sites. Coordinates applied to images via the location editor also sync back to the corresponding Immich asset.
+Manage saved observing sites. Coordinates applied to images are stored in AstroviaBin only.
 
 #### Get All Locations
 ```
@@ -1136,11 +993,30 @@ Downloads the SQLite database file as an attachment. Only available for SQLite d
 GET /api/admin/cron-jobs
 ```
 
-Returns the status of all scheduled background jobs (Immich sync, notification cleanup).
+Returns the status of all scheduled background jobs (notification cleanup, daily database backup, preview cache cleanup).
 
 **Response:** Array of cron job objects with name, schedule, last run time, and last error.
 
 ---
+
+### Users (admin)
+
+- `GET /api/users` — `{ "builtinAdmin": { "username", "role" }, "users": [{ "id", "username", "role", "createdAt", "updatedAt" }] }` (password hashes are never returned).
+- `POST /api/users` — `{ "username": "guest", "password": "at-least-8", "role": "viewer" }` → `201`. `409` if the name is taken (including the built-in admin).
+- `PATCH /api/users/{id}` — `{ "role": "editor" }` and/or `{ "password": "..." }`. A password change signs that account out.
+- `DELETE /api/users/{id}` → `204`.
+
+### Gallery catalogs
+
+Named groups of photos and FITS frames.
+
+- `GET /api/gallery-catalogs` — list with `imageCount` and `coverImageId`.
+- `POST /api/gallery-catalogs` — `{ "name": "Messier marathon", "description": "optional" }` → `201` (`409` on a duplicate name, case-insensitive).
+- `PATCH /api/gallery-catalogs/{id}` — rename or change the description.
+- `DELETE /api/gallery-catalogs/{id}` — removes the catalog only; images stay.
+- `POST /api/gallery-catalogs/{id}/images` — `{ "imageIds": [1, 2, 3] }` → `{ "added": 3 }` (already present images are skipped).
+- `DELETE /api/gallery-catalogs/{id}/images/{imageId}`
+- `GET /api/images?galleryCatalogId={id}` — gallery filtered by catalog; `GET /api/images/{id}/gallery-catalogs` — catalog ids for one image.
 
 ## Error Handling
 
@@ -1219,7 +1095,7 @@ Auxiliary files and HOTPANTS utilities are also available under
 
 ## WebSocket Events
 
-AstroviaBin uses native WebSocket for real-time updates. Connect to `ws://<host>/ws` and listen for JSON messages:
+AstroviaBin uses native WebSocket for real-time updates. Connect to `ws://<host>/ws` with a signed-in session cookie and listen for JSON messages:
 
 ### Plate Solving Updates
 ```javascript
@@ -1228,7 +1104,7 @@ ws.onmessage = (event) => {
   const { event: type, data } = JSON.parse(event.data);
   if (type === 'plate-solving-update') {
     console.log('Plate solving update:', data);
-    // data: { jobId, status, result, imageId, message }
+    // data: { jobId, status ('pending' | 'processing' | 'success' | 'failed'), result, imageId, message }
   }
 };
 ```
@@ -1251,9 +1127,12 @@ const plateSolveResult = await result.json();
 
 ## Environment Variables
 
-Some API behavior can be configured via environment variables:
+Some API behavior can be configured via environment variables (legacy `SIDEREAL_*` names are accepted as aliases):
 
+- `ASTROVIABIN_ADMIN_USER` / `ASTROVIABIN_ADMIN_PASSWORD` - Built-in administrator (default `admin` / `admin`)
+- `ASTROVIABIN_SESSION_SECRET` - Session signing key (generated and stored next to the database when unset)
 - `ENABLE_PLATE_SOLVING` - Enable/disable plate solving worker
+- `ASTROMETRY_EXTRA_INDEX_DIRS` - Extra Astrometry.net index directories for narrow fields
 - `FITS_ANALYSIS_DIR` - Persistent location for private analysis reports and intermediate FITS layers
 
 Note: Admin settings take precedence over environment variables.

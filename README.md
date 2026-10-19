@@ -411,9 +411,9 @@ Run `npm run check`, `npm run build`, and `docker compose build` after
 changes. Check `http://localhost:5000/api/health` after deployment. This
 fork's source build is the supported path for local FITS analysis.
 
-## Upgrading from Skymmich
+## Upgrading from Sidereal or Skymmich
 
-If you were running the project under its former name (Skymmich), see the [Migration Guide](docs/MIGRATION.md) for step-by-step instructions on renaming Docker volumes, database files, and environment variables.
+AstroviaBin was previously released as Sidereal (and before that as Skymmich). Sidereal installs upgrade in place: old `SIDEREAL_*` variables and an existing `sidereal.db` keep working. See the [Migration Guide](docs/MIGRATION.md) for details and the Skymmich steps.
 
 ## Contributing
 

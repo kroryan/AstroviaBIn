@@ -1,10 +1,35 @@
-# Migration Guide: Skymmich → AstroviaBin
+# Migration Guide
 
-This guide covers what you need to do when upgrading from the Skymmich-branded release to the AstroviaBin rename.
-
-This is a **cosmetic rebrand only** — no data is lost, no schema changes occurred, and application behavior is unchanged. However, several names that Docker and your environment depend on have changed, so a few manual steps are required.
+The project has been renamed twice: **Skymmich → Sidereal → AstroviaBin**. Pick the section for the version you are coming from.
 
 ---
+
+## From Sidereal to AstroviaBin (0.11.0)
+
+No manual migration is needed. AstroviaBin keeps reading everything a Sidereal install already has:
+
+| What | Sidereal | AstroviaBin | Compatibility |
+|---|---|---|---|
+| Environment variables | `SIDEREAL_*` | `ASTROVIABIN_*` | Old names are accepted as aliases; a new name wins when both are set |
+| SQLite default path | `/app/config/sidereal.db` | `/app/config/astroviabin.db` | `sidereal.db` is used automatically when no `astroviabin.db` exists |
+| Docker image / container | `sidereal` | `astroviabin` | Rebuild with the new Compose file; mount the same host folders |
+| Python analysis venv | `/opt/sidereal-python` | `/opt/astroviabin-python` | Inside the image only |
+| Session cookie | `sidereal_session` | `astroviabin_session` | Everyone signs in again once |
+| Stored library identifiers | `sidereal-library://…` | unchanged | Kept as-is so existing records stay valid |
+
+Recommended steps:
+
+1. Rename your variables to `ASTROVIABIN_*` when convenient (for example `ASTROVIABIN_ADMIN_USER`, `ASTROVIABIN_ADMIN_PASSWORD`, `ASTROVIABIN_HOST_DATA`).
+2. Rebuild and start with the new Compose file, mounting the **same** AppData, Media and FITS folders.
+3. Optionally rename the database: stop the container, `mv sidereal.db astroviabin.db` in AppData (or keep `SQLITE_DB_PATH` pointing at the old name).
+
+---
+
+## From Skymmich (historical)
+
+This section covers upgrading from the Skymmich-branded release. The target names below are the current AstroviaBin ones, which also cover the intermediate Sidereal release.
+
+This is a **cosmetic rebrand only** — no data is lost, no schema changes occurred, and application behavior is unchanged. However, several names that Docker and your environment depend on have changed, so a few manual steps are required.
 
 ## Quick summary of breaking changes
 
