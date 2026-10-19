@@ -267,7 +267,10 @@ app.delete('/:id', async (c) => {
       return c.json({ message: 'This image has no locally managed original and cannot be deleted here' }, 409);
     }
 
-    if (fitsPath) await rm(fitsPath, { force: true });
+    if (fitsPath) {
+      await rm(fitsPath, { force: true });
+      await rm(`${fitsPath}.orig`, { force: true }); // original of a normalized upload
+    }
     if (asset) {
       await rm(resolveLibraryAssetPath(asset), { force: true });
       await storage.deleteLibraryAsset(asset.id);

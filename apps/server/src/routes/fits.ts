@@ -17,6 +17,7 @@ import {
   resolveFitsFile,
   type FitsSource,
   type FitsProcessingSettings,
+  normalizeUploadedFits,
 } from '../services/fits';
 import { runStackInThread, type StackMethod } from '../services/fits-stacking';
 import { wcsFromStored } from '../services/wcs';
@@ -191,12 +192,17 @@ app.post('/upload', async (c) => {
     outputPath = path.join(fitsUploadDirectory(), outputName);
     await mkdir(fitsUploadDirectory(), { recursive: true });
     await writeUploadBody(c.req.raw.body, outputPath);
+    // Extension or tile-compressed FITS (Slooh, fpack) become a standard FITS; the original is kept.
+    const normalized = await normalizeUploadedFits(outputPath);
     const image = await importFits(outputPath, fitsUploadDirectory(), 'upload');
-    return c.json({ image, output: outputName }, 201);
+    return c.json({ image, output: outputName, normalized }, 201);
   } catch (error) {
-    if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
+    if (outputPath) {
+      await rm(outputPath, { force: true }).catch(() => {});
+      await rm(`${outputPath}.orig`, { force: true }).catch(() => {});
+    }
     if (error instanceof UploadRequestError) return c.json({ message: error.message }, error.status);
-    if (error instanceof Error && error.message.startsWith('Invalid FITS file:')) {
+    if (error instanceof Error && (error.message.startsWith('Invalid FITS file:') || /^FITS header|^Unsupported FITS/.test(error.message))) {
       return c.json({ message: error.message }, 400);
     }
     return handleRouteError(c, error, 'Failed to upload FITS image');

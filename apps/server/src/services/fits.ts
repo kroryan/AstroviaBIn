@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import sharp from 'sharp';
 
 export const FITS_PATH_PREFIX = 'fits://';
@@ -926,5 +927,48 @@ export async function renderFitsTile(filePath: string, settings: FitsProcessingS
     return await work;
   } finally {
     fitsTileJobs.delete(cachePath);
+  }
+}
+
+/**
+ * Makes an uploaded FITS readable when its image is not in the primary HDU (an IMAGE extension or
+ * a tile-compressed RICE/GZIP image, as Slooh "_cal.fit" or fpack files): the image is rewritten
+ * as a standard single-HDU FITS with the observation keywords merged, and the untouched original
+ * is kept next to it as "<name>.orig". Returns whether the file was rewritten.
+ */
+export async function normalizeUploadedFits(filePath: string): Promise<boolean> {
+  try {
+    const metadata = await readFitsMetadata(filePath);
+    if (metadata.width > 0 && metadata.height > 0) return false;
+  } catch { /* not a primary-HDU image: try to normalize */ }
+  const original = `${filePath}.orig`;
+  const converted = `${filePath}.${randomUUID()}.tmp`;
+  await rename(filePath, original);
+  try {
+    const script = process.env.FITS_NORMALIZE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/fits_normalize.py');
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python', [script, original, converted], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', chunk => { stdout += String(chunk); });
+      child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-2000); });
+      child.on('error', reject);
+      const timer = setTimeout(() => child.kill('SIGKILL'), 300_000);
+      child.on('close', code => {
+        clearTimeout(timer);
+        if (code === 0) return resolve(stdout);
+        let message = '';
+        try { message = JSON.parse(stdout).error; } catch { /* use stderr */ }
+        reject(new Error(`Invalid FITS file: ${message || stderr.trim().split('\n').pop() || 'it could not be read'}`));
+      });
+    });
+    await rename(converted, filePath);
+    await readFitsMetadata(filePath);
+    console.log(`Normalized FITS ${path.basename(filePath)}: ${output.trim()}`);
+    return true;
+  } catch (error) {
+    await rm(converted, { force: true }).catch(() => undefined);
+    await rename(original, filePath).catch(() => undefined);
+    throw error;
   }
 }

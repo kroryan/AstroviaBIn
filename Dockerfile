@@ -120,6 +120,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=builder /build/dist ./dist
 COPY tools/scripts/hotpants_pipeline.py ./tools/scripts/hotpants_pipeline.py
 COPY tools/scripts/hotpants_report.py ./tools/scripts/hotpants_report.py
+COPY tools/scripts/fits_normalize.py ./tools/scripts/fits_normalize.py
 COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
 COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
 COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes
