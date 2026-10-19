@@ -594,8 +594,14 @@ export async function renderFitsPreview(filePath: string, settings: FitsProcessi
   return { buffer, metadata, ...dimensions };
 }
 
+const COMMENTARY_KEYWORDS = new Set(['HISTORY', 'COMMENT', '']);
+
 export function fitsCard(key: string, value?: string): string {
-  const content = value === undefined ? key : `${key.padEnd(8, ' ')}= ${value}`;
+  // Commentary keywords carry free text after column 8 and must not have the "= " value indicator;
+  // CFITSIO-based readers (solve-field among them) reject such files.
+  const content = value === undefined ? key
+    : COMMENTARY_KEYWORDS.has(key) ? `${key.padEnd(8, ' ')}${value}`
+      : `${key.padEnd(8, ' ')}= ${value}`;
   return content.padEnd(FITS_CARD_SIZE, ' ').slice(0, FITS_CARD_SIZE);
 }
 

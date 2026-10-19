@@ -175,3 +175,29 @@ test('registration is not thrown off by a different overall background level bet
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('stacked output keeps a shifted frame aligned with the reference', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
+  const size = 40;
+  const framePaths = [path.join(directory, 'ref.fits'), path.join(directory, 'shifted.fits')];
+  await writeFile(framePaths[0], testFitsMono(size, patchFrame(size, 0, 0)));
+  await writeFile(framePaths[1], testFitsMono(size, patchFrame(size, 3, -2)));
+  const output = path.join(directory, 'stacked.fits');
+  try {
+    await stackFits(framePaths, output, { method: 'mean', register: true });
+    const { pixels } = await readOutputPixels(output);
+    // The patch must stay where the reference has it: centre pixels at full foreground value,
+    // and nothing left behind at the shifted frame's original position.
+    const centre = Math.floor(size / 2);
+    assert.equal(pixels[centre * size + centre], 900);
+    assert.equal(pixels[(centre - 2 - 3) * size + (centre + 3 + 3)], 100);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('writes standard HISTORY cards that CFITSIO readers accept', async () => {
+  const { fitsCard } = await import('./fits');
+  assert.equal(fitsCard('HISTORY', 'stack of 7 frames').slice(0, 10), 'HISTORY st');
+  assert.equal(fitsCard('EXPTIME', '120').slice(0, 10), 'EXPTIME = ');
+});

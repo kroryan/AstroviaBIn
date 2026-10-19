@@ -121,10 +121,18 @@ function fitsHeaderHint(headers: Record<string, string | number | boolean> | und
   const pixel = headerNumber(headers, 'XPIXSZ', 'PIXSIZE1');
   const binning = headerNumber(headers, 'XBINNING') ?? 1;
   if (!scale && focal && pixel) scale = 206.265 * pixel * binning / focal;
+  // An existing WCS (observatory pipelines, earlier solves, stacks registered to a solved frame)
+  // pins both scale and position, so search tightly around it.
+  const cd11 = headerNumber(headers, 'CD1_1');
+  const cd12 = headerNumber(headers, 'CD1_2') ?? 0;
+  const cd21 = headerNumber(headers, 'CD2_1') ?? 0;
+  const cd22 = headerNumber(headers, 'CD2_2');
+  const fromWcs = headers.CRVAL1 !== undefined && cd11 !== undefined && cd22 !== undefined;
+  if (fromWcs) scale = Math.sqrt(Math.abs(cd11! * cd22! - cd12 * cd21)) * 3600 || scale;
   return {
-    label: 'FITS header pointing',
-    ra, dec, radiusDeg: 3,
-    ...(scale ? { scaleLowArcsec: scale * 0.8, scaleHighArcsec: scale * 1.25 } : {}),
+    label: fromWcs ? 'FITS header WCS' : 'FITS header pointing',
+    ra, dec, radiusDeg: fromWcs ? 1 : 3,
+    ...(scale ? { scaleLowArcsec: scale * (fromWcs ? 0.9 : 0.8), scaleHighArcsec: scale * (fromWcs ? 1.1 : 1.25) } : {}),
   };
 }
 

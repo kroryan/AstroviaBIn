@@ -8,6 +8,7 @@ import {
   readPixels,
   type FitsMetadata,
 } from './fits';
+import { parseWcsHeaders, pixelToSky, skyToPixel, type WcsSolution } from './wcs';
 
 export type StackMethod = 'mean' | 'median' | 'sigma-clip';
 
@@ -148,6 +149,32 @@ function estimateTranslation(rawReference: Float32Array, rawTarget: Float32Array
   return { dx: refined.dx, dy: refined.dy };
 }
 
+function headerWcs(metadata: FitsMetadata): WcsSolution | null {
+  try {
+    return metadata.headers.CRVAL1 === undefined ? null : parseWcsHeaders(metadata.headers, metadata.width, metadata.height);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Translation that maps the reference frame onto a target frame using both frames' WCS: the sky
+ * position at the reference centre, located in the target. Returns null when the frames' scales
+ * or rotations differ (a pure translation would not register them).
+ */
+function wcsTranslation(reference: WcsSolution, target: WcsSolution | null): { dx: number; dy: number } | null {
+  if (!target) return null;
+  const scaleRatio = Math.sqrt(Math.abs((target.cd11 * target.cd22 - target.cd12 * target.cd21) / (reference.cd11 * reference.cd22 - reference.cd12 * reference.cd21)));
+  const rotation = Math.atan2(target.cd21, target.cd11) - Math.atan2(reference.cd21, reference.cd11);
+  if (Math.abs(scaleRatio - 1) > 0.002 || Math.abs(Math.sin(rotation)) > 0.002) return null;
+  const centerX = (reference.imageWidth + 1) / 2;
+  const centerY = (reference.imageHeight + 1) / 2;
+  const sky = pixelToSky(reference, centerX, centerY);
+  const pixel = skyToPixel(target, sky.ra, sky.dec);
+  if (!pixel) return null;
+  return { dx: Math.round(pixel.x - centerX), dy: Math.round(pixel.y - centerY) };
+}
+
 function medianOf(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -225,9 +252,13 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
   const { width, height, channels } = reference;
   const planeSize = width * height;
   const referenceLuminance = luminancePlane(frames[0].pixels, reference);
+  const referenceWcs = headerWcs(reference);
   const offsets = frames.map((frame, index) => {
     if (!register || index === 0) return { dx: 0, dy: 0 };
-    return estimateTranslation(referenceLuminance, luminancePlane(frame.pixels, frame.metadata), width, height);
+    // Frames with their own astrometric solution (e.g. observatory pipelines) align exactly
+    // through it; cross-correlation is the fallback for frames without one.
+    const fromWcs = referenceWcs ? wcsTranslation(referenceWcs, headerWcs(frame.metadata)) : null;
+    return fromWcs ?? estimateTranslation(referenceLuminance, luminancePlane(frame.pixels, frame.metadata), width, height);
   });
 
   const stacked = new Float64Array(planeSize * channels);
@@ -238,8 +269,10 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
       for (let x = 0; x < width; x++) {
         let count = 0;
         for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
-          const sourceX = x - offsets[frameIndex].dx;
-          const sourceY = y - offsets[frameIndex].dy;
+          // An offset means the frame's content sits at reference + (dx, dy), so the frame pixel
+          // that lines up with output pixel (x, y) is at (x + dx, y + dy).
+          const sourceX = x + offsets[frameIndex].dx;
+          const sourceY = y + offsets[frameIndex].dy;
           if (sourceX < 0 || sourceX >= width || sourceY < 0 || sourceY >= height) continue;
           const pixel = frames[frameIndex].pixels[base + sourceY * width + sourceX] * fluxScales[frameIndex];
           if (Number.isFinite(pixel)) samples[count++] = pixel;

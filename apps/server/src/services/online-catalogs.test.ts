@@ -25,7 +25,9 @@ it('queries SIMBAD with hierarchical non-star types and persists the complete re
   try {
     const result = await getOnlineCatalog(99123, { ra: 23.462069, dec: 30.660175, radiusDeg: 0.5, pixelScale: 1 });
     assert.ok(result);
-    assert.match(query, /otype\s*!=\s*'star\.\.'/i);
+    // SIMBAD's otype supports only equality, with "X.." selecting X and its subtypes.
+    assert.match(query, /otype\s*=\s*'G\.\.'/i);
+    assert.match(query, /otype\s*=\s*'ISM\.\.'/i);
     assert.doesNotMatch(query, /NOT\s+LIKE/i);
     assert.deepEqual(result.simbad, [{ name: 'M 33', ra: 23.462069, dec: 30.660175, type: 'G', mag: 5.7 }]);
     const files = await readdir(cache);
