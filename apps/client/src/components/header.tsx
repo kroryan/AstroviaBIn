@@ -1,11 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Settings, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
+import { Settings, Files, FolderUp, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, useEffect, useRef } from "react";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { queryClient } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
 import { UPLOAD_ACCEPT, UploadQueuePanel, useFileDrop, useUploadQueue } from "@/components/upload-queue";
@@ -33,6 +34,7 @@ export function Header() {
   const [fitsScanning, setFitsScanning] = useState(false);
   const uploads = useUploadQueue();
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const dragging = useFileDrop(canEdit, uploads.enqueue);
   const socket = useSocket();
   const { toast } = useToast();
@@ -79,6 +81,12 @@ export function Header() {
     event.target.value = '';
   };
 
+  // A chosen folder lists every file in it and its subfolders; only photos and FITS are sent.
+  const handleFolderChosen = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) uploads.enqueue(event.target.files, { skipUnsupported: true });
+    event.target.value = '';
+  };
+
   const unacknowledgedCount = notifications.length;
 
   return (
@@ -106,10 +114,20 @@ export function Header() {
           {/* Right-side actions */}
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <input ref={uploadInputRef} type="file" multiple accept={UPLOAD_ACCEPT} className="hidden" onChange={handleFilesChosen} />
-            {canEdit && <Button onClick={() => uploadInputRef.current?.click()} title="Upload photos and FITS (several at once, or drop them on the page)" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
-              {uploads.busy ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
-              <span>{uploads.busy ? 'Uploading…' : 'Upload'}</span>
-            </Button>}
+            <input ref={folderInputRef} type="file" multiple className="hidden" onChange={handleFolderChosen}
+              {...{ webkitdirectory: '', directory: '' } as Record<string, string>} />
+            {canEdit && <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button title="Upload photos and FITS (files, a whole folder, or drop them on the page)" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
+                  {uploads.busy ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
+                  <span>{uploads.busy ? 'Uploading…' : 'Upload'}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => uploadInputRef.current?.click()}><Files className="mr-2 h-4 w-4" />Files… (photos and FITS)</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => folderInputRef.current?.click()}><FolderUp className="mr-2 h-4 w-4" />Folder (with subfolders)…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>}
             {canEdit && <Button onClick={handleFitsScan} disabled={fitsScanning} title="Scan FITS library" aria-label="Scan FITS library" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
               {fitsScanning ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <ScanLine className="h-4 w-4 2xl:mr-2" />}
               <span className="inline 2xl:hidden">{fitsScanning ? 'Scanning…' : 'FITS Scan'}</span><span className="hidden 2xl:inline">{fitsScanning ? 'Scanning FITS…' : 'Scan FITS'}</span>
@@ -188,6 +206,12 @@ export function Header() {
                     {uploads.busy ? 'Uploading…' : 'Upload photos & FITS'}
                   </button>
                   <button
+                    onClick={() => { setMobileOpen(false); folderInputRef.current?.click(); }}
+                    className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
+                  >
+                    <FolderUp className="h-4 w-4" /> Upload a folder
+                  </button>
+                  <button
                     onClick={() => { setMobileOpen(false); handleFitsScan(); }}
                     disabled={fitsScanning}
                     className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
@@ -231,7 +255,7 @@ export function Header() {
           <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="rounded-xl border-2 border-dashed border-primary px-8 py-6 text-center">
               <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
-              <p className="font-display uppercase tracking-wider text-foreground">Drop photos and FITS to upload</p>
+              <p className="font-display uppercase tracking-wider text-foreground">Drop photos, FITS or folders to upload</p>
             </div>
           </div>
         )}

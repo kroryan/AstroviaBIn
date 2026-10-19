@@ -17,7 +17,7 @@ type Kind = "image" | "fits";
 type Stage = "queued" | "uploading" | "processing" | "done" | "failed";
 export interface UploadItem { id: number; name: string; kind: Kind | null; progress: number; stage: Stage; error?: string }
 
-function kindOf(name: string): Kind | null {
+export function kindOf(name: string): Kind | null {
   const extension = name.slice(name.lastIndexOf(".")).toLowerCase();
   if (FITS_EXTENSIONS.includes(extension)) return "fits";
   if (IMAGE_EXTENSIONS.includes(extension)) return "image";
@@ -51,7 +51,7 @@ export function useUploadQueue() {
   const queue = useRef<Array<{ id: number; file: File }>>([]);
   const running = useRef(false);
   const nextId = useRef(1);
-  const batch = useRef({ done: 0, failed: 0, images: 0, fits: 0 });
+  const batch = useRef({ done: 0, failed: 0, images: 0, fits: 0, skipped: 0 });
   const { toast } = useToast();
 
   const update = (id: number, patch: Partial<UploadItem>) =>
@@ -81,22 +81,29 @@ export function useUploadQueue() {
       }
     }
     running.current = false;
-    const { done, failed, images, fits } = batch.current;
-    batch.current = { done: 0, failed: 0, images: 0, fits: 0 };
+    const { done, failed, images, fits, skipped } = batch.current;
+    batch.current = { done: 0, failed: 0, images: 0, fits: 0, skipped: 0 };
     for (const key of ["/api/images", "/api/stats", "/api/tags", "/api/fits", "/api/gallery-catalogs"]) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
     const parts = [images && `${images} photo${images === 1 ? "" : "s"}`, fits && `${fits} FITS`].filter(Boolean).join(" and ");
     toast({
       title: failed ? `${done} uploaded, ${failed} failed` : `${done} file${done === 1 ? "" : "s"} uploaded`,
-      description: done ? `${parts} saved in AstroviaBin's local library.` : "See the upload panel for the reasons.",
+      description: `${done ? `${parts} saved in AstroviaBin's local library.` : "See the upload panel for the reasons."}${skipped ? ` ${skipped} other file${skipped === 1 ? "" : "s"} in the folder skipped.` : ""}`,
       variant: failed && !done ? "destructive" : undefined,
     });
   }, [toast]);
 
-  const enqueue = useCallback((files: File[] | FileList) => {
-    const list = [...files];
-    if (!list.length) return;
+  /** `skipUnsupported`: folder uploads silently leave out non-photo/FITS files (sidecars, notes…). */
+  const enqueue = useCallback((files: File[] | FileList, options: { skipUnsupported?: boolean } = {}) => {
+    const all = [...files].filter(file => !/^\./.test(file.name)); // hidden files (.DS_Store…)
+    const list = options.skipUnsupported ? all.filter(file => kindOf(file.name)) : all;
+    const skipped = [...files].length - list.length;
+    if (!list.length) {
+      if (skipped) toast({ title: "Nothing to upload", description: `No photos or FITS found (${skipped} other file${skipped === 1 ? "" : "s"} skipped).` });
+      return;
+    }
+    batch.current.skipped += skipped;
     const added = list.map(file => ({ id: nextId.current++, file }));
     queue.current.push(...added);
     const continuing = running.current;
@@ -106,7 +113,7 @@ export function useUploadQueue() {
       ...added.map(({ id, file }) => ({ id, name: file.name, kind: kindOf(file.name), progress: 0, stage: "queued" as Stage })),
     ]);
     void run();
-  }, [run]);
+  }, [run, toast]);
 
   const clear = useCallback(() => setItems(previous => previous.filter(item => item.stage === "queued" || item.stage === "uploading" || item.stage === "processing")), []);
   const busy = items.some(item => item.stage === "queued" || item.stage === "uploading" || item.stage === "processing");
@@ -149,7 +156,7 @@ export function UploadQueuePanel({ items, busy, onClose }: { items: UploadItem[]
 }
 
 /** Drop photos and FITS anywhere on the page to upload them. */
-export function useFileDrop(enabled: boolean, onFiles: (files: FileList) => void): boolean {
+export function useFileDrop(enabled: boolean, onFiles: (files: File[] | FileList, options?: { skipUnsupported?: boolean }) => void): boolean {
   const [dragging, setDragging] = useState(false);
   useEffect(() => {
     if (!enabled) return;
@@ -163,7 +170,13 @@ export function useFileDrop(enabled: boolean, onFiles: (files: FileList) => void
       event.preventDefault();
       depth = 0;
       setDragging(false);
-      if (event.dataTransfer?.files.length) onFiles(event.dataTransfer.files);
+      const entries = [...(event.dataTransfer?.items ?? [])].map(item => item.webkitGetAsEntry?.()).filter((entry): entry is FileSystemEntry => Boolean(entry));
+      if (entries.some(entry => entry.isDirectory)) {
+        // Dropped folders: walk them (and their subfolders) for photos and FITS.
+        void Promise.all(entries.map(filesIn)).then(lists => onFiles(lists.flat(), { skipUnsupported: true }));
+      } else if (event.dataTransfer?.files.length) {
+        onFiles(event.dataTransfer.files);
+      }
     };
     window.addEventListener("dragenter", enter);
     window.addEventListener("dragleave", leave);
@@ -177,4 +190,21 @@ export function useFileDrop(enabled: boolean, onFiles: (files: FileList) => void
     };
   }, [enabled, onFiles]);
   return dragging;
+}
+
+/** Every file in a dropped file or folder entry, subfolders included. */
+async function filesIn(entry: FileSystemEntry): Promise<File[]> {
+  if (entry.isFile) {
+    return new Promise(resolve => (entry as FileSystemFileEntry).file(file => resolve([file]), () => resolve([])));
+  }
+  if (!entry.isDirectory) return [];
+  const reader = (entry as FileSystemDirectoryEntry).createReader();
+  const children: FileSystemEntry[] = [];
+  // readEntries returns at most ~100 entries per call; keep reading until it returns none.
+  for (;;) {
+    const batch = await new Promise<FileSystemEntry[]>(resolve => reader.readEntries(resolve, () => resolve([])));
+    if (!batch.length) break;
+    children.push(...batch);
+  }
+  return (await Promise.all(children.map(filesIn))).flat();
 }
