@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { mkdir, readFile, rename, stat } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import path from 'node:path';
@@ -241,6 +241,34 @@ app.patch('/:id', async (c) => {
     return c.json(updatedImage);
   } catch (error) {
     return handleRouteError(c, error, 'Failed to update image');
+  }
+});
+
+// Delete an image from AstroviaBin and remove its locally managed original.
+// External/legacy references are intentionally not deleted because AstroviaBin
+// does not own those source files.
+app.delete('/:id', async (c) => {
+  try {
+    const id = Number(c.req.param('id'));
+    if (!Number.isSafeInteger(id) || id < 1) return c.json({ message: 'Invalid image ID' }, 400);
+    const image = await storage.getAstroImage(id);
+    if (!image) return c.json({ message: 'Image not found' }, 404);
+
+    const fitsPath = resolveFitsFile(image.originalPath || null);
+    const asset = await storage.getLibraryAssetForAstroImage(id);
+    if (!fitsPath && !asset) {
+      return c.json({ message: 'This image has no locally managed original and cannot be deleted here' }, 409);
+    }
+
+    if (fitsPath) await rm(fitsPath, { force: true });
+    if (asset) {
+      await rm(resolveLibraryAssetPath(asset), { force: true });
+      await storage.deleteLibraryAsset(asset.id);
+    }
+    await storage.deleteAstroImage(id);
+    return c.json({ ok: true, id });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to delete image');
   }
 });
 

@@ -158,24 +158,26 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             >
               {isExpanded ? <Minimize2 className="h-5 w-5 text-white" /> : <Maximize2 className="h-5 w-5 text-white" />}
             </button>
-            <button
-              onClick={downloadCurrentImage}
-              aria-label="Download original image"
-              title="Download original image"
-              className="p-2 rounded-full hover:bg-black/60 text-white border border-white/20 bg-black/50"
-            >
-              <Download className="h-5 w-5" />
-            </button>
-            {currentImage.plateSolved && !isPlateSolveProcessing && (
+            {!isExpanded && <>
               <button
-                onClick={() => setShowAnnotations((v) => !v)}
-                aria-label={showAnnotations ? 'Hide Annotations' : 'Show Annotations'}
-                className="p-2 rounded-full hover:bg-black/60 text-white border border-white/20 bg-black/50 disabled:opacity-50"
-                disabled={annotationsLoading}
+                onClick={downloadCurrentImage}
+                aria-label="Download original image"
+                title="Download original image"
+                className="p-2 rounded-full hover:bg-black/60 text-white border border-white/20 bg-black/50"
               >
-                <Eye className="h-5 w-5" />
+                <Download className="h-5 w-5" />
               </button>
-            )}
+              {currentImage.plateSolved && !isPlateSolveProcessing && (
+                <button
+                  onClick={() => setShowAnnotations((v) => !v)}
+                  aria-label={showAnnotations ? 'Hide Annotations' : 'Show Annotations'}
+                  className="p-2 rounded-full hover:bg-black/60 text-white border border-white/20 bg-black/50 disabled:opacity-50"
+                  disabled={annotationsLoading}
+                >
+                  <Eye className="h-5 w-5" />
+                </button>
+              )}
+            </>}
           </div>
         </div>
         <div className="relative w-full max-w-md mx-auto bg-black rounded-b-xl overflow-hidden flex items-center justify-center mt-4" style={{ height: isExpanded ? '100vh' : 'min(50vh, 60vw)' }}>
@@ -200,7 +202,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             </div>
           )}
         </div>
-        {skyOverlay && (
+        {skyOverlay && !isExpanded && (
           <div className="max-w-md mx-auto w-full px-4 mt-2">
             <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
           </div>
@@ -380,7 +382,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               <PlateSolveControls image={currentImage} job={plateSolvingJob} annotationsSource={annotationsData?.source} annotationsMessage={annotationsData?.message} />
             </section>
             <GalleryCatalogPicker image={currentImage} />
-            <ImageTagsEditor image={currentImage} />
+            <ImageTagsEditor image={currentImage} onDeleted={onClose} />
             {/* Description */}
             {image.description && (
               <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
@@ -434,35 +436,6 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                 <Minimize2 className="mr-2 h-4 w-4" />
                 Collapse
               </Button>
-            </div>
-            {skyOverlay && (
-              <div className="absolute bottom-16 right-4 z-50 max-w-md">
-                <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
-              </div>
-            )}
-            {/* Show/Hide Annotations Button (bottom right) */}
-            <div className="absolute bottom-4 right-4 z-50 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadCurrentImage}
-                className="bg-black/50 text-white border-white/20 hover:bg-black/70"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Download
-              </Button>
-              {image.plateSolved && !isPlateSolveProcessing && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowAnnotations((v) => !v)}
-                  className="bg-black/50 text-white border-white/20 hover:bg-black/70"
-                  disabled={annotationsLoading}
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  {showAnnotations ? "Hide" : "Show"} Annotations
-                </Button>
-              )}
             </div>
           </div>
         </div>
@@ -818,7 +791,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             </section>
 
             <GalleryCatalogPicker image={currentImage} dark />
-            <ImageTagsEditor image={currentImage} dark />
+            <ImageTagsEditor image={currentImage} dark onDeleted={onClose} />
 
             {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
             <FitsProcessingPanel image={currentImage} />
@@ -840,13 +813,13 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
               height="100%"
               disableZoom={true}
             />
-            {skyOverlay && (
+            {skyOverlay && !isExpanded && (
               <div className="absolute bottom-16 right-4 z-10 max-w-md">
                 <SkyLayerToggles layers={skyLayers} onChange={setSkyLayers} overlay={skyOverlay} />
               </div>
             )}
             {/* Show/Hide Annotations Button (desktop/tablet, not expanded) */}
-            <div className="absolute bottom-4 right-4 z-10 flex gap-2">
+            {!isExpanded && <div className="absolute bottom-4 right-4 z-10 flex gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -868,7 +841,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
                   {showAnnotations ? "Hide" : "Show"} Annotations
                 </Button>
               )}
-            </div>
+            </div>}
             {/* Expand Button (desktop/tablet, not expanded) */}
             <div className="absolute top-4 right-4 z-10">
               <Button

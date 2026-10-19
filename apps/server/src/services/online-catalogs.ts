@@ -61,7 +61,9 @@ async function fetchGaia(ra: number, dec: number, radiusDeg: number, magLimit: n
 async function fetchSimbad(ra: number, dec: number, radiusDeg: number): Promise<OnlineObject[]> {
   const query = `SELECT TOP 400 b.main_id, b.ra, b.dec, b.otype, f.V FROM basic AS b LEFT JOIN allfluxes AS f ON b.oid = f.oidref ` +
     `WHERE CONTAINS(POINT('ICRS', b.ra, b.dec), CIRCLE('ICRS', ${ra.toFixed(6)}, ${dec.toFixed(6)}, ${radiusDeg.toFixed(5)})) = 1 ` +
-    `AND b.ra IS NOT NULL AND b.otype NOT LIKE '%*' AND b.otype NOT IN ('IR', 'X', 'Rad', 'UV', 'gam', 'mR', 'cm', 'mm', 'smm', 'HI', '?', 'reg', 'err', 'PoC', 'PoG', 'Unknown')`;
+    // SIMBAD TAP rejects NOT LIKE on otype. The hierarchical type excludes stellar subtypes while
+    // retaining galaxies, nebulae, clusters and other non-stellar objects.
+    `AND b.ra IS NOT NULL AND b.otype != 'star..'`;
   const params = new URLSearchParams({ request: 'doQuery', lang: 'adql', format: 'json', query });
   const json = JSON.parse(await fetchText(`https://simbad.cds.unistra.fr/simbad/sim-tap/sync?${params}`)) as { data?: Array<[string, number, number, string, number | null]> };
   return (json.data ?? []).map(([name, r, d, type, v]) => ({ name: String(name).replace(/\s+/g, ' ').trim(), ra: Number(r), dec: Number(d), type: String(type), mag: v ?? null }))

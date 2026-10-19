@@ -24,6 +24,19 @@ function testFits(): Buffer {
   return Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), data, Buffer.alloc(2880 - data.length)]);
 }
 
+function largeHeaderTestFits(): Buffer {
+  const cards = [card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', '2'), card('NAXIS2', '2')];
+  // Real camera/software headers can exceed the old 1 MiB read limit.
+  for (let index = 0; index < 14_000; index++) cards.push(`COMMENT header metadata ${index}`.padEnd(80, ' ').slice(0, 80));
+  cards.push(card('END'));
+  const rawHeader = Buffer.from(cards.join(''), 'ascii');
+  const paddedHeader = Buffer.alloc(Math.ceil(rawHeader.length / 2880) * 2880, 32);
+  rawHeader.copy(paddedHeader);
+  const data = Buffer.alloc(2880);
+  [0, 100, 500, 1000].forEach((value, index) => data.writeInt16BE(value, index * 2));
+  return Buffer.concat([paddedHeader, data]);
+}
+
 /** A mono FITS wider than the default 2048px preview cap, to tell "full" resolution apart from it. */
 function wideTestFits(width: number): Buffer {
   const header = Buffer.from([
@@ -70,6 +83,13 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     assert.equal(upload.status, 201);
     const uploaded = await upload.json() as { image: { originalPath: string } };
     assert.match(uploaded.image.originalPath, /^fits-upload:\/\/M42_final-\d+\.fits$/);
+
+    const largeHeaderUpload = await app.request('/api/fits/upload?filename=long-header.fits', {
+      method: 'POST',
+      headers: { 'content-type': 'application/fits' },
+      body: new Uint8Array(largeHeaderTestFits()),
+    });
+    assert.equal(largeHeaderUpload.status, 201, await largeHeaderUpload.text());
 
     const images = await app.request('/api/fits');
     const image = (await images.json() as Array<{ id: number; originalPath: string; targetName: string; tags: string[] }>).find(item => item.originalPath === 'fits://m42.fits');

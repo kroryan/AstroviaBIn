@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Pencil, Plus, X } from 'lucide-react';
+import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,11 +25,12 @@ function normalizedTags(tags: string[]): string[] {
   }, []);
 }
 
-export function ImageTagsEditor({ image, dark = false }: { image: AstroImage; dark?: boolean }) {
+export function ImageTagsEditor({ image, dark = false, onDeleted }: { image: AstroImage; dark?: boolean; onDeleted?: () => void }) {
   const [tags, setTags] = useState<string[]>(image.tags || []);
   const [objectType, setObjectType] = useState(image.objectType || '');
   const [newTag, setNewTag] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const { toast } = useToast();
 
@@ -73,6 +74,23 @@ export function ImageTagsEditor({ image, dark = false }: { image: AstroImage; da
       toast({ title: 'Could not remove classification', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteImage = async () => {
+    const name = image.title || image.filename || 'this image';
+    if (!window.confirm(`Delete "${name}" and its locally stored original? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await apiRequest('DELETE', `/api/images/${image.id}`);
+      await queryClient.invalidateQueries({ queryKey: ['/api/images'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/tags'] });
+      toast({ title: 'Image deleted', description: `${name} was removed from AstroviaBin.` });
+      onDeleted?.();
+    } catch (error) {
+      toast({ title: 'Could not delete image', description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -120,6 +138,11 @@ export function ImageTagsEditor({ image, dark = false }: { image: AstroImage; da
         </div>
         <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-muted-foreground'}`}>Deep Sky and Solar System are mutually exclusive. Solar System and planet tags are excluded from plate solving.</p>
       </>}
+      <div className="mt-4 border-t border-border/60 pt-3">
+        <Button type="button" variant="destructive" size="sm" className="w-full" onClick={() => void deleteImage()} disabled={deleting || saving}>
+          <Trash2 className="mr-2 h-4 w-4" />{deleting ? 'Deleting…' : 'Delete image / FITS'}
+        </Button>
+      </div>
     </section>
   );
 }

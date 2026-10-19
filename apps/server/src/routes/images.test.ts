@@ -1,7 +1,7 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 delete process.env.DATABASE_URL;
@@ -92,4 +92,42 @@ it('returns 404 from /:id/full when the image has no private original and is not
   const app = new Hono().route('/api/images', routes);
   const response = await app.request('/api/images/1/full');
   assert.equal(response.status, 404);
+});
+
+it('deletes a private-library image and its local original', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-delete-'));
+  const previousLibrary = process.env.LIBRARY_STORAGE_DIR;
+  process.env.LIBRARY_STORAGE_DIR = directory;
+  const original = path.join(directory, 'originals', 'photo.jpg');
+  await mkdir(path.dirname(original), { recursive: true });
+  await writeFile(original, new Uint8Array([1, 2, 3]));
+  t.mock.method(storage, 'getAstroImage', async () => ({ id: 42, originalPath: 'sidereal-library://7' }));
+  t.mock.method(storage, 'getLibraryAssetForAstroImage', async () => ({ id: 7, relativePath: 'originals/photo.jpg' }));
+  let deletedAsset: number | undefined;
+  let deletedImage: number | undefined;
+  t.mock.method(storage, 'deleteLibraryAsset', async (id: number) => { deletedAsset = id; });
+  t.mock.method(storage, 'deleteAstroImage', async (id: number) => { deletedImage = id; return true; });
+  try {
+    const app = new Hono().route('/api/images', routes);
+    const response = await app.request('/api/images/42', { method: 'DELETE' });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, id: 42 });
+    assert.equal(deletedAsset, 7);
+    assert.equal(deletedImage, 42);
+    await assert.rejects(access(original));
+  } finally {
+    if (previousLibrary === undefined) delete process.env.LIBRARY_STORAGE_DIR; else process.env.LIBRARY_STORAGE_DIR = previousLibrary;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('refuses to delete an image whose original is not managed locally', async t => {
+  t.mock.method(storage, 'getAstroImage', async () => ({ id: 43, originalPath: 'legacy-external://photo' }));
+  t.mock.method(storage, 'getLibraryAssetForAstroImage', async () => undefined);
+  let deleted = false;
+  t.mock.method(storage, 'deleteAstroImage', async () => { deleted = true; return true; });
+  const app = new Hono().route('/api/images', routes);
+  const response = await app.request('/api/images/43', { method: 'DELETE' });
+  assert.equal(response.status, 409);
+  assert.equal(deleted, false);
 });

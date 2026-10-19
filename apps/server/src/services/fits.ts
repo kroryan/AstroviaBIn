@@ -8,7 +8,7 @@ export const FITS_DERIVED_PATH_PREFIX = 'fits-derived://';
 export const FITS_UPLOAD_PATH_PREFIX = 'fits-upload://';
 export const FITS_BLOCK_SIZE = 2880;
 export const FITS_CARD_SIZE = 80;
-const MAX_HEADER_BYTES = 1024 * 1024;
+const MAX_HEADER_BYTES = 64 * 1024 * 1024;
 const DEFAULT_MAX_PROCESS_BYTES = 1024 * 1024 * 1024;
 const FITS_TILE_SIZE = 256;
 const FITS_RANGE_CACHE_MAX = 32;
@@ -69,22 +69,47 @@ export interface FitsMetadata {
 
 export async function readFitsHeader(filePath: string): Promise<Record<string, string | number | boolean>> {
   const source = await stat(filePath);
-  const file = Buffer.alloc(Math.min(source.size, MAX_HEADER_BYTES));
+  return (await readFitsHeaderCards(filePath, source.size)).headers;
+}
+
+interface ParsedFitsHeader {
+  cards: string[];
+  headers: Record<string, string | number | boolean>;
+  endOffset: number;
+}
+
+/** Read complete FITS blocks until END, without assuming the header fits in a single 1 MiB read. */
+async function readFitsHeaderCards(filePath: string, sourceSize: number): Promise<ParsedFitsHeader> {
+  const cards: string[] = [];
+  const headers: Record<string, string | number | boolean> = {};
+  const block = Buffer.alloc(FITS_BLOCK_SIZE);
+  const limit = Math.min(sourceSize, MAX_HEADER_BYTES);
   const handle = await open(filePath, 'r');
   try {
-    await handle.read(file, 0, file.length, 0);
+    for (let blockOffset = 0; blockOffset + FITS_BLOCK_SIZE <= limit; blockOffset += FITS_BLOCK_SIZE) {
+      let bytesRead = 0;
+      while (bytesRead < FITS_BLOCK_SIZE) {
+        const result = await handle.read(block, bytesRead, FITS_BLOCK_SIZE - bytesRead, blockOffset + bytesRead);
+        if (result.bytesRead === 0) break;
+        bytesRead += result.bytesRead;
+      }
+      if (bytesRead !== FITS_BLOCK_SIZE) break;
+
+      for (let offset = 0; offset < FITS_BLOCK_SIZE; offset += FITS_CARD_SIZE) {
+        const card = block.subarray(offset, offset + FITS_CARD_SIZE).toString('ascii');
+        cards.push(card);
+        const key = card.slice(0, 8).trim();
+        if (key === 'END') return { cards, headers, endOffset: blockOffset + offset + FITS_CARD_SIZE };
+        if (key && card[8] === '=') headers[key] = parseFitsValue(card.slice(10).split(/\s\/\s/)[0] || '');
+      }
+    }
   } finally {
     await handle.close();
   }
-
-  const headers: Record<string, string | number | boolean> = {};
-  for (let offset = 0; offset + FITS_CARD_SIZE <= file.length; offset += FITS_CARD_SIZE) {
-    const card = file.subarray(offset, offset + FITS_CARD_SIZE).toString('ascii');
-    const key = card.slice(0, 8).trim();
-    if (key === 'END') return headers;
-    if (key && card[8] === '=') headers[key] = parseFitsValue(card.slice(10).split(/\s\/\s/)[0] || '');
+  if (sourceSize > MAX_HEADER_BYTES) {
+    throw new Error(`Invalid FITS file: header exceeds the ${MAX_HEADER_BYTES / 1024 / 1024} MiB safety limit without END`);
   }
-  throw new Error('Invalid FITS header: missing END card');
+  throw new Error('Invalid FITS file: missing END header card');
 }
 
 export interface FitsPreview {
@@ -131,33 +156,7 @@ function maxProcessBytes(): number {
 
 export async function readFitsMetadata(filePath: string): Promise<FitsMetadata> {
   const source = await stat(filePath);
-  const limit = Math.min(source.size, MAX_HEADER_BYTES);
-  const file = Buffer.alloc(limit);
-  const handle = await open(filePath, 'r');
-  try {
-    await handle.read(file, 0, limit, 0);
-  } finally {
-    await handle.close();
-  }
-  const cards: string[] = [];
-  const headers: Record<string, string | number | boolean> = {};
-  let endOffset = -1;
-
-  for (let offset = 0; offset + FITS_CARD_SIZE <= limit; offset += FITS_CARD_SIZE) {
-    const card = file.subarray(offset, offset + FITS_CARD_SIZE).toString('ascii');
-    cards.push(card);
-    const key = card.slice(0, 8).trim();
-    if (key === 'END') {
-      endOffset = offset + FITS_CARD_SIZE;
-      break;
-    }
-    if (key && card[8] === '=') {
-      const rawValue = card.slice(10).split(/\s\/\s/)[0] || '';
-      headers[key] = parseFitsValue(rawValue);
-    }
-  }
-
-  if (endOffset === -1) throw new Error('Invalid FITS file: missing END header card');
+  const { cards, headers, endOffset } = await readFitsHeaderCards(filePath, source.size);
   if (headers.SIMPLE !== true && headers.XTENSION !== 'IMAGE') {
     throw new Error('Unsupported FITS file: primary HDU is not an image');
   }

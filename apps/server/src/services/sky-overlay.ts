@@ -429,7 +429,7 @@ export function mergeOnlineCatalog(overlay: SkyOverlay, wcs: WcsSolution, online
     }
     return undefined;
   };
-  const stars = [...overlay.stars];
+  const stars = overlay.stars.map(star => ({ ...star, names: [...star.names] }));
   const years = epoch - 2016;
   for (const gaia of online.gaia) {
     const dec = gaia.dec + gaia.pmdec * years / 3.6e6;
@@ -450,20 +450,25 @@ export function mergeOnlineCatalog(overlay: SkyOverlay, wcs: WcsSolution, online
     index(star);
   }
 
-  const objects = [...overlay.objects];
+  const objects = overlay.objects.map(object => ({ ...object, names: [...object.names] }));
   const objectRadius = Math.max(4, 20 / 3600 / scaleDeg);
   for (const entry of online.simbad) {
     const point = project(wcs, entry.ra, entry.dec);
     if (!point || !insideFrame(point, width, height)) continue;
     const match = objects.find(object => Math.hypot(object.x - point[0], object.y - point[1]) <= Math.max(objectRadius, Math.min(object.rx, object.ry)));
     if (match) {
-      if (!match.names.includes(entry.name)) match.names.push(entry.name);
+      match.names = [entry.name, ...match.names.filter(name => name !== entry.name)];
+      match.label = entry.name;
+      match.type = entry.type;
+      match.typeLabel = SIMBAD_TYPES[entry.type] ?? entry.type;
+      if (entry.mag !== null) match.mag = entry.mag;
+      match.priority = 1000 + (entry.mag === null ? 0 : Math.max(0, 18 - entry.mag));
       continue;
     }
     objects.push({
       id: entry.name, label: entry.name, common: null, names: [entry.name], type: entry.type, typeLabel: SIMBAD_TYPES[entry.type] ?? entry.type,
       x: point[0], y: point[1], rx: 0, ry: 0, angle: 0, mag: entry.mag, ra: entry.ra, dec: entry.dec,
-      priority: 25 + (entry.mag === null ? 0 : Math.max(0, 18 - entry.mag)),
+      priority: 1000 + (entry.mag === null ? 0 : Math.max(0, 18 - entry.mag)),
     });
   }
   return {

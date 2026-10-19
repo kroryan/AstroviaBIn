@@ -2,7 +2,7 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 delete process.env.DATABASE_URL;
 process.env.SQLITE_DB_PATH = ':memory:';
-const { computeSkyOverlay, offsetPoint } = await import('./sky-overlay');
+const { computeSkyOverlay, mergeOnlineCatalog, offsetPoint } = await import('./sky-overlay');
 const { parseWcsHeaders, skyToPixel } = await import('./wcs');
 import type { SkyCatalog } from './sky-catalog';
 
@@ -81,6 +81,22 @@ it('draws deep-sky outlines with catalogue size and position angle', () => {
   assert.ok(Math.abs(Math.abs(nebula.angle) - 180) < 0.5, `angle ${nebula.angle}`);
 });
 
+it('gives SIMBAD names and object metadata priority over offline catalogue matches', () => {
+  const offline = computeSkyOverlay(wcs, { epoch: 2000, catalog: catalog() })!;
+  const merged = mergeOnlineCatalog(offline, wcs, {
+    fetchedAt: '2026-10-19T00:00:00.000Z',
+    gaia: [],
+    simbad: [{ name: 'Merope Nebula', ra: 56.75, dec: 23.9, type: 'RNe', mag: 4.0 }],
+    errors: [],
+  }, 2000);
+  const object = merged.objects.find(candidate => candidate.names.includes('Merope Nebula'))!;
+  assert.ok(object);
+  assert.equal(object.label, 'Merope Nebula');
+  assert.equal(object.names[0], 'Merope Nebula');
+  assert.equal(object.type, 'RNe');
+  assert.equal(object.mag, 4.0);
+  assert.ok(object.priority > 1000, `SIMBAD match should be prioritized, got ${object.priority}`);
+});
 it('projects constellation figures and an RA/Dec grid', () => {
   const overlay = computeSkyOverlay(wcs, { epoch: 2000, catalog: catalog() })!;
   assert.equal(overlay.constellations.labels[0].name, 'Taurus');
