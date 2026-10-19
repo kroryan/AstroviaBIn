@@ -694,7 +694,10 @@ def detect_candidates(difference_path, noise_path, bad_mask_path, mask, science_
     reference, _ = mono_data(reference_path)
     if noise.shape != difference.shape or bad_mask.shape != difference.shape:
         raise ValueError('HOTPANTS output layers do not match the difference image')
-    valid = (mask == 0) & (bad_mask == 0) & np.isfinite(difference) & np.isfinite(noise) & (noise > 0)
+    # HOTPANTS bit 0x8000 (FLAG_OUTPUT_ISBAD) marks unusable output pixels. Other bits are
+    # informational, e.g. 0x40 FLAG_OK_CONV = valid pixel whose kernel touched a flagged neighbour.
+    output_bad = (np.nan_to_num(bad_mask).astype(np.int64) & 0x8000) != 0
+    valid = (mask == 0) & ~output_bad & np.isfinite(difference) & np.isfinite(noise) & (noise > 0)
     valid &= np.isfinite(science) & np.isfinite(reference)
     valid &= ~binary_dilation(~valid, iterations=max(3, math.ceil(fwhm)))
     significance = np.zeros_like(difference)
@@ -851,7 +854,9 @@ def known_solar_system_objects(wcs, shape, header):
     location = str(header.get('MPCCODE') or header.get('OBSCODE') or LCO_SITE_CODES.get(site, '500'))
     query = urllib.parse.urlencode({'-ep': f'{epoch.jd:.6f}', '-ra': f'{float(ra):.6f}', '-dec': f'{float(dec):.6f}',
                                     '-rd': f'{min(radius * 1.05, 10):.5f}', '-mime': 'json', '-output': 'basic',
-                                    '-loc': location, '-objFilter': '111', '-refsys': 'EQJ2000', '-from': 'AstroviaBin'})
+                                    # SkyBoT's observer-location parameter is "-observer" ("-loc" is silently ignored,
+                                    # which drops the topocentric parallax: ~15" for a near-Earth asteroid at 0.4 au).
+                                    '-observer': location, '-objFilter': '111', '-refsys': 'EQJ2000', '-from': 'AstroviaBin'})
     url = 'https://ssp.imcce.fr/webservices/skybot/api/conesearch.php?' + query
     try:
         request = urllib.request.Request(url, headers={'User-Agent': 'AstroviaBin private FITS analysis/1.0'})

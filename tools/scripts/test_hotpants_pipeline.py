@@ -29,7 +29,7 @@ class CandidateValidationTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def analyze(self, science_point=True, reference_point=False, dipole=False, bad=False):
+    def analyze(self, science_point=True, reference_point=False, dipole=False, bad=False, bad_value=0x8000 | 0x80 | 0x01):
         science = self.rng.normal(30, 2, (96, 96))
         reference = self.rng.normal(100, 2, (96, 96))
         difference = self.rng.normal(0, 2, (96, 96)) + self.point
@@ -41,9 +41,10 @@ class CandidateValidationTests(unittest.TestCase):
             difference[48, 54] = -80
         noise = np.full((96, 96), 2.0)
         mask = np.zeros((96, 96), dtype=np.uint8)
-        bad_mask = np.zeros_like(mask)
+        bad_mask = np.zeros((96, 96), dtype=np.int32)
         if bad:
-            bad_mask[48, 48] = 1
+            # What HOTPANTS writes for an unusable pixel (FLAG_OUTPUT_ISBAD | FLAG_INPUT_ISBAD | FLAG_BAD_PIXVAL).
+            bad_mask[46:51, 46:51] = bad_value
         for name, data in [('science', science), ('reference-aligned', reference),
                            ('difference', difference), ('noise', noise),
                            ('bad-pixels', bad_mask)]:
@@ -71,6 +72,11 @@ class CandidateValidationTests(unittest.TestCase):
         candidates, _, rejected = self.analyze(dipole=True)
         self.assertEqual(candidates, [])
         self.assertGreater(rejected['subtractionDipole'], 0)
+
+    def test_ok_conv_flag_keeps_a_real_source(self):
+        """Regression: FLAG_OK_CONV (0x40) marks valid pixels; it must not hide a new source."""
+        candidates, _, rejected = self.analyze(bad=True, bad_value=0x40)
+        self.assertEqual(len(candidates), 1, rejected)
 
     def test_masked_source_is_rejected(self):
         candidates, _, _ = self.analyze(bad=True)
@@ -265,6 +271,36 @@ class BrightStarMaskTests(unittest.TestCase):
         mask = elongated_source_mask(image, np.zeros(image.shape, dtype=bool), 3.0)
         self.assertTrue(mask[60, 60] and mask[60, 72])
         self.assertFalse(mask[170, 170])
+
+
+class SkyBotQueryTests(unittest.TestCase):
+    def test_observer_code_is_sent_as_observer(self):
+        """Regression: SkyBoT ignores "-loc"; the topocentric site must be passed as "-observer"."""
+        import hotpants_pipeline as pipeline
+        wcs = WCS(naxis=2)
+        wcs.wcs.crpix = [600, 600]
+        wcs.wcs.cdelt = [-0.0004, 0.0004]
+        wcs.wcs.crval = [347.67, 26.73]
+        wcs.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+        seen = {}
+
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, size=-1): return b'[]'
+
+        def fake_urlopen(request, timeout=60):
+            seen['url'] = request.full_url
+            return Response()
+
+        original = pipeline.urllib.request.urlopen
+        pipeline.urllib.request.urlopen = fake_urlopen
+        try:
+            pipeline.known_solar_system_objects(wcs, (1200, 1200), {'DATE-OBS': '2026-10-14T01:53:10', 'EXPTIME': 120, 'SITEID': 'tfn'})
+        finally:
+            pipeline.urllib.request.urlopen = original
+        self.assertIn('-observer=Z21', seen['url'])
+        self.assertNotIn('-loc=', seen['url'])
 
 if __name__ == '__main__':
     unittest.main()

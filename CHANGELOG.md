@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HOTPANTS reference surveys: Pan-STARRS1 g/r/i/z/y, DESI Legacy Surveys DR10 g/r/i/z, SDSS u/g/r/i/z, DSS1/DSS2 and 2MASS J/H/K, with an "Auto" default that picks the deepest survey covering the field in the band matching the science FILTER (blank out-of-footprint cutouts are detected and skipped).
 - Data-driven HOTPANTS defaults: seeing measured by Gaussian fits on both images sets the kernel half-width, stamp size and Gaussian basis; valid-data ranges come from the data (negative, background-subtracted references stay valid); saturated blocks are masked; gain and read noise come from GAIN/RDNOISE/NCOMBINE. Explicit user flags always win.
 - HOTPANTS masks bright, saturated and bleeding stars in the reference (brightness, elongation, and a Legacy-Surveys-style catalogue mask from the offline Tycho-2/HYG data) so they no longer appear as false candidates; reports show the masked fraction.
-- HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT, observer-site aware for LCO) and flag candidates that coincide with one.
+- HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT with the observatory's topocentric position, sent as `-observer`) and flag candidates that coincide with one — verified on 1620 Geographos to 0.7".
+
+### Fixed (HOTPANTS)
+- New sources were discarded wherever HOTPANTS set the informational FLAG_OK_CONV bit; only FLAG_OUTPUT_ISBAD pixels are excluded now.
 
 ### Added
 - Online catalogues for annotations when the server has internet: Gaia DR3 stars (VizieR) and named SIMBAD objects, merged without duplicates and cached per image on disk (`AppData/online-catalog-cache`); a "Rescan annotations" button next to "Re-solve locally" refreshes them (online when reachable, otherwise offline). Only field coordinates are sent; `ASTROVIABIN_ONLINE_CATALOGS=false` disables it.
