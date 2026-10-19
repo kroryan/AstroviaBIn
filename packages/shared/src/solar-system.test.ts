@@ -28,3 +28,13 @@ test('new images are Deep Sky unless their name is a planet, the Sun or the Moon
   assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'Comet', 'Solar System'], ['Deep Sky']), ['Deep Sky', 'Comet', 'Solar System'], 'comets keep Deep Sky');
   assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'NGC 253'], []), ['Deep Sky', 'NGC 253']);
 });
+
+test('Solar System album categories come from the body tags', async () => {
+  const { solarSystemSection } = await import('./solar-system');
+  assert.equal(solarSystemSection(['astrophotography', 'Saturn']), 'Saturn');
+  assert.equal(solarSystemSection(['Sun']), 'Sun');
+  assert.equal(solarSystemSection(['jupiter']), 'Jupiter');
+  assert.equal(solarSystemSection(['Solar System', 'Comet']), 'Comets');
+  assert.equal(solarSystemSection(['Solar System']), 'Solar System');
+  assert.equal(solarSystemSection([]), 'Solar System');
+});

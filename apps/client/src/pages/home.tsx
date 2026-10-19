@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Header } from "@/components/header";
 import { SearchFilters } from "@/components/search-filters";
-import { ImageGallery } from "@/components/image-gallery";
+import { ImageGallery, isFitsImage } from "@/components/image-gallery";
+import { SOLAR_SYSTEM_SECTIONS, solarSystemSection } from "@shared/solar-system";
 import { Sidebar } from "@/components/sidebar";
 import { ImageOverlay } from "@/components/image-overlay";
 import { GalleryCatalogBar } from "@/components/gallery-catalog-bar";
@@ -119,6 +120,14 @@ export default function Home() {
   const catalogued = new Set(catalogs.flatMap(catalog => catalog.imageIds ?? []));
   const listedImages = showFolders ? filteredImages.filter(image => !catalogued.has(image.id)) : filteredImages;
 
+  // Inside an album, images are grouped into categories: one per body in the Solar System album,
+  // FITS and photos in every other album.
+  const openCatalog = catalogs.find(catalog => catalog.id === filters.galleryCatalogId);
+  const albumSections: Array<{ name: string; images: AstroImage[] }> = !openCatalog ? [] :
+    openCatalog.name === "Solar System"
+      ? SOLAR_SYSTEM_SECTIONS.map(name => ({ name, images: filteredImages.filter(image => solarSystemSection(image.tags) === name) }))
+      : [{ name: "FITS", images: filteredImages.filter(isFitsImage) }, { name: "Photos", images: filteredImages.filter(image => !isFitsImage(image)) }];
+
   // Get only the visible images based on pagination
   const visibleImages = listedImages.slice(0, visibleCount);
   const hasMoreImages = visibleCount < listedImages.length;
@@ -171,7 +180,25 @@ export default function Home() {
                 Unclassified ({listedImages.length})
               </h2>
             )}
-            {showFolders && catalogued.size > 0 && !imagesLoading && listedImages.length === 0 ? (
+            {openCatalog && !imagesLoading ? (
+              filteredImages.length === 0 ? <p className="mb-8 text-sm text-muted-foreground">No images in this album match.</p> :
+              albumSections.filter(section => section.images.length).map(section => (
+                <section key={section.name} className="mb-6">
+                  <h2 className="mb-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                    {section.name} ({section.images.length})
+                  </h2>
+                  <ImageGallery
+                    images={section.images}
+                    equipment={[]}
+                    onImageClick={(image) => {
+                      setSelectedImage(image);
+                      setLocation(`/?image=${image.id}`, { replace: true });
+                    }}
+                    isLoading={false}
+                  />
+                </section>
+              ))
+            ) : showFolders && catalogued.size > 0 && !imagesLoading && listedImages.length === 0 ? (
               <p className="mb-8 text-sm text-muted-foreground">Every image is filed in a catalog. New images stay here until they are classified.</p>
             ) : <ImageGallery
               images={visibleImages}

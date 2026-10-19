@@ -6,7 +6,7 @@ import { isDeepSkyTagged } from "@shared/solar-system";
 import { formatDate } from "@/lib/datetime";
 import { RemoteImage } from "./remote-image";
 
-function isFitsImage(image: AstroImage): boolean {
+export function isFitsImage(image: AstroImage): boolean {
   return Boolean(image.originalPath?.startsWith('fits://') || image.originalPath?.startsWith('fits-derived://') || image.originalPath?.startsWith('fits-upload://'));
 }
 
