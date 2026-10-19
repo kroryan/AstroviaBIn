@@ -44,6 +44,7 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 - **Built-in OpenNGC Catalog**: Browse, search, and filter thousands of deep-sky objects by type, constellation, magnitude, and angular size
 - **DSS Thumbnails**: Cached Digitized Sky Survey preview images for catalog objects
 - **Target Wishlists**: Annotate catalog objects with personal notes and tags on the Targets page
+- **Solar System target**: Every Sun, Moon and planet image (by tag) is grouped under a single "Solar System" target
 - **Target Backfill**: Automatically match plate-solved images to catalog objects via the admin panel
 
 ### **Acquisition Logging**
@@ -77,7 +78,8 @@ This fork does **not** require Immich or an Astrometry.net account. Existing Imm
 - **Notification Badge**: Unacknowledged notification count displayed in the navigation
 
 ### **Security & Deployment**
-- **Login required**: Every page, API route, and WebSocket needs a signed session cookie (single admin account from environment variables, brute-force throttled)
+- **Login required**: Every page, API route, and WebSocket needs a signed session cookie (brute-force throttled)
+- **Users & roles**: A built-in admin from environment variables, plus accounts created in **Admin → Users & roles** as `admin` (everything), `editor` (upload, edit, solve, catalogs) or `viewer` (read only); role changes apply immediately and password changes sign the account out
 - **Automatic maintenance**: Daily consistent SQLite backups (14 kept) and bounded preview/tile caches
 - **Docker Ready**: Multi-stage containerization with health checks
 - **UnRAID Support**: Ready-to-use container templates
@@ -201,7 +203,7 @@ npm run dev:worker:standalone
 | `SIDEREAL_MAX_UPLOAD_BYTES` | `21474836480` | Maximum direct upload size (20 GiB) |
 | `FITS_MAX_PROCESS_BYTES` | `1073741824` | Maximum uncompressed primary FITS image size processed in memory |
 | `FITS_FULL_PREVIEW_MAX` | `4096` | Longest side of the non-tiled FITS fallback preview (the zoom viewer uses native-resolution tiles) |
-| `SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD` | `admin` / `admin` | Login credentials. **Change them.** |
+| `SIDEREAL_ADMIN_USER` / `SIDEREAL_ADMIN_PASSWORD` | `admin` / `admin` | Built-in administrator (always available, cannot be removed from the UI). **Change them.** More users are managed in Admin settings. |
 | `SIDEREAL_SESSION_SECRET` | _(generated)_ | Cookie signing key; generated once and stored as `.session-secret` next to the database when unset |
 | `SIDEREAL_AUTH_DISABLED` | `false` | Turn the login off only when another authenticating proxy sits in front |
 | `ASTROMETRY_EXTRA_INDEX_DIRS` | `/app/config/astrometry-index` | Colon-separated extra index directories (narrow fields) |

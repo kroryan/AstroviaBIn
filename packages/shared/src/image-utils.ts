@@ -74,6 +74,15 @@ export interface ImageInput {
   captureDate: Date | string | null;
   totalIntegration: number | null;
   originalPath: string | null;
+  tags?: string[] | null;
+}
+
+/** Name of the single target that groups every Sun, Moon and planet image. */
+export const SOLAR_SYSTEM_TARGET = 'Solar System';
+const SOLAR_SYSTEM_TARGET_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
+
+function isSolarSystemImage(image: ImageInput): boolean {
+  return Boolean(image.tags?.some(tag => SOLAR_SYSTEM_TARGET_TAGS.has(tag.trim().toLowerCase())));
 }
 
 const FITS_PATH_PREFIXES = ['fits://', 'fits-derived://', 'fits-upload://'];
@@ -129,10 +138,11 @@ export function groupAndEnrichTargets(
     if (obj.messier) catalogMap.set(obj.messier, obj);
   }
 
-  // Group images by targetName (fallback to title)
+  // Group images by targetName (fallback to title). Sun, Moon and planet images share one
+  // "Solar System" target instead of one target per file.
   const groups = new Map<string, ImageInput[]>();
   for (const img of images) {
-    const key = img.targetName || img.title;
+    const key = isSolarSystemImage(img) ? SOLAR_SYSTEM_TARGET : img.targetName || img.title;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(img);
   }
@@ -156,7 +166,7 @@ export function groupAndEnrichTargets(
       imageCount: groupImages.length,
       totalIntegrationHours: Math.round(totalHours * 1000) / 1000,
       thumbnailUrl: mostRecent.thumbnailUrl || null,
-      objectType: catalogObj?.type || mostRecent.objectType || null,
+      objectType: targetName === SOLAR_SYSTEM_TARGET ? SOLAR_SYSTEM_TARGET : catalogObj?.type || mostRecent.objectType || null,
       constellation: catalogObj?.constellation || mostRecent.constellation || null,
       vMag: catalogObj?.vMag || null,
       commonNames: catalogObj?.commonNames || null,

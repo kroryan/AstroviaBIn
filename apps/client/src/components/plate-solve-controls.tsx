@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage } from "@shared/schema";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 const SOLAR_SYSTEM_TAGS = new Set(['solar system', 'sun', 'moon', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto']);
 
@@ -28,6 +29,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
   const tags = image.tags?.map(tag => tag.trim().toLowerCase()) || [];
   const eligible = (tags.includes('deep sky') || Boolean(image.plateSolved)) && !tags.some(tag => SOLAR_SYSTEM_TAGS.has(tag));
   const processing = job?.status === 'processing';
+  const { canEdit } = useCurrentUser();
 
   const solve = useMutation({
     mutationFn: async () => {
@@ -55,7 +57,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
       {job?.status === 'failed' && job.error && (
         <p className="text-xs text-red-400 break-words">Last attempt failed: {job.error}</p>
       )}
-      {!eligible ? (
+      {!canEdit ? null : !eligible ? (
         <p className={`text-xs ${muted}`}>Add the Deep Sky tag to plate solve this image (Solar System frames cannot be solved).</p>
       ) : (
         <>

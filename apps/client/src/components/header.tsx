@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Settings, FileUp, FileImage, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -21,6 +22,7 @@ const NAV_LINKS = [
 ] as const;
 
 export function Header() {
+  const { user, isAdmin, canEdit } = useCurrentUser();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const signOut = async () => {
@@ -158,7 +160,7 @@ export function Header() {
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/tiff,image/webp,image/gif,image/bmp,image/avif,image/heic,.jpg,.jpeg,.png,.tif,.tiff,.webp,.gif,.bmp,.avif,.heic,.heif" className="hidden" onChange={handleImageUpload} />
             <input ref={fitsInputRef} type="file" accept=".fit,.fits,.fts,application/fits" className="hidden" onChange={handleFitsUpload} />
-            <DropdownMenu>
+            {canEdit && <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button disabled={uploadType !== null} title="Upload to Sidereal's private library" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
                   {uploadType ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
@@ -169,11 +171,11 @@ export function Header() {
                 <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}><FileImage className="mr-2 h-4 w-4" />Photo or image</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => fitsInputRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />FITS file</DropdownMenuItem>
               </DropdownMenuContent>
-            </DropdownMenu>
-            <Button onClick={handleFitsScan} disabled={fitsScanning} title="Scan FITS library" aria-label="Scan FITS library" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
+            </DropdownMenu>}
+            {canEdit && <Button onClick={handleFitsScan} disabled={fitsScanning} title="Scan FITS library" aria-label="Scan FITS library" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
               {fitsScanning ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <ScanLine className="h-4 w-4 2xl:mr-2" />}
               <span className="inline 2xl:hidden">{fitsScanning ? 'Scanning…' : 'FITS Scan'}</span><span className="hidden 2xl:inline">{fitsScanning ? 'Scanning FITS…' : 'Scan FITS'}</span>
-            </Button>
+            </Button>}
             <a
               href="https://github.com/sidereal-io/sidereal"
               target="_blank"
@@ -185,7 +187,7 @@ export function Header() {
                 <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
               </Button>
             </a>
-            <Link href="/admin" className="hidden md:inline-flex">
+            {isAdmin && <Link href="/admin" className="hidden md:inline-flex">
               <Button
                 variant="ghost"
                 size="icon"
@@ -204,8 +206,8 @@ export function Header() {
                   )}
                 </span>
               </Button>
-            </Link>
-            <Button variant="ghost" size="icon" className="hidden md:inline-flex h-9 w-9" title="Sign out" onClick={signOut}>
+            </Link>}
+            <Button variant="ghost" size="icon" className="hidden md:inline-flex h-9 w-9" title={user ? `Sign out ${user.username} (${user.role})` : "Sign out"} onClick={signOut}>
               <LogOut className="h-5 w-5" />
             </Button>
 
@@ -239,6 +241,7 @@ export function Header() {
                     </Link>
                   ))}
                   <div className="border-t border-border my-2" />
+                  {canEdit && <>
                   <button
                     onClick={() => { setMobileOpen(false); imageInputRef.current?.click(); }}
                     disabled={uploadType !== null}
@@ -263,7 +266,8 @@ export function Header() {
                     {fitsScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
                     {fitsScanning ? 'Scanning FITS...' : 'Scan FITS'}
                   </button>
-                  <Link
+                  </>}
+                  {isAdmin && <Link
                     href="/admin"
                     onClick={() => setMobileOpen(false)}
                     className={`px-4 py-3 text-sm font-medium transition-colors flex items-center justify-between ${
@@ -278,12 +282,12 @@ export function Header() {
                         {unacknowledgedCount > 9 ? '9+' : unacknowledgedCount}
                       </span>
                     )}
-                  </Link>
+                  </Link>}
                   <button
                     onClick={signOut}
                     className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
                   >
-                    <LogOut className="h-4 w-4" /> Sign out
+                    <LogOut className="h-4 w-4" /> Sign out{user ? ` (${user.username})` : ''}
                   </button>
                 </nav>
               </SheetContent>

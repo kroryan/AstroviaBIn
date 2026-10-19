@@ -198,6 +198,16 @@ export const galleryCatalogImages = pgTable('gallery_catalog_images', {
   addedAt: timestamp('added_at').defaultNow(),
 });
 
+/** Additional login accounts managed from Admin settings (the env-defined admin is built in). */
+export const users = pgTable('users', {
+  id: serial('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // Zod schemas for validation
 export const insertAstroImageSchema = createInsertSchema(astrophotographyImages);
 export const insertLibraryAssetSchema = createInsertSchema(libraryAssets);

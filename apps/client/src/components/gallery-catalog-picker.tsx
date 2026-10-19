@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
 import type { AstroImage } from "@shared/schema";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 export interface GalleryCatalogSummary {
   id: number;
@@ -26,6 +27,7 @@ export function GalleryCatalogPicker({ image, dark = false }: { image: AstroImag
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  const { canEdit } = useCurrentUser();
 
   const { data: catalogs = [] } = useQuery<GalleryCatalogSummary[]>({ queryKey: ["/api/gallery-catalogs"] });
   const { data: memberOf = [] } = useQuery<number[]>({
@@ -70,18 +72,18 @@ export function GalleryCatalogPicker({ image, dark = false }: { image: AstroImag
         <h3 className={`font-semibold flex items-center gap-2 ${dark ? "text-white" : "text-foreground"}`}>
           <Library className="h-4 w-4" /> Catalogs
         </h3>
-        <Button variant="ghost" size="sm" className={`h-6 px-2 ${muted}`} onClick={() => setAdding(value => !value)} title="Add to a catalog">
+        {canEdit && <Button variant="ghost" size="sm" className={`h-6 px-2 ${muted}`} onClick={() => setAdding(value => !value)} title="Add to a catalog">
           <FolderPlus className="h-3 w-3" />
-        </Button>
+        </Button>}
       </div>
       <div className="flex flex-wrap gap-1">
         {members.length === 0 && <span className={`text-xs ${muted}`}>Not in any catalog yet.</span>}
         {members.map(catalog => (
           <Badge key={catalog.id} variant="secondary" className="gap-1">
             {catalog.name}
-            <button aria-label={`Remove from ${catalog.name}`} onClick={() => remove.mutate(catalog.id)} className="hover:text-red-400">
+            {canEdit && <button aria-label={`Remove from ${catalog.name}`} onClick={() => remove.mutate(catalog.id)} className="hover:text-red-400">
               <X className="h-3 w-3" />
-            </button>
+            </button>}
           </Badge>
         ))}
       </div>

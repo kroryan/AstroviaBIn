@@ -18,6 +18,8 @@ import { CatalogSection } from '@/components/admin/catalog-section';
 import { AppSettingsSection } from '@/components/admin/app-settings-section';
 import { DatabaseSection } from '@/components/admin/database-section';
 import { AboutSection } from '@/components/admin/about-section';
+import { UsersSection } from '@/components/admin/users-section';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 export interface AdminSettings {
   astrometry: {
@@ -62,6 +64,7 @@ export default function AdminPage() {
   const [astrometryTestStatus, setAstrometryTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [astrometryTestMessage, setAstrometryTestMessage] = useState('');
   const [showAllNotifications, setShowAllNotifications] = useState(false);
+  const { user } = useCurrentUser();
 
   // Use React Query for notifications for consistent state across Header and Admin
   const { data: notifications = [] } = useQuery<Notification[]>({
@@ -166,15 +169,21 @@ export default function AdminPage() {
           <Settings className="h-8 w-8 text-primary" />
           <div>
             <h1 className="text-3xl font-bold">Admin Settings</h1>
-            <p className="text-muted-foreground">Configure your AstroViewer application</p>
+            <p className="text-muted-foreground">Configure your Sidereal server</p>
           </div>
         </div>
+
+        {user && user.role !== 'admin' ? (
+          <p className="text-muted-foreground">Signed in as <span className="font-medium text-foreground">{user.username}</span> ({user.role}). Only administrators can change settings and accounts.</p>
+        ) : (<>
 
         <NotificationsSection
           notifications={notifications}
           showAllNotifications={showAllNotifications}
           setShowAllNotifications={setShowAllNotifications}
         />
+
+        <UsersSection />
 
         <form onSubmit={(e) => { e.preventDefault(); saveSettings(); }}>
           <AstrometrySection
@@ -212,6 +221,7 @@ export default function AdminPage() {
             </Button>
           </div>
         </form>
+        </>)}
       </div>
     </div>
   );

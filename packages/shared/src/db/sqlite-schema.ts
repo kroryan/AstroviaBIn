@@ -194,3 +194,13 @@ export const galleryCatalogImages = sqliteTable('gallery_catalog_images', {
     imageId: integer('image_id').notNull().references(() => astrophotographyImages.id, { onDelete: 'cascade' }),
     addedAt: integer('added_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
 });
+
+/** Additional login accounts managed from Admin settings (the env-defined admin is built in). */
+export const users = sqliteTable('users', {
+    id: integer('id').primaryKey(),
+    username: text('username').notNull().unique(),
+    passwordHash: text('password_hash').notNull(),
+    role: text('role').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().$defaultFn(() => new Date()),
+});

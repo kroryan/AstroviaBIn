@@ -2,10 +2,19 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage } from 'node:http';
+import { findUserByUsername, passwordFingerprint, verifyPassword, type Role } from './users';
+
+export interface AuthUser {
+  username: string;
+  role: Role;
+  /** The env-defined admin account, which cannot be edited or deleted from the UI. */
+  builtin: boolean;
+}
 
 /**
- * Single-user login for a self-hosted install. Credentials come from SIDEREAL_ADMIN_USER and
- * SIDEREAL_ADMIN_PASSWORD (default admin / admin — change them). Sessions are HMAC-signed cookies;
+ * Login for a self-hosted install. The built-in admin comes from SIDEREAL_ADMIN_USER and
+ * SIDEREAL_ADMIN_PASSWORD (default admin / admin — change them); further accounts with the admin,
+ * editor or viewer role are managed in Admin settings. Sessions are HMAC-signed cookies;
  * the signing secret is SIDEREAL_SESSION_SECRET or a random value persisted next to the database.
  * The background worker authenticates with a per-boot internal token instead of a cookie.
  */
@@ -75,21 +84,52 @@ export function checkCredentials(user: string, password: string): boolean {
   return userOk && passwordOk;
 }
 
-export function createSessionToken(user: string, now = Date.now()): string {
-  const payload = Buffer.from(JSON.stringify({ u: user, exp: now + SESSION_DAYS * 86_400_000 })).toString('base64url');
+function builtinFingerprint(): string {
+  return passwordFingerprint(createHash('sha256').update(`${adminUser()}:${adminPassword()}`).digest('hex'));
+}
+
+export function isBuiltinUsername(username: string): boolean {
+  return username.trim().toLowerCase() === adminUser().toLowerCase();
+}
+
+/** Checks the built-in admin first, then accounts stored in the database. */
+export async function authenticate(username: string, password: string): Promise<(AuthUser & { fingerprint: string }) | null> {
+  if (checkCredentials(username, password)) return { username: adminUser(), role: 'admin', builtin: true, fingerprint: builtinFingerprint() };
+  if (isBuiltinUsername(username)) return null;
+  const user = await findUserByUsername(username).catch(() => undefined);
+  if (!user || !await verifyPassword(user.passwordHash, password)) return null;
+  return { username: user.username, role: user.role, builtin: false, fingerprint: passwordFingerprint(user.passwordHash) };
+}
+
+export function createSessionToken(user: string, fingerprint = builtinFingerprint(), now = Date.now()): string {
+  const payload = Buffer.from(JSON.stringify({ u: user, f: fingerprint, exp: now + SESSION_DAYS * 86_400_000 })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
-export function verifySessionToken(token: string | undefined, now = Date.now()): boolean {
-  if (!token) return false;
+/** Signature and expiry check only; `resolveSession` also confirms the account still exists. */
+export function verifySessionToken(token: string | undefined, now = Date.now()): { u: string; f: string } | null {
+  if (!token) return null;
   const [payload, signature] = token.split('.');
-  if (!payload || !signature || !safeEqual(signature, sign(payload))) return false;
+  if (!payload || !signature || !safeEqual(signature, sign(payload))) return null;
   try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { u?: string; exp?: number };
-    return data.u === adminUser() && typeof data.exp === 'number' && data.exp > now;
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { u?: string; f?: string; exp?: number };
+    return typeof data.u === 'string' && typeof data.f === 'string' && typeof data.exp === 'number' && data.exp > now
+      ? { u: data.u, f: data.f } : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Resolves the current account and role on every request, so role changes apply immediately. */
+export async function resolveSession(token: string | undefined, now = Date.now()): Promise<AuthUser | null> {
+  const session = verifySessionToken(token, now);
+  if (!session) return null;
+  if (session.u === adminUser()) {
+    return safeEqual(session.f, builtinFingerprint()) ? { username: adminUser(), role: 'admin', builtin: true } : null;
+  }
+  const user = await findUserByUsername(session.u).catch(() => undefined);
+  if (!user || !safeEqual(session.f, passwordFingerprint(user.passwordHash))) return null;
+  return { username: user.username, role: user.role, builtin: false };
 }
 
 export function readCookie(header: string | undefined | null, name: string): string | undefined {
@@ -112,14 +152,28 @@ export function isInternalRequest(headerValue: string | undefined | null): boole
   return Boolean(headerValue) && safeEqual(String(headerValue), internalToken());
 }
 
-export function isAuthenticatedRequest(cookieHeader: string | undefined | null, internalHeader: string | undefined | null): boolean {
-  return authDisabled() || isInternalRequest(internalHeader) || verifySessionToken(readCookie(cookieHeader, SESSION_COOKIE));
+const SYSTEM_USER: AuthUser = { username: 'system', role: 'admin', builtin: true };
+
+export async function authenticateRequest(cookieHeader: string | undefined | null, internalHeader: string | undefined | null): Promise<AuthUser | null> {
+  if (authDisabled() || isInternalRequest(internalHeader)) return SYSTEM_USER;
+  return resolveSession(readCookie(cookieHeader, SESSION_COOKIE));
 }
 
 /** For the WebSocket upgrade, which bypasses Hono's middleware. */
-export function isAuthenticatedUpgrade(request: IncomingMessage): boolean {
+export async function isAuthenticatedUpgrade(request: IncomingMessage): Promise<boolean> {
   const internal = request.headers[INTERNAL_HEADER];
-  return isAuthenticatedRequest(request.headers.cookie, Array.isArray(internal) ? internal[0] : internal);
+  return Boolean(await authenticateRequest(request.headers.cookie, Array.isArray(internal) ? internal[0] : internal));
+}
+
+const ADMIN_ONLY_PATHS = ['/api/admin', '/api/users', '/api/catalog/load', '/api/catalog/check-updates', '/api/catalog/backfill-targets', '/api/test-astrometry-connection'];
+const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** Admins can do everything; editors can change content but not settings or accounts; viewers only read. */
+export function isAllowed(role: Role, method: string, requestPath: string): boolean {
+  if (role === 'admin') return true;
+  if (ADMIN_ONLY_PATHS.some(prefix => requestPath === prefix || requestPath.startsWith(`${prefix}/`))) return false;
+  if (READ_METHODS.has(method.toUpperCase())) return true;
+  return role === 'editor';
 }
 
 export { INTERNAL_HEADER };

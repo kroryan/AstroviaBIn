@@ -10,7 +10,9 @@ export class WsManager {
     this.wss = new WebSocketServer({
       server,
       path: '/ws',
-      verifyClient: ({ req }: { req: import('http').IncomingMessage }) => isAuthenticatedUpgrade(req),
+      verifyClient: ({ req }: { req: import('http').IncomingMessage }, done: (allowed: boolean, code?: number) => void) => {
+        isAuthenticatedUpgrade(req).then(allowed => done(allowed, allowed ? undefined : 401), () => done(false, 401));
+      },
     });
 
     this.wss.on('connection', (ws) => {

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiRequest } from "@/lib/queryClient";
 import type { GalleryCatalogSummary } from "./gallery-catalog-picker";
+import { useCurrentUser } from "@/hooks/use-current-user";
 
 interface GalleryCatalogBarProps {
   selectedId?: number;
@@ -28,6 +29,7 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [lastAdded, setLastAdded] = useState<string | null>(null);
+  const { canEdit } = useCurrentUser();
   const { data: catalogs = [] } = useQuery<GalleryCatalogSummary[]>({ queryKey: ["/api/gallery-catalogs"] });
   const selected = catalogs.find(catalog => catalog.id === selectedId);
 
@@ -70,10 +72,10 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
             {catalog.name} <span className="opacity-70">({catalog.imageCount})</span>
           </button>
         ))}
-        <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" onClick={() => { setCreating(value => !value); setEditing(false); setName(""); setDescription(""); }}>
+        {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" onClick={() => { setCreating(value => !value); setEditing(false); setName(""); setDescription(""); }}>
           <FolderPlus className="h-3 w-3 mr-1" /> New catalog
-        </Button>
-        {catalogs.length > 0 && visibleImageIds.length > 0 && (
+        </Button>}
+        {canEdit && catalogs.length > 0 && visibleImageIds.length > 0 && (
           <Select value="" onValueChange={value => addShown.mutate(Number(value))}>
             <SelectTrigger className="h-7 w-auto text-xs shrink-0 sky-input">
               <SelectValue placeholder={`Add ${visibleImageIds.length} shown to…`} />
@@ -99,7 +101,7 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
         </form>
       )}
 
-      {selected && !editing && (
+      {canEdit && selected && !editing && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span>{selected.description || `${selected.imageCount} item${selected.imageCount === 1 ? "" : "s"} in this catalog`}</span>
           <Button variant="ghost" size="sm" className="h-6 px-2" title="Rename catalog" onClick={() => { setEditing(true); setCreating(false); setName(selected.name); setDescription(selected.description || ""); }}>

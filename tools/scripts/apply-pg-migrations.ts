@@ -251,6 +251,17 @@ async function runMigrations() {
 
     await connection`CREATE INDEX IF NOT EXISTS gallery_catalog_images_image_idx ON gallery_catalog_images (image_id);`;
 
+    await connection`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `;
+
     // Add target_name column to astrophotography_images if not exists
     await connection`
       DO $$ BEGIN

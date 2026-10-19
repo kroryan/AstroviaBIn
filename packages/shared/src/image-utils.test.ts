@@ -307,4 +307,19 @@ describe('groupAndEnrichTargets', () => {
     const result = groupAndEnrichTargets(images, []);
     assert.equal(result[0].totalIntegrationHours, 2);
   });
+
+  it('groups every Sun, Moon and planet image into one Solar System target', () => {
+    const result = groupAndEnrichTargets([
+      makeImage({ id: 1, title: 'saturno.png', tags: ['astrophotography', 'Saturn'] }),
+      makeImage({ id: 2, title: 'jupiter.png', tags: ['Jupiter'] }),
+      makeImage({ id: 3, title: 'sol.png', tags: ['Solar System'], targetName: 'Sun' }),
+      makeImage({ id: 4, title: 'M42', targetName: 'M 42', tags: ['Deep Sky'] }),
+    ], []);
+    const solar = result.find(target => target.targetName === 'Solar System');
+    assert.ok(solar);
+    assert.deepEqual([...solar.imageIds].sort(), [1, 2, 3]);
+    assert.equal(solar.objectType, 'Solar System');
+    assert.ok(result.some(target => target.targetName === 'M 42'));
+    assert.equal(result.length, 2);
+  });
 });
