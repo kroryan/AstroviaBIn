@@ -13,7 +13,8 @@ import { renderTile, tileCacheDirectory, tileInfo } from '../services/tiles';
 import { resolveLibraryAssetPath } from '../services/library';
 import { readFitsMetadata, resolveFitsFile } from '../services/fits';
 import { computeSkyAnnotations } from '../services/sky-annotations';
-import { computeSkyOverlay, overlayToAnnotations } from '../services/sky-overlay';
+import { computeSkyOverlay, mergeOnlineCatalog, overlayToAnnotations } from '../services/sky-overlay';
+import { getOnlineCatalog } from '../services/online-catalogs';
 import { wcsFromStored } from '../services/wcs';
 
 const app = new Hono();
@@ -313,7 +314,16 @@ app.get('/:id/annotations', async (c) => {
       const epoch = captured && !Number.isNaN(captured.getTime())
         ? captured.getUTCFullYear() + captured.getUTCMonth() / 12
         : undefined;
-      const overlay = computeSkyOverlay(wcs, { epoch });
+      let overlay = computeSkyOverlay(wcs, { epoch });
+      if (overlay && c.req.query('online') !== '0') {
+        // Deeper stars and named objects from Gaia DR3 / SIMBAD when online; cached per image on disk.
+        const online = await getOnlineCatalog(image.id, {
+          ra: overlay.field.ra, dec: overlay.field.dec,
+          radiusDeg: Math.hypot(overlay.field.widthDeg, overlay.field.heightDeg) / 2,
+          pixelScale: overlay.field.pixelScale,
+        }).catch(() => null);
+        if (online) overlay = mergeOnlineCatalog(overlay, wcs, online, epoch ?? new Date().getUTCFullYear());
+      }
       return c.json({
         annotations: overlay ? overlayToAnnotations(overlay) : await computeSkyAnnotations(wcs),
         overlay,

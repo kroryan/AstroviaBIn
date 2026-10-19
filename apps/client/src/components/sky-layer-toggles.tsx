@@ -69,7 +69,7 @@ export function SkyLayerToggles({ layers, onChange, overlay, compact = false }: 
       {overlay && !compact && (
         <p className="font-mono text-[10px] text-gray-300">
           Field {formatSize(overlay.field.widthDeg)} × {formatSize(overlay.field.heightDeg)} · {overlay.field.pixelScale.toFixed(2)}″/px
-          {overlay.field.constellation ? ` · ${overlay.field.constellation}` : ""} · {overlay.stars.length} stars · {overlay.objects.length} deep-sky
+          {overlay.field.constellation ? ` · ${overlay.field.constellation}` : ""} · {overlay.stars.length} stars · {overlay.objects.length} deep-sky · {overlay.online ? `online: Gaia DR3 + SIMBAD (cached ${new Date(overlay.online.fetchedAt).toLocaleDateString()})` : "offline catalogues"}
         </p>
       )}
     </div>

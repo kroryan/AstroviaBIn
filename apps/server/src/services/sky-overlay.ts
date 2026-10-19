@@ -2,6 +2,7 @@ import type { AstrometryAnnotation } from './astrometry';
 import { loadSkyCatalog, starLabels, starPosition, starsNear, tychoName, tychoNear, tychoPosition, type SkyCatalog } from './sky-catalog';
 import { angularDistanceDegrees, pixelScaleArcsec, pixelToSky, skyToPixel, type WcsSolution } from './wcs';
 import { constellationName } from './iau-constellations';
+import type { OnlineCatalog } from './online-catalogs';
 
 /**
  * "Astro-style" annotation layers for a solved image, in the spirit of nova.astrometry.net's
@@ -57,6 +58,8 @@ export interface SkyOverlay {
     labels: Array<{ id: string; name: string; x: number; y: number }>;
   };
   grid: { raStepDeg: number; decStepDeg: number; lines: Array<{ kind: 'ra' | 'dec'; value: number; label: string; points: Point[] }> };
+  /** Present when an online catalogue (Gaia DR3 / SIMBAD) was merged in. */
+  online?: { fetchedAt: string; gaia: number; simbad: number };
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -403,3 +406,77 @@ export function overlayToAnnotations(overlay: SkyOverlay): AstrometryAnnotation[
     })),
   ];
 }
+
+/**
+ * Adds an online catalogue (Gaia DR3 stars, SIMBAD objects) to an overlay. Stars already known
+ * offline only gain their Gaia identifier; objects near an OpenNGC entry only add their name.
+ */
+export function mergeOnlineCatalog(overlay: SkyOverlay, wcs: WcsSolution, online: OnlineCatalog, epoch: number): SkyOverlay {
+  const width = overlay.imageWidth;
+  const height = overlay.imageHeight;
+  const scaleDeg = overlay.field.pixelScale / 3600;
+  const starRadius = Math.max(1.5, 1.5 / 3600 / scaleDeg);
+  const cell = starRadius * 2;
+  const grid = new Map<string, OverlayStar[]>();
+  const keyOf = (x: number, y: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
+  const index = (star: OverlayStar) => { const key = keyOf(star.x, star.y); grid.set(key, [...(grid.get(key) ?? []), star]); };
+  overlay.stars.forEach(index);
+  const nearby = (x: number, y: number) => {
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      for (const star of grid.get(`${cx + dx},${cy + dy}`) ?? []) if (Math.hypot(star.x - x, star.y - y) <= starRadius) return star;
+    }
+    return undefined;
+  };
+  const stars = [...overlay.stars];
+  const years = epoch - 2016;
+  for (const gaia of online.gaia) {
+    const dec = gaia.dec + gaia.pmdec * years / 3.6e6;
+    const ra = gaia.ra + gaia.pmra * years / 3.6e6 / Math.max(1e-6, Math.cos(gaia.dec * Math.PI / 180));
+    const point = project(wcs, ra, dec);
+    if (!point || !insideFrame(point, width, height)) continue;
+    const name = `Gaia DR3 ${gaia.id}`;
+    const existing = nearby(point[0], point[1]);
+    if (existing) {
+      if (!existing.names.includes(name)) existing.names.push(name);
+      continue;
+    }
+    const star: OverlayStar = {
+      label: name, names: [name], mag: gaia.mag === null ? null : Math.round(gaia.mag * 100) / 100,
+      x: point[0], y: point[1], ra, dec, priority: starPriority(gaia.mag, -20),
+    };
+    stars.push(star);
+    index(star);
+  }
+
+  const objects = [...overlay.objects];
+  const objectRadius = Math.max(4, 20 / 3600 / scaleDeg);
+  for (const entry of online.simbad) {
+    const point = project(wcs, entry.ra, entry.dec);
+    if (!point || !insideFrame(point, width, height)) continue;
+    const match = objects.find(object => Math.hypot(object.x - point[0], object.y - point[1]) <= Math.max(objectRadius, Math.min(object.rx, object.ry)));
+    if (match) {
+      if (!match.names.includes(entry.name)) match.names.push(entry.name);
+      continue;
+    }
+    objects.push({
+      id: entry.name, label: entry.name, common: null, names: [entry.name], type: entry.type, typeLabel: SIMBAD_TYPES[entry.type] ?? entry.type,
+      x: point[0], y: point[1], rx: 0, ry: 0, angle: 0, mag: entry.mag, ra: entry.ra, dec: entry.dec,
+      priority: 25 + (entry.mag === null ? 0 : Math.max(0, 18 - entry.mag)),
+    });
+  }
+  return {
+    ...overlay,
+    stars: stars.sort((left, right) => right.priority - left.priority).slice(0, 2000),
+    objects: objects.sort((left, right) => right.priority - left.priority).slice(0, 600),
+    online: { fetchedAt: online.fetchedAt, gaia: online.gaia.length, simbad: online.simbad.length },
+  };
+}
+
+const SIMBAD_TYPES: Record<string, string> = {
+  G: 'Galaxy', GiG: 'Galaxy in group', GiC: 'Galaxy in cluster', BiC: 'Brightest galaxy in cluster', SBG: 'Starburst galaxy',
+  AGN: 'Active galaxy', Sy1: 'Seyfert 1', Sy2: 'Seyfert 2', QSO: 'Quasar', BLL: 'BL Lac', LSB: 'Low surface brightness galaxy',
+  ClG: 'Galaxy cluster', GrG: 'Galaxy group', PN: 'Planetary nebula', HII: 'HII region', RNe: 'Reflection nebula', DNe: 'Dark nebula',
+  SNR: 'Supernova remnant', OpC: 'Open cluster', GlC: 'Globular cluster', 'Cl*': 'Star cluster', EmG: 'Emission-line galaxy',
+};

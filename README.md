@@ -204,6 +204,7 @@ npm run dev:worker:standalone
 | `ASTROVIABIN_ADMIN_USER` / `ASTROVIABIN_ADMIN_PASSWORD` | `admin` / `admin` | Built-in administrator (always available, cannot be removed from the UI). **Change them.** More users are managed in Admin settings. |
 | `ASTROVIABIN_SESSION_SECRET` | _(generated)_ | Cookie signing key; generated once and stored as `.session-secret` next to the database when unset |
 | `ASTROVIABIN_AUTH_DISABLED` | `false` | Turn the login off only when another authenticating proxy sits in front |
+| `ASTROVIABIN_ONLINE_CATALOGS` | `true` | Add Gaia DR3 stars and SIMBAD objects to annotations when online (only field coordinates are sent; results cached per image in `online-catalog-cache` next to the database) |
 | `ASTROMETRY_EXTRA_INDEX_DIRS` | `/app/config/astrometry-index` | Colon-separated extra index directories (narrow fields) |
 | `ASTROMETRY_TIMEOUT_MS` | `900000` | Total time budget per local solve (hinted attempts, then blind) |
 | `ASTROVIABIN_BACKUP_DIR` / `ASTROVIABIN_BACKUP_KEEP` | `<db dir>/backups` / `14` | Daily SQLite backups |

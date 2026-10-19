@@ -22,6 +22,7 @@ export interface SkyOverlayData {
   stars: SkyOverlayStar[];
   constellations: { lines: Array<{ id: string; points: Point[] }>; labels: Array<{ id: string; name: string; x: number; y: number }> };
   grid: { raStepDeg: number; decStepDeg: number; lines: Array<{ kind: "ra" | "dec"; value: number; label: string; points: Point[] }> };
+  online?: { fetchedAt: string; gaia: number; simbad: number };
 }
 
 export interface SkyLayers {

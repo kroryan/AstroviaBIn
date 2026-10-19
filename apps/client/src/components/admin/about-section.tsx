@@ -72,6 +72,16 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">Online catalogues (Gaia DR3, SIMBAD, VizieR)</h3>
+        <p className="text-muted-foreground">When the server is online, annotations add deeper stars from Gaia DR3 and named objects from SIMBAD. Only the field centre and radius are sent; images never leave the server. Results are cached per image on local disk (AppData/online-catalog-cache) and reused. Disable with ASTROVIABIN_ONLINE_CATALOGS=false. This work has made use of data from the European Space Agency (ESA) mission Gaia (https://www.cosmos.esa.int/gaia), processed by the Gaia Data Processing and Analysis Consortium (DPAC); Gaia data are © ESA, licensed CC BY-SA 3.0 IGO. This research has made use of the SIMBAD database and the VizieR catalogue access tool, operated at CDS, Strasbourg Astronomical Observatory, France.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://www.cosmos.esa.int/web/gaia/dr3" target="_blank" rel="noreferrer">Gaia DR3</a>
+          <a className="text-primary underline" href="https://www.cosmos.esa.int/web/gaia-users/license" target="_blank" rel="noreferrer">Gaia data licence</a>
+          <a className="text-primary underline" href="https://simbad.cds.unistra.fr/" target="_blank" rel="noreferrer">SIMBAD</a>
+          <a className="text-primary underline" href="https://vizier.cds.unistra.fr/" target="_blank" rel="noreferrer">VizieR</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">OpenNGC catalog</h3>
         <p className="text-muted-foreground">Target identification and deep-sky annotations (outlines with catalogue size and position angle) use OpenNGC by Mattia Verga, licensed under CC BY-SA 4.0. Every annotation is projected through each image's own WCS solution (TAN with SIP distortion); outlines are only as accurate as the catalogue's sizes.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
