@@ -466,6 +466,128 @@ def estimate_fwhm(data, invalid=None):
     return round(fwhm_guess, 2)
 
 
+def bright_source_mask(data, invalid, fwhm):
+    """Saturated/near-saturated stars and their bleed trails in a reference image.
+
+    Survey stacks (DECam, PS1, photographic DSS) clip bright stars and add bleed trails and
+    spikes; their flux no longer scales, so subtraction leaves bright false residuals. Mask every
+    pixel above half the brightest-star level and grow it by three seeing widths.
+    """
+    good = np.isfinite(data) & ~invalid
+    if good.sum() < 1000:
+        return np.zeros(data.shape, dtype=bool)
+    median = float(np.median(data[good]))
+    brightest = float(np.percentile(data[good], 99.999))
+    if not brightest > median:
+        return np.zeros(data.shape, dtype=bool)
+    core = good & (data > median + 0.5 * (brightest - median))
+    return binary_dilation(core, iterations=max(3, math.ceil(3 * (fwhm or 3))))
+
+
+def elongated_source_mask(data, invalid, fwhm, axis_ratio_limit=1.35):
+    """Bright sources that are markedly elongated in the reference: saturation bleeds and
+    diffraction streaks of stars that saturated in the survey's single exposures. Their flux and
+    shape cannot be matched by a PSF kernel, so they are masked with a margin."""
+    good = np.isfinite(data) & ~invalid
+    if good.sum() < 1000:
+        return np.zeros(data.shape, dtype=bool)
+    median = float(np.median(data[good]))
+    sigma = float(1.4826 * np.median(np.abs(data[good] - median))) or 1.0
+    clean = np.where(good, data, median) - median
+    finder = DAOStarFinder(threshold=25 * sigma, fwhm=max(2.0, fwhm or 3), sharpness_range=(0.0, 2.0),
+                           roundness_range=(-2.0, 2.0), exclude_border=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        sources = finder(clean)
+    mask = np.zeros(data.shape, dtype=bool)
+    if sources is None:
+        return mask
+    radius = int(max(6, math.ceil(4 * (fwhm or 3))))
+    yy, xx = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+    height, width = data.shape
+    for source in sources:
+        x, y = int(round(float(source['x_centroid']))), int(round(float(source['y_centroid'])))
+        if x < radius or y < radius or x >= width - radius or y >= height - radius:
+            continue
+        stamp = np.clip(clean[y - radius:y + radius + 1, x - radius:x + radius + 1], 0, None)
+        stamp = np.where(stamp > 0.1 * stamp.max(), stamp, 0)
+        total = stamp.sum()
+        if total <= 0:
+            continue
+        cx, cy = (xx * stamp).sum() / total, (yy * stamp).sum() / total
+        mxx = ((xx - cx) ** 2 * stamp).sum() / total
+        myy = ((yy - cy) ** 2 * stamp).sum() / total
+        mxy = ((xx - cx) * (yy - cy) * stamp).sum() / total
+        root = math.sqrt(max(((mxx - myy) / 2) ** 2 + mxy ** 2, 0))
+        major, minor = (mxx + myy) / 2 + root, max((mxx + myy) / 2 - root, 1e-6)
+        if math.sqrt(major / minor) < axis_ratio_limit:
+            continue
+        extent = 3 * math.sqrt(major) + 2 * (fwhm or 3)
+        y0, y1 = max(0, int(y - extent)), min(height, int(y + extent) + 2)
+        x0, x1 = max(0, int(x - extent)), min(width, int(x + extent) + 2)
+        oy, ox = np.ogrid[y0:y1, x0:x1]
+        mask[y0:y1, x0:x1] |= (ox - x) ** 2 + (oy - y) ** 2 <= extent ** 2
+    return mask
+
+
+def catalog_bright_stars(wcs, shape, magnitude_limit=13.0):
+    """(x, y, mag) of catalogued stars brighter than `magnitude_limit` in the frame, from the offline
+    sky bundle (HYG + Tycho-2); empty when the bundle is not installed."""
+    import gzip
+    directory = None
+    for candidate in (os.environ.get('ASTROVIABIN_SKY_DATA_DIR'), '/usr/share/astroviabin/sky'):
+        if candidate and os.path.exists(os.path.join(candidate, 'stars.json.gz')):
+            directory = candidate
+            break
+    if directory is None:
+        return []
+    ra0, dec0, fov = _field_geometry(wcs, shape)
+    radius = fov / 2.3 * 1.1
+    ras, decs, mags = [], [], []
+    with gzip.open(os.path.join(directory, 'stars.json.gz'), 'rt', encoding='utf-8') as handle:
+        table = json.load(handle)
+    dec = np.asarray(table['dec'], dtype=float)
+    lo, hi = np.searchsorted(dec, dec0 - radius), np.searchsorted(dec, dec0 + radius)
+    mag = np.asarray([np.nan if value is None else value for value in table['mag'][lo:hi]], dtype=float)
+    keep = np.isfinite(mag) & (mag < magnitude_limit)
+    ras.append(np.asarray(table['ra'][lo:hi], dtype=float)[keep]); decs.append(dec[lo:hi][keep]); mags.append(mag[keep])
+    tycho_meta = os.path.join(directory, 'tycho.json')
+    if os.path.exists(tycho_meta):
+        layout = json.load(open(tycho_meta))
+        with gzip.open(os.path.join(directory, 'tycho.bin.gz'), 'rb') as handle:
+            raw = handle.read()
+        count = layout['count']
+        column = lambda key, dtype: np.frombuffer(raw, dtype=dtype, count=count, offset=layout['columns'][key]['offset'])
+        tdec = column('dec', '<f4').astype(float)
+        lo, hi = np.searchsorted(tdec, dec0 - radius), np.searchsorted(tdec, dec0 + radius)
+        tmag = column('mag', '<i2')[lo:hi] / 1000.0
+        keep = tmag < magnitude_limit
+        ras.append(column('ra', '<f4')[lo:hi].astype(float)[keep]); decs.append(tdec[lo:hi][keep]); mags.append(tmag[keep])
+    ra_all, dec_all, mag_all = np.concatenate(ras), np.concatenate(decs), np.concatenate(mags)
+    if not len(ra_all):
+        return []
+    x, y = wcs.world_to_pixel_values(ra_all, dec_all)
+    height, width = shape
+    inside = np.isfinite(x) & np.isfinite(y) & (x > -200) & (y > -200) & (x < width + 200) & (y < height + 200)
+    return list(zip(x[inside], y[inside], mag_all[inside]))
+
+
+def catalog_bright_star_mask(wcs, shape, fwhm, magnitude_limit=13.0):
+    """Legacy-Surveys-style bright-star mask: radius 1630" x 1.396**(-mag) around each star."""
+    height, width = shape
+    mask = np.zeros(shape, dtype=bool)
+    scale = float(np.sqrt(abs(np.linalg.det(wcs.pixel_scale_matrix)))) * 3600
+    for x, y, mag in catalog_bright_stars(wcs, shape, magnitude_limit):
+        radius = min(400.0, max(2.5 * (fwhm or 3), 1630.0 * 1.396 ** (-mag) / scale))
+        x0, x1 = max(0, int(x - radius)), min(width, int(x + radius) + 2)
+        y0, y1 = max(0, int(y - radius)), min(height, int(y + radius) + 2)
+        if x0 >= x1 or y0 >= y1:
+            continue
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        mask[y0:y1, x0:x1] |= (xx - x) ** 2 + (yy - y) ** 2 <= radius ** 2
+    return mask
+
+
 def default_hotpants_args(user_args, science, science_header, template, template_mask, fwhm_science, fwhm_template, science_invalid):
     """Data-driven HOTPANTS settings; any flag the user passed explicitly is left to the user."""
     present = {value for value in user_args if isinstance(value, str) and value.startswith('-')}
@@ -848,6 +970,16 @@ def main(config_path):
     aligned_data, _ = mono_data(aligned)
     fwhm_science = estimate_fwhm(science_data, science_invalid)
     fwhm_reference = estimate_fwhm(aligned_data, mask > 0)
+    # Mask clipped bright stars and bleed trails in the reference before subtracting and detecting.
+    bright = bright_source_mask(aligned_data, mask > 0, fwhm_reference)
+    bright |= elongated_source_mask(aligned_data, mask > 0, fwhm_reference)
+    try:
+        bright |= catalog_bright_star_mask(science_wcs, science_data.shape, max(fwhm_science or 0, fwhm_reference or 0) or 3)
+    except Exception as error:  # the catalogue mask is an improvement, never a reason to fail
+        print(f'Bright-star catalogue mask unavailable: {error}', file=sys.stderr)
+    if bright.any():
+        mask = np.where(bright, 1, mask).astype(np.uint8)
+        fits.writeto(work / 'reference-mask.fits', mask, overwrite=True)
     user_args = config.get('hotpantsArgs', [])
     auto_args, auto_settings = default_hotpants_args(user_args, science_data, science_header, aligned_data, mask,
                                                      fwhm_science, fwhm_reference, science_invalid)
@@ -884,6 +1016,7 @@ def main(config_path):
             'width': science_data.shape[1], 'height': science_data.shape[0],
             'candidates': candidates, 'detectedTotal': detected_total,
             'solarSystemObjects': solar_system_objects, 'solarSystemCheck': solar_system_note,
+            'brightStarMaskFraction': round(float(bright.mean()), 5),
             'autoSettings': {**auto_settings, 'detectionFwhmPx': float(config.get('sourceFwhm') or fwhm_science or 3),
                              'hotpantsArgs': auto_args},
             'rejectedCandidates': rejected, 'comparisonWarning': comparison_warning,

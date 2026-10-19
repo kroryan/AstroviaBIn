@@ -23,6 +23,7 @@ type Report = {
   files?: string[]; reference?: { survey?: string; localImageId?: number; autoSelection?: { band: string; reason: string; skipped: string[] } }; catalogCheck?: string;
   settings?: { thresholdSigma: number; maxDimension: number; sourceFwhm?: number };
   solarSystemObjects?: SolarSystemObject[]; solarSystemCheck?: string;
+  brightStarMaskFraction?: number;
   autoSettings?: { fwhmSciencePx?: number | null; fwhmReferencePx?: number | null; detectionFwhmPx?: number; hotpantsArgs?: string[] };
 };
 
@@ -191,6 +192,7 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
         </>}
         <p className="text-xs text-muted-foreground">Catalog check: {report.catalogCheck || 'not available'}. A nearby catalog object is not a transient identification.</p>
         {report.reference?.autoSelection && <p className="text-xs text-muted-foreground">Auto reference: band {report.reference.autoSelection.band} ({report.reference.autoSelection.reason}){report.reference.autoSelection.skipped.length ? `; skipped ${report.reference.autoSelection.skipped.map(item => item.split(':')[0]).join(', ')}` : ''}.</p>}
+        {report.brightStarMaskFraction != null && report.brightStarMaskFraction > 0 && <p className="text-xs text-muted-foreground">Masked around bright, saturated or bleeding stars: {(report.brightStarMaskFraction * 100).toFixed(1)}% of the field (transients there cannot be detected reliably).</p>}
         {report.autoSettings && <p className="text-xs text-muted-foreground">Measured seeing: science {report.autoSettings.fwhmSciencePx ?? '?'} px, reference {report.autoSettings.fwhmReferencePx ?? '?'} px · detection FWHM {report.autoSettings.detectionFwhmPx} px · HOTPANTS auto: <code>{report.autoSettings.hotpantsArgs?.join(' ') || 'defaults'}</code></p>}
         {report.solarSystemCheck && <p className="text-xs text-muted-foreground">Known asteroids and comets: {report.solarSystemCheck}{report.solarSystemObjects?.length ? ` ${report.solarSystemObjects.map(item => `${item.name}${item.vmag != null ? ` (V ${item.vmag})` : ''}`).join(', ')}.` : ''}</p>}
         <div className="grid gap-2 sm:grid-cols-3">

@@ -8,7 +8,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from hotpants_pipeline import (auto_reference_order, binned_wcs, check_candidate, default_hotpants_args,
+from hotpants_pipeline import (auto_reference_order, binned_wcs, bright_source_mask, elongated_source_mask, check_candidate, default_hotpants_args,
                                detect_candidates, estimate_fwhm, flag_known_objects, reduced_image,
                                science_band, write_candidate_products)
 
@@ -242,6 +242,29 @@ class ReferenceAndDefaultsTests(unittest.TestCase):
         self.assertIn('-rss', args)
         self.assertEqual(args[args.index('-ig') + 1], '6')
         self.assertLess(float(args[args.index('-il') + 1]), 0, 'negative background-subtracted values stay valid')
+
+
+class BrightStarMaskTests(unittest.TestCase):
+    def test_saturated_star_and_bleed_trail_are_masked_but_faint_stars_are_not(self):
+        image = np.random.default_rng(3).normal(10, 1, (200, 200))
+        yy, xx = np.mgrid[:200, :200]
+        image += np.minimum(5000, 20000 * np.exp(-((xx - 60) ** 2 + (yy - 60) ** 2) / 8))  # clipped star
+        image[59:62, 30:95] = 5000  # bleed trail
+        image += 300 * np.exp(-((xx - 150) ** 2 + (yy - 150) ** 2) / 4)  # ordinary star
+        mask = bright_source_mask(image, np.zeros(image.shape, dtype=bool), 2.5)
+        self.assertTrue(mask[60, 60] and mask[60, 32] and mask[60, 92])
+        self.assertFalse(mask[150, 150])
+        self.assertFalse(mask[180, 20])
+
+    def test_bleeding_stars_are_masked_and_round_stars_are_kept(self):
+        rng = np.random.default_rng(4)
+        image = rng.normal(0, 1, (240, 240))
+        yy, xx = np.mgrid[:240, :240]
+        image += 800 * np.exp(-((xx - 60) ** 2 / (2 * 6.0 ** 2) + (yy - 60) ** 2 / (2 * 1.3 ** 2)))  # bleed-elongated
+        image += 800 * np.exp(-((xx - 170) ** 2 + (yy - 170) ** 2) / (2 * 1.3 ** 2))  # round
+        mask = elongated_source_mask(image, np.zeros(image.shape, dtype=bool), 3.0)
+        self.assertTrue(mask[60, 60] and mask[60, 72])
+        self.assertFalse(mask[170, 170])
 
 if __name__ == '__main__':
     unittest.main()
