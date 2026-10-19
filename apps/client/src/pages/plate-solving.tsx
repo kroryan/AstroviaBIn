@@ -340,7 +340,7 @@ export default function PlateSolvingPage() {
               <Button
                 onClick={handleBulkPlateSolve}
                 disabled={selectedSelectableCount === 0 || plateSolveMutation.isPending}
-                className="sky-button-primary"
+                className="sky-button-primary w-full sm:w-auto whitespace-normal"
               >
                 {plateSolveMutation.isPending ? (
                   <>
