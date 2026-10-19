@@ -1,14 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { Settings, FileUp, FileImage, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Settings, Loader2, Menu, ScanLine, Upload, LogOut } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, useEffect, useRef } from "react";
 import { useSocket } from "@/hooks/use-socket";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { useQuery } from "@tanstack/react-query";
+import { UPLOAD_ACCEPT, UploadQueuePanel, useFileDrop, useUploadQueue } from "@/components/upload-queue";
 import type { Notification } from '@shared/types';
 
 const NAV_LINKS = [
@@ -30,12 +30,9 @@ export function Header() {
     window.location.assign("/login");
   };
   const [fitsScanning, setFitsScanning] = useState(false);
-  const [uploadType, setUploadType] = useState<'image' | 'fits' | null>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadStage, setUploadStage] = useState<'uploading' | 'processing' | 'complete' | 'failed'>('uploading');
-  const [uploadName, setUploadName] = useState('');
-  const imageInputRef = useRef<HTMLInputElement>(null);
-  const fitsInputRef = useRef<HTMLInputElement>(null);
+  const uploads = useUploadQueue();
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const dragging = useFileDrop(canEdit, uploads.enqueue);
   const socket = useSocket();
   const { toast } = useToast();
 
@@ -76,59 +73,8 @@ export function Header() {
     }
   };
 
-  const handleUpload = async (file: File, kind: 'image' | 'fits') => {
-    setUploadType(kind);
-    setUploadProgress(0);
-    setUploadStage('uploading');
-    setUploadName(file.name);
-    try {
-      const data = await new Promise<Record<string, unknown>>((resolve, reject) => {
-        const request = new XMLHttpRequest();
-        const endpoint = kind === 'fits' ? '/api/fits/upload' : '/api/library/upload';
-        request.open('POST', `${endpoint}?${new URLSearchParams({ filename: file.name })}`);
-        request.withCredentials = true;
-        request.setRequestHeader('Content-Type', 'application/octet-stream');
-        request.upload.addEventListener('progress', progressEvent => {
-          if (!progressEvent.lengthComputable) return;
-          const progress = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-          setUploadProgress(progress);
-          if (progress === 100) setUploadStage('processing');
-        });
-        request.addEventListener('load', () => {
-          let response: Record<string, unknown> = {};
-          try { response = request.responseText ? JSON.parse(request.responseText) as Record<string, unknown> : {}; } catch { /* handled below */ }
-          if (request.status >= 200 && request.status < 300) resolve(response);
-          else reject(new Error(typeof response.message === 'string' ? response.message : `Server returned ${request.status}`));
-        });
-        request.addEventListener('error', () => reject(new Error(`Network error while uploading ${kind === 'fits' ? 'FITS' : 'image'}`)));
-        request.addEventListener('abort', () => reject(new Error('Upload was cancelled')));
-        request.send(file);
-      });
-      setUploadProgress(100);
-      setUploadStage('complete');
-      const image = data.image && typeof data.image === 'object' ? data.image as Record<string, unknown> : undefined;
-      const savedName = kind === 'fits' ? data.output : image?.filename;
-      toast({ title: kind === 'fits' ? 'FITS uploaded' : 'Image uploaded', description: `${typeof savedName === 'string' ? savedName : file.name} was saved in AstroviaBin's local library.` });
-      queryClient.invalidateQueries({ queryKey: ["/api/images"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tags"] });
-      window.setTimeout(() => setUploadType(null), 1800);
-    } catch (error) {
-      setUploadStage('failed');
-      toast({ title: `${kind === 'fits' ? 'FITS' : 'Image'} upload failed`, description: error instanceof Error ? error.message : 'Unknown error', variant: 'destructive' });
-      window.setTimeout(() => setUploadType(null), 5000);
-    }
-  };
-
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) void handleUpload(file, 'image');
-    event.target.value = '';
-  };
-
-  const handleFitsUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) void handleUpload(file, 'fits');
+  const handleFilesChosen = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) uploads.enqueue(event.target.files);
     event.target.value = '';
   };
 
@@ -158,20 +104,11 @@ export function Header() {
 
           {/* Right-side actions */}
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-            <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/tiff,image/webp,image/gif,image/bmp,image/avif,image/heic,.jpg,.jpeg,.png,.tif,.tiff,.webp,.gif,.bmp,.avif,.heic,.heif" className="hidden" onChange={handleImageUpload} />
-            <input ref={fitsInputRef} type="file" accept=".fit,.fits,.fts,application/fits" className="hidden" onChange={handleFitsUpload} />
-            {canEdit && <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button disabled={uploadType !== null} title="Upload to AstroviaBin's private library" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
-                  {uploadType ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
-                  <span>{uploadType ? 'Uploading…' : 'Upload'}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => imageInputRef.current?.click()}><FileImage className="mr-2 h-4 w-4" />Photo or image</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => fitsInputRef.current?.click()}><FileUp className="mr-2 h-4 w-4" />FITS file</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>}
+            <input ref={uploadInputRef} type="file" multiple accept={UPLOAD_ACCEPT} className="hidden" onChange={handleFilesChosen} />
+            {canEdit && <Button onClick={() => uploadInputRef.current?.click()} title="Upload photos and FITS (several at once, or drop them on the page)" aria-label="Upload" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
+              {uploads.busy ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <Upload className="h-4 w-4 2xl:mr-2" />}
+              <span>{uploads.busy ? 'Uploading…' : 'Upload'}</span>
+            </Button>}
             {canEdit && <Button onClick={handleFitsScan} disabled={fitsScanning} title="Scan FITS library" aria-label="Scan FITS library" variant="outline" className="hidden h-9 px-2 md:inline-flex 2xl:px-3">
               {fitsScanning ? <Loader2 className="h-4 w-4 animate-spin 2xl:mr-2" /> : <ScanLine className="h-4 w-4 2xl:mr-2" />}
               <span className="inline 2xl:hidden">{fitsScanning ? 'Scanning…' : 'FITS Scan'}</span><span className="hidden 2xl:inline">{fitsScanning ? 'Scanning FITS…' : 'Scan FITS'}</span>
@@ -243,20 +180,11 @@ export function Header() {
                   <div className="border-t border-border my-2" />
                   {canEdit && <>
                   <button
-                    onClick={() => { setMobileOpen(false); imageInputRef.current?.click(); }}
-                    disabled={uploadType !== null}
+                    onClick={() => { setMobileOpen(false); uploadInputRef.current?.click(); }}
                     className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
                   >
-                    {uploadType === 'image' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileImage className="h-4 w-4" />}
-                    {uploadType === 'image' ? 'Uploading image…' : 'Upload image'}
-                  </button>
-                  <button
-                    onClick={() => { setMobileOpen(false); fitsInputRef.current?.click(); }}
-                    disabled={uploadType !== null}
-                    className="px-4 py-3 text-sm font-medium transition-colors text-muted-foreground hover:bg-accent/50 hover:text-foreground flex items-center gap-2 text-left"
-                  >
-                    {uploadType === 'fits' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileUp className="h-4 w-4" />}
-                    {uploadType === 'fits' ? 'Uploading FITS…' : 'Upload FITS'}
+                    {uploads.busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {uploads.busy ? 'Uploading…' : 'Upload photos & FITS'}
                   </button>
                   <button
                     onClick={() => { setMobileOpen(false); handleFitsScan(); }}
@@ -295,20 +223,13 @@ export function Header() {
           </div>
         </div>
       </div>
-      {uploadType !== null && (
-        <div className="fixed bottom-4 right-4 z-50 w-72 rounded-lg border border-border bg-card p-3 shadow-lg" role="status" aria-live="polite">
-          <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-            <span className="truncate font-medium">{uploadName}</span>
-            <span className={uploadStage === 'failed' ? 'text-destructive' : 'text-muted-foreground'}>
-              {uploadStage === 'uploading' ? `${uploadProgress}%` : uploadStage === 'processing' ? 'Saving' : uploadStage === 'complete' ? 'Done' : 'Failed'}
-            </span>
+      <UploadQueuePanel items={uploads.items} busy={uploads.busy} onClose={uploads.clear} />
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="rounded-xl border-2 border-dashed border-primary px-8 py-6 text-center">
+            <Upload className="mx-auto mb-2 h-8 w-8 text-primary" />
+            <p className="font-display uppercase tracking-wider text-foreground">Drop photos and FITS to upload</p>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted">
-            <div className={`h-full rounded-full transition-all duration-200 ${uploadStage === 'failed' ? 'bg-destructive' : uploadStage === 'complete' ? 'bg-green-500' : 'bg-primary'}`} style={{ width: `${uploadProgress}%` }} />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {uploadStage === 'uploading' ? `Uploading ${uploadType === 'fits' ? 'FITS' : 'image'}…` : uploadStage === 'processing' ? 'Saving locally and adding to the gallery…' : uploadStage === 'complete' ? 'Saved to AstroviaBin’s local library.' : 'Upload failed; see the notification for details.'}
-          </p>
         </div>
       )}
     </header>

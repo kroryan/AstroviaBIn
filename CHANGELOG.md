@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HOTPANTS reports list known asteroids and comets in the field (IMCCE SkyBoT with the observatory's topocentric position, sent as `-observer`) and flag candidates that coincide with one — verified on 1620 Geographos to 0.7".
 
 ### Changed
+- One Upload button for everything: pick (or drop anywhere on the page) any number of photos and FITS together; each file goes to the right library by its extension, one at a time, with per-file progress, a summary at the end and the reason for any file that fails.
 - Inside an album, images are grouped into categories: the Solar System album has one section per body (Sun, Moon, each planet, comets, asteroids, other Solar System), every other album separates FITS from photos.
 - Dates and times are shown in UTC by default (with a "UTC" suffix), including the capture-time editor, which now reads and writes UTC; each browser can switch to local time in Admin → Dates and times.
 - New uploads (photos and FITS) are tagged Deep Sky by default so they can be plate-solved, unless the title, file name or FITS OBJECT names a planet, the Sun or the Moon (Spanish or English), which gets that tag instead and goes to the Solar System album. Adding a planet tag to an image removes its Deep Sky tag (comets and asteroids keep it).
