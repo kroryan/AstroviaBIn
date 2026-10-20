@@ -268,7 +268,8 @@ app.get('/:imageId/preview', async (c) => {
       redBalance: query.redBalance ? Number(query.redBalance) : undefined,
       greenBalance: query.greenBalance ? Number(query.greenBalance) : undefined,
       blueBalance: query.blueBalance ? Number(query.blueBalance) : undefined,
-      backgroundNeutralization: query.backgroundNeutralization === 'true',
+      // On unless explicitly turned off: a neutral sky is the faithful default for colour FITS.
+      backgroundNeutralization: query.backgroundNeutralization !== 'false',
       scnrAmount: query.scnrAmount ? Number(query.scnrAmount) : undefined,
       sharpenAmount: query.sharpenAmount ? Number(query.sharpenAmount) : undefined,
       sharpenRadius: query.sharpenRadius ? Number(query.sharpenRadius) : undefined,
@@ -294,7 +295,7 @@ app.get('/:imageId/preview', async (c) => {
 // tiles stay a stable, shareable cache regardless of who's looking. The live-editing processing
 // panel keeps using /preview directly — it needs arbitrary settings, which tiling intentionally
 // does not support.
-const TILE_SOURCE_SETTINGS: FitsProcessingSettings = { stretch: 'asinh' };
+const TILE_SOURCE_SETTINGS: FitsProcessingSettings = { stretch: 'asinh', backgroundNeutralization: true };
 
 app.get('/:imageId/tile-info', async (c) => {
   try {

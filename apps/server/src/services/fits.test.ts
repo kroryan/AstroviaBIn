@@ -384,3 +384,50 @@ test('preview downscaling averages blocks instead of skipping pixels', async () 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('blank borders and channel pedestals do not wash out the sky (STF black point)', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 64;
+  const random = noise(11);
+  // A registered narrowband composite: 0 in a 4-pixel border (more than the 0.5% shadow clip), a different
+  // sky level per channel (228 / 242 / 199) and one bright star in the centre.
+  const plane = (sky: number) => Array.from({ length: size * size }, (_, index) => {
+    const x = index % size, y = Math.floor(index / size);
+    if (x < 4 || y < 4 || x >= size - 4 || y >= size - 4) return 0;
+    // A nebula (~5% of the frame) and a star, as in a real field.
+    const star = (x - 32) ** 2 + (y - 32) ** 2 < 2 ? 3000 : (x - 32) ** 2 + (y - 32) ** 2 < 64 ? 300 : 0;
+    return Math.round(sky + 15 * random() + star);
+  });
+  const filePath = path.join(directory, 'composite.fits');
+  await writeFile(filePath, testFitsRgb(size, [plane(228), plane(242), plane(199)]));
+  try {
+    const preview = await renderFitsPreview(filePath, { stretch: 'asinh', strength: 10, shadowPercentile: 0.005, highlightPercentile: 0.995, backgroundNeutralization: true });
+    const { data, info } = await sharp(preview.buffer).raw().toBuffer({ resolveWithObject: true });
+    // Sky sample away from the border and the star.
+    const at = (x: number, y: number) => Array.from({ length: 3 }, (_, channel) => data[(y * info.width + x) * info.channels + channel]);
+    const sky = [at(12, 12), at(50, 12), at(12, 50), at(50, 50)];
+    const mean = [0, 1, 2].map(channel => sky.reduce((sum, pixel) => sum + pixel[channel], 0) / sky.length);
+    assert.ok(Math.max(...mean) < 140, `sky must stay dark, got ${mean.map(Math.round)}`);
+    assert.ok(Math.max(...mean) - Math.min(...mean) < 40, `sky must stay neutral, got ${mean.map(Math.round)}`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a mostly empty field keeps a dark sky (white point relative to the sky)', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 64;
+  const random = noise(5);
+  // Sky and noise only, plus three faint stars: the 99.5th percentile is barely above the sky.
+  const values = Array.from({ length: size * size }, (_, index) => Math.round(1000 + 20 * random() + ([700, 2100, 3500].includes(index) ? 400 : 0)));
+  const filePath = path.join(directory, 'empty.fits');
+  await writeFile(filePath, testFitsMono(size, values));
+  try {
+    const preview = await renderFitsPreview(filePath, { stretch: 'asinh', strength: 10, shadowPercentile: 0.005, highlightPercentile: 0.995 });
+    const { data } = await sharp(preview.buffer).raw().toBuffer({ resolveWithObject: true });
+    const sorted = Array.from(data).sort((a, b) => a - b);
+    assert.ok(sorted[sorted.length >> 1] < 110, `sky must not wash out, got ${sorted[sorted.length >> 1]}`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

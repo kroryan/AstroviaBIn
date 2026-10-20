@@ -407,7 +407,7 @@ export async function analysisFile(imageId: number, runId: string, filename: str
   }
   if (preview) {
     if (!filename.endsWith('.fits')) throw new Error('Only FITS layers have a preview');
-    const image = await cachedFitsPreview(filePath, { stretch: 'asinh' }, 2048);
+    const image = await cachedFitsPreview(filePath, { stretch: 'asinh', backgroundNeutralization: true }, 2048);
     const bytes = new Uint8Array(new ArrayBuffer(image.byteLength));
     bytes.set(image);
     return new Response(bytes, { headers: { 'content-type': 'image/png', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });

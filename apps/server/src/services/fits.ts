@@ -214,7 +214,7 @@ export function readPixels(file: Buffer, metadata: FitsMetadata): Float64Array {
   return result;
 }
 
-function percentile(values: Float64Array, percentileValue: number): number {
+function sortedSample(values: Float64Array): number[] {
   const sample: number[] = [];
   const step = Math.max(1, Math.floor(values.length / 200_000));
   for (let index = 0; index < values.length; index += step) {
@@ -222,9 +222,37 @@ function percentile(values: Float64Array, percentileValue: number): number {
     if (Number.isFinite(value)) sample.push(value);
   }
   if (sample.length === 0) throw new Error('FITS image contains no finite pixel values');
-  sample.sort((left, right) => left - right);
-  const position = Math.max(0, Math.min(sample.length - 1, Math.round((sample.length - 1) * percentileValue)));
-  return sample[position];
+  return sample.sort((left, right) => left - right);
+}
+
+function atPercentile(sorted: number[], percentileValue: number): number {
+  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.round((sorted.length - 1) * percentileValue)))];
+}
+
+/**
+ * Display black point: the shadow-clipping percentile, but never below the sky background minus 2.8σ
+ * (σ from the median absolute deviation) — the screen-transfer auto-stretch rule of PixInsight/Siril.
+ * Blank borders (0 after registration), dead pixels or a pedestal would otherwise pull the black
+ * point far below the sky and wash the background out (with a colour cast when the channels' skies
+ * differ). For ordinary frames the percentile already lies at about this level, so nothing changes.
+ */
+/**
+ * Display white point: the highlight percentile, but never closer to the black point than ten times the
+ * sky's distance from it, so the sky lands at about 10% before the stretch curve (≈25–30% after the
+ * default asinh, like PixInsight's auto-stretch). In mostly empty fields the 99.5th percentile is barely
+ * above the sky and would otherwise turn the background bright grey; fields with real signal are
+ * unaffected because their percentile is far higher.
+ */
+export function whitePoint(sorted: number[], highlightPercentile: number, black: number): number {
+  const median = atPercentile(sorted, 0.5);
+  return Math.max(atPercentile(sorted, highlightPercentile), black + 10 * (median - black));
+}
+
+export function blackPoint(sorted: number[], shadowPercentile: number): number {
+  const median = atPercentile(sorted, 0.5);
+  const deviations = sorted.map(value => Math.abs(value - median)).sort((left, right) => left - right);
+  const sigma = 1.4826 * atPercentile(deviations, 0.5);
+  return Math.max(atPercentile(sorted, shadowPercentile), median - 2.8 * sigma);
 }
 
 function normalized(value: number, low: number, high: number): number {
@@ -262,18 +290,36 @@ interface ProcessingRanges { low: number[]; high: number[]; }
 function processingRanges(pixels: Float64Array, metadata: FitsMetadata, settings: FitsProcessingSettings): ProcessingRanges {
   const shadowPercentile = Math.max(0, Math.min(0.5, settings.shadowPercentile ?? (settings.backgroundNeutralization ? 0.01 : 0.005)));
   const highlightPercentile = Math.max(0.5, Math.min(1, settings.highlightPercentile ?? 0.995));
-  const sharedLow = settings.blackPoint ?? percentile(pixels, shadowPercentile);
-  const sharedHigh = settings.whitePoint ?? percentile(pixels, highlightPercentile);
+  const shared = settings.blackPoint === undefined || settings.whitePoint === undefined ? sortedSample(pixels) : [];
+  const sharedLow = settings.blackPoint ?? blackPoint(shared, shadowPercentile);
+  const sharedHigh = settings.whitePoint ?? whitePoint(shared, highlightPercentile, sharedLow);
   const low = Array.from({ length: metadata.channels }, () => sharedLow);
   const high = Array.from({ length: metadata.channels }, () => sharedHigh);
   if (settings.backgroundNeutralization && metadata.channels === 3) {
     const planeSize = metadata.width * metadata.height;
+    const sky: number[] = [];
     for (let channel = 0; channel < metadata.channels; channel++) {
-      low[channel] = settings.blackPoint ?? percentile(pixels.subarray(channel * planeSize, (channel + 1) * planeSize), shadowPercentile);
-      high[channel] = settings.whitePoint ?? percentile(pixels.subarray(channel * planeSize, (channel + 1) * planeSize), highlightPercentile);
+      const plane = sortedSample(pixels.subarray(channel * planeSize, (channel + 1) * planeSize));
+      low[channel] = settings.blackPoint ?? blackPoint(plane, shadowPercentile);
+      high[channel] = settings.whitePoint ?? whitePoint(plane, highlightPercentile, low[channel]);
+      sky[channel] = atPercentile(plane, 0.5);
     }
+    return neutralRanges(low, high, sky, settings.blackPoint !== undefined);
   }
   return { low, high };
+}
+
+/**
+ * Background neutralization: every channel's sky (median) is placed at the same distance above its
+ * black point and every channel uses the same range, so the sky becomes neutral while objects keep
+ * their real colour ratios. (Stretching each channel to its own black and white points, as before,
+ * recoloured the whole image — e.g. an orange or magenta sky.) With fixed black points, they win.
+ */
+function neutralRanges(low: number[], high: number[], sky: number[], fixedBlack = false): ProcessingRanges {
+  const offset = fixedBlack ? 0 : Math.max(0, Math.min(...sky.map((value, channel) => value - low[channel])));
+  const black = fixedBlack ? low : sky.map(value => value - offset);
+  const range = Math.max(...high.map((value, channel) => value - black[channel]), Number.EPSILON);
+  return { low: black, high: black.map(value => value + range) };
 }
 
 /**
@@ -861,9 +907,16 @@ export function resolveFitsFile(originalPath: string | null): string | null {
   return resolved === root || resolved.startsWith(`${root}${path.sep}`) ? resolved : null;
 }
 
+/**
+ * Part of every rendered-image cache key: bump it when the rendering changes so previews and tiles
+ * cached on disk by an older version are not served again (they are simply left unused).
+ * 3: background-relative black and white points and colour-preserving background neutralization.
+ */
+const FITS_RENDER_VERSION = 3;
+
 export async function cachedFitsPreview(filePath: string, settings: FitsProcessingSettings = {}, maximumDimension = 2048): Promise<Buffer> {
   const source = await stat(filePath);
-  const key = createHash('sha256').update(JSON.stringify({ filePath, size: source.size, mtimeMs: source.mtimeMs, settings, maximumDimension })).digest('hex');
+  const key = createHash('sha256').update(JSON.stringify({ render: FITS_RENDER_VERSION, filePath, size: source.size, mtimeMs: source.mtimeMs, settings, maximumDimension })).digest('hex');
   const cachePath = path.join(fitsCacheDirectory(), `${key}.png`);
   try { return await readFile(cachePath); } catch { /* generate it below */ }
   const preview = await renderFitsPreview(filePath, settings, maximumDimension);
@@ -881,12 +934,11 @@ async function readExactly(handle: Awaited<ReturnType<typeof open>>, buffer: Buf
   }
 }
 
-async function sampleFilePercentile(
+async function sampleFileValues(
   handle: Awaited<ReturnType<typeof open>>,
   metadata: FitsMetadata,
-  percentileValue: number,
   channel?: number,
-): Promise<number> {
+): Promise<number[]> {
   const bytes = bytesPerPixel(metadata.bitpix);
   const valueCount = metadata.width * metadata.height;
   const channels = channel === undefined ? Array.from({ length: metadata.channels }, (_, index) => index) : [channel];
@@ -918,14 +970,13 @@ async function sampleFilePercentile(
   }
 
   if (values.length === 0) throw new Error('FITS image contains no finite pixel values');
-  values.sort((left, right) => left - right);
-  const position = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * percentileValue)));
-  return values[position];
+  return values.sort((left, right) => left - right);
 }
 
 async function cachedFileProcessingRanges(filePath: string, metadata: FitsMetadata, settings: FitsProcessingSettings): Promise<ProcessingRanges> {
   const source = await stat(filePath);
   const key = createHash('sha256').update(JSON.stringify({
+    render: FITS_RENDER_VERSION,
     filePath,
     size: source.size,
     mtimeMs: source.mtimeMs,
@@ -946,14 +997,18 @@ async function cachedFileProcessingRanges(filePath: string, metadata: FitsMetada
       if (settings.backgroundNeutralization && metadata.channels === 3) {
         const low: number[] = [];
         const high: number[] = [];
+        const sky: number[] = [];
         for (let channel = 0; channel < metadata.channels; channel++) {
-          low.push(settings.blackPoint ?? await sampleFilePercentile(handle, metadata, shadowPercentile, channel));
-          high.push(settings.whitePoint ?? await sampleFilePercentile(handle, metadata, highlightPercentile, channel));
+          const plane = await sampleFileValues(handle, metadata, channel);
+          low.push(settings.blackPoint ?? blackPoint(plane, shadowPercentile));
+          high.push(settings.whitePoint ?? whitePoint(plane, highlightPercentile, low[channel]));
+          sky.push(atPercentile(plane, 0.5));
         }
-        return { low, high };
+        return neutralRanges(low, high, sky, settings.blackPoint !== undefined);
       }
-      const low = settings.blackPoint ?? await sampleFilePercentile(handle, metadata, shadowPercentile);
-      const high = settings.whitePoint ?? await sampleFilePercentile(handle, metadata, highlightPercentile);
+      const all = await sampleFileValues(handle, metadata);
+      const low = settings.blackPoint ?? blackPoint(all, shadowPercentile);
+      const high = settings.whitePoint ?? whitePoint(all, highlightPercentile, low);
       return {
         low: Array.from({ length: metadata.channels }, () => low),
         high: Array.from({ length: metadata.channels }, () => high),
@@ -996,7 +1051,7 @@ export async function renderFitsTile(filePath: string, settings: FitsProcessingS
 
   const source = await stat(filePath);
   const tileKey = createHash('sha256').update(JSON.stringify({
-    filePath, size: source.size, mtimeMs: source.mtimeMs, settings, level, x, y,
+    render: FITS_RENDER_VERSION, filePath, size: source.size, mtimeMs: source.mtimeMs, settings, level, x, y,
   })).digest('hex');
   const cacheDirectory = path.join(fitsCacheDirectory(), 'tiles');
   const cachePath = path.join(cacheDirectory, `${tileKey}.jpg`);

@@ -96,7 +96,7 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
       backgroundExtractionAmount: String(backgroundExtractionAmount), hotPixelThreshold: String(hotPixelThreshold),
       colorMap,
     });
-    if (backgroundNeutralization) params.set('backgroundNeutralization', 'true');
+    params.set('backgroundNeutralization', String(backgroundNeutralization));
     if (!fullscreen) params.set('preview', 'interactive');
     return `/api/fits/${image.id}/preview?${params.toString()}`;
   }, [image.id, stretch, strength, gamma, midtones, saturation, redBalance, greenBalance, blueBalance, shadowPercentile, highlightPercentile, backgroundNeutralization, scnrAmount, sharpenAmount, sharpenRadius, denoiseAmount, denoiseRadius, backgroundExtractionAmount, hotPixelThreshold, colorMap, fullscreen]);
