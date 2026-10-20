@@ -92,7 +92,7 @@ export function StackingGuide() {
             <li><b>Stacks:</b> do not re-stack a stack together with the frames it came from (their signal would count twice). Stacks of different frames of the same field and filter can be combined.</li>
             <li><b>Binning / pixel scale / telescope:</b> CCDProc reprojects mono frames through their plate solutions, so different setups can line up, but their PSFs differ and the result is softer. Prefer one setup per stack and plate-solve every frame first.</li>
             <li><b>Mosaics:</b> panels of different fields do not overlap enough to stack — they need a mosaic tool.</li>
-            <li><b>Exposure time:</b> different exposures are normalized by EXPTIME, but long frames may saturate stars that short ones do not; keep one exposure per stack when possible.</li>
+            <li><b>Exposure time:</b> different exposures are normalized by EXPTIME, which is only exact once the bias (or dark) is subtracted: scaling an uncalibrated frame also scales its bias pedestal, so add a master bias/dark or stack one exposure. Long frames may also saturate stars that short ones do not. Frames without EXPTIME are normalized to the reference's median level instead.</li>
             <li><b>Quality:</b> leave out frames with clouds, bad focus, trailing or much worse seeing — they add noise. Single satellite or plane trails are removed by sigma-clipping.</li>
           </ul>
         </Section>

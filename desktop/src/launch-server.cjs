@@ -21,7 +21,7 @@ const resources = {
   server: __dirname,
   sky: path.join(resourcesDir, 'sky'),
   hotpants: path.join(resourcesDir, 'bin'),
-  python: [isWindows ? path.join(resourcesDir, 'python', 'python.exe') : path.join(resourcesDir, '..', 'python', 'bin', 'python'), '/opt/AstroviaBin/python/bin/python']
+  python: [path.join(resourcesDir, 'python', isWindows ? 'python.exe' : path.join('bin', 'python3')), '/opt/AstroviaBin/python/bin/python']
     .find(candidate => fs.existsSync(candidate)) || '',
 };
 

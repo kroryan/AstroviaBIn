@@ -20,7 +20,12 @@ const isWindows = process.platform === 'win32';
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => (state.configured ? openSettings() : openSetup()));
+  // Launching AstroviaBin again (menu, desktop icon) shows the app instead of starting a second copy.
+  app.on('second-instance', () => {
+    if (state.status === 'running') openApp();
+    else if (state.configured) openSettings();
+    else openSetup();
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -39,7 +44,7 @@ function resources() {
   const base = process.resourcesPath;
   const pythonCandidates = isWindows
     ? [path.join(base, 'python', 'python.exe')]
-    : [path.join(base, '..', 'python', 'bin', 'python'), '/opt/AstroviaBin/python/bin/python'];
+    : [path.join(base, 'python', 'bin', 'python3'), '/opt/AstroviaBin/python/bin/python'];
   return {
     server: path.join(base, 'server'),
     node: path.join(base, 'runtime', isWindows ? 'node.exe' : 'node'),
@@ -79,6 +84,13 @@ function loadConfig() {
 
 function url() {
   return `http://localhost:${state.values.port}`;
+}
+
+/** The addresses other devices use when AstroviaBin is shared on the local network. */
+function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat()
+    .filter(entry => entry && entry.family === 'IPv4' && !entry.internal)
+    .map(entry => entry.address);
 }
 
 function notify(title, body) {
@@ -167,6 +179,10 @@ async function startServer() {
       // Already served, e.g. by the astroviabin.service systemd unit: use it instead of starting a second one.
       state.external = true;
       setStatus('running', `Running at ${url()} (managed by the AstroviaBin system service)`);
+      if (state.values.openBrowserOnStart && !state.openedOnce && !process.argv.includes('--hidden')) {
+        state.openedOnce = true;
+        openApp();
+      }
       return;
     }
     setStatus('error', `Port ${state.values.port} is already in use (another AstroviaBin or program). Change the port in Settings or stop the other program.`);
@@ -223,9 +239,9 @@ async function startServer() {
     if (await healthy(Number(state.values.port))) {
       state.restarts = 0;
       setStatus('running', `Running at ${url()}`);
-      if (state.values.openBrowserOnStart && !state.openedOnce) {
+      if (state.values.openBrowserOnStart && !state.openedOnce && !process.argv.includes('--hidden')) {
         state.openedOnce = true;
-        shell.openExternal(url());
+        openApp();
       }
       return;
     }
@@ -259,9 +275,136 @@ function stopServer() {
 }
 
 async function restartServer() {
+  if (state.external) {
+    // The astroviabin.service systemd unit (Linux) serves AstroviaBin: restart it with the saved settings.
+    if (isWindows) return;
+    // Never start a second server here: wait for the service itself to answer (two servers must not
+    // share one database).
+    setStatus('starting', 'Restarting the AstroviaBin system service…');
+    const failed = await new Promise(resolve => execFile('systemctl', ['--user', 'restart', 'astroviabin.service'], resolve));
+    if (failed) { setStatus('error', `The system service could not be restarted: ${failed.message}`); return; }
+    const started = Date.now();
+    while (Date.now() - started < 180_000) {
+      if (await healthy(Number(state.values.port))) {
+        setStatus('running', `Running at ${url()} (managed by the AstroviaBin system service)`);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    setStatus('error', 'The AstroviaBin system service did not come back; see "journalctl --user -u astroviabin.service".');
+    return;
+  }
   await stopServer();
   state.restarts = 0;
   await startServer();
+}
+
+function stopExternalServer() {
+  setStatus('stopping', 'Stopping the AstroviaBin system service…');
+  execFile('systemctl', ['--user', 'stop', 'astroviabin.service'], error => {
+    state.external = false;
+    setStatus(error ? 'error' : 'stopped', error ? `The system service could not be stopped: ${error.message}` : 'Stopped');
+  });
+}
+
+/** "Only this computer" (127.0.0.1) or "every device on my local network" (0.0.0.0); restarts the server. */
+async function setSharing(host) {
+  if (state.values.host === host) return;
+  state.values.host = host;
+  config.save(app, state.values, safeStorage);
+  refreshTray();
+  if (state.child || state.external) {
+    if (state.external && isWindows) return;
+    await restartServer();
+    const shared = host !== '127.0.0.1';
+    notify('AstroviaBin', shared
+      ? `Shared on your local network: ${lanAddresses().map(address => `http://${address}:${state.values.port}`).join(', ') || 'no network address found'}`
+      : 'Only this computer can open AstroviaBin now.');
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// AstroviaBin window (the web interface in its own app window)
+
+let appWindow = null;
+const windowStateFile = () => path.join(config.configDirectory(app), 'window-state.json');
+
+function sameOrigin(target) {
+  try { return new URL(target).origin === new URL(url()).origin; } catch { return false; }
+}
+
+/** Links to other sites (Aladin, SIMBAD, TNS…) open in the web browser; AstroviaBin pages stay in the app. */
+function keepInApp(contents) {
+  contents.setWindowOpenHandler(({ url: target }) => {
+    if (sameOrigin(target)) {
+      return { action: 'allow', overrideBrowserWindowOptions: {
+        autoHideMenuBar: true, icon: RES.icon, backgroundColor: '#05030c',
+        webPreferences: { partition: 'persist:astroviabin', contextIsolation: true, sandbox: true, plugins: true },
+      } };
+    }
+    if (/^(https?|mailto):/i.test(target)) shell.openExternal(target);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (event, target) => {
+    if (sameOrigin(target)) return;
+    event.preventDefault();
+    if (/^(https?|mailto):/i.test(target)) shell.openExternal(target);
+  });
+  contents.on('did-create-window', child => keepInApp(child.webContents));
+}
+
+function openApp() {
+  if (state.status !== 'running') { openSettings(); return; }
+  if (state.values.openIn === 'browser') { shell.openExternal(url()); return; }
+  if (appWindow && !appWindow.isDestroyed()) {
+    if (appWindow.isMinimized()) appWindow.restore();
+    appWindow.show();
+    appWindow.focus();
+    return;
+  }
+  let saved = {};
+  try { saved = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')); } catch { /* first window */ }
+  appWindow = new BrowserWindow({
+    width: saved.width || 1400, height: saved.height || 900, x: saved.x, y: saved.y,
+    minWidth: 640, minHeight: 480, title: 'AstroviaBin', icon: RES.icon, backgroundColor: '#05030c',
+    autoHideMenuBar: true, show: false,
+    // A persistent session keeps you signed in between launches; the page gets no Node access.
+    webPreferences: { partition: 'persist:astroviabin', contextIsolation: true, sandbox: true, nodeIntegration: false, plugins: true },
+  });
+  appWindow.setMenu(Menu.buildFromTemplate([
+    { label: 'AstroviaBin', submenu: [
+      { label: 'Open in web browser', click: () => shell.openExternal(appWindow.webContents.getURL() || url()) },
+      { label: 'Copy page address', click: () => require('electron').clipboard.writeText(appWindow.webContents.getURL() || url()) },
+      { type: 'separator' },
+      { label: 'Server settings…', click: () => openSettings() },
+      { type: 'separator' },
+      { role: 'close', label: 'Close window (the server keeps running)' },
+    ] },
+    { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+    { label: 'View', submenu: [
+      { label: 'Back', accelerator: 'Alt+Left', click: () => appWindow.webContents.navigationHistory.canGoBack() && appWindow.webContents.navigationHistory.goBack() },
+      { label: 'Forward', accelerator: 'Alt+Right', click: () => appWindow.webContents.navigationHistory.canGoForward() && appWindow.webContents.navigationHistory.goForward() },
+      { role: 'reload' }, { role: 'forceReload' }, { type: 'separator' },
+      { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' },
+    ] },
+  ]));
+  if (saved.maximized) appWindow.maximize();
+  keepInApp(appWindow.webContents);
+  appWindow.once('ready-to-show', () => appWindow.show());
+  // While the server restarts the page cannot load: try again until it is back.
+  appWindow.webContents.on('did-fail-load', (_event, code, _description, failedUrl, isMainFrame) => {
+    if (!isMainFrame || code === -3) return;
+    if (!appWindow.isVisible()) appWindow.show();
+    setTimeout(() => { if (appWindow && !appWindow.isDestroyed()) appWindow.loadURL(sameOrigin(failedUrl) ? failedUrl : url()); }, 2000);
+  });
+  appWindow.on('close', () => {
+    try {
+      const bounds = appWindow.getNormalBounds();
+      fs.writeFileSync(windowStateFile(), JSON.stringify({ ...bounds, maximized: appWindow.isMaximized() }));
+    } catch { /* not important */ }
+  });
+  appWindow.on('closed', () => { appWindow = null; });
+  appWindow.loadURL(url());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -281,7 +424,7 @@ function setLaunchAtLogin(enabled) {
       fs.rmSync(file, { force: true });
     }
   } else {
-    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), args: ['--hidden'] });
+    app.setLoginItemSettings({ openAtLogin: Boolean(enabled), args: ['--hidden'], name: 'AstroviaBin' });
   }
 }
 
@@ -313,12 +456,23 @@ function refreshTray() {
     { label: `AstroviaBin — ${STATUS_LABEL[state.status]}`, enabled: false },
     { label: state.message || ' ', enabled: false },
     { type: 'separator' },
-    { label: 'Open AstroviaBin', enabled: running, click: () => shell.openExternal(url()) },
+    { label: 'Open AstroviaBin', enabled: running, click: () => openApp() },
+    { label: 'Open in web browser', enabled: running, click: () => shell.openExternal(url()) },
     { label: 'Copy address', enabled: running, click: () => require('electron').clipboard.writeText(url()) },
+    { label: 'Share AstroviaBin with', submenu: [
+      { label: 'Only this computer', type: 'radio', checked: values.host === '127.0.0.1', click: () => setSharing('127.0.0.1') },
+      { label: 'Every device on my local network', type: 'radio', checked: values.host !== '127.0.0.1', click: () => setSharing('0.0.0.0') },
+      { type: 'separator' },
+      ...(values.host !== '127.0.0.1' && lanAddresses().length
+        ? lanAddresses().map(address => ({ label: `Copy http://${address}:${values.port}`, enabled: running,
+          click: () => require('electron').clipboard.writeText(`http://${address}:${values.port}`) }))
+        : [{ label: values.host === '127.0.0.1' ? 'Other devices cannot connect' : 'No network address found', enabled: false }]),
+    ] },
     { type: 'separator' },
     { label: 'Start server', enabled: !state.child && !busy && state.configured, click: () => { state.restarts = 0; startServer(); } },
-    { label: 'Stop server', enabled: Boolean(state.child) && !busy, click: () => stopServer() },
-    { label: 'Restart server', enabled: Boolean(state.child) && !busy, click: () => restartServer() },
+    { label: 'Stop server', enabled: (Boolean(state.child) || (state.external && !isWindows)) && !busy,
+      click: () => (state.external ? stopExternalServer() : stopServer()) },
+    { label: 'Restart server', enabled: (Boolean(state.child) || (state.external && !isWindows)) && !busy, click: () => restartServer() },
     { type: 'separator' },
     { label: 'Settings…', click: () => openSettings() },
     { label: 'Open folder', submenu: [
@@ -351,7 +505,7 @@ function refreshTray() {
 function createTray() {
   const image = nativeImage.createFromPath(path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', 'assets'), isWindows ? 'tray.ico' : 'tray.png'));
   tray = new Tray(image.isEmpty() ? nativeImage.createFromPath(RES.icon).resize({ width: 22, height: 22 }) : image);
-  tray.on('click', () => { if (state.status === 'running') shell.openExternal(url()); else openSettings(); });
+  tray.on('click', () => { if (state.status === 'running') openApp(); else openSettings(); });
   refreshTray();
 }
 

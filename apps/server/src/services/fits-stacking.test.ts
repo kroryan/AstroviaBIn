@@ -178,3 +178,83 @@ test('CCDProc stacks unsigned 16-bit camera frames (BZERO 32768) with the right 
     assert.ok(pixels.every(value => Math.abs(value - 40001) < 1e-3), `mean of 40000 and 40002, got ${pixels[0]}`);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+/** Colour cube (planes, y, x) as written by OSC cameras and colour composites. */
+function fitsCube(width: number, height: number, planes: number[][], extra: string[] = []): Buffer {
+  const cards = [card('SIMPLE', 'T'), card('BITPIX', '-32'), card('NAXIS', '3'), card('NAXIS1', String(width)),
+    card('NAXIS2', String(height)), card('NAXIS3', String(planes.length)), card('BUNIT', "'adu'"), ...extra, card('END')];
+  const header = Buffer.from(cards.join(''), 'ascii');
+  const paddedHeader = Buffer.concat([header, Buffer.alloc(Math.ceil(header.length / 2880) * 2880 - header.length, ' ')]);
+  const values = planes.flat();
+  const data = Buffer.alloc(values.length * 4);
+  values.forEach((value, index) => data.writeFloatBE(value, index * 4));
+  return Buffer.concat([paddedHeader, data, Buffer.alloc(Math.ceil(data.length / 2880) * 2880 - data.length)]);
+}
+
+const celestial = (crpix1: number) => [card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"), card('CRPIX1', String(crpix1)),
+  card('CRPIX2', '3'), card('CRVAL1', '337.41'), card('CRVAL2', '-20.84'), card('CD1_1', '-0.001'), card('CD1_2', '0'),
+  card('CD2_1', '0'), card('CD2_2', '0.001')];
+
+test('colour FITS are aligned through their WCS and combined plane by plane', async () => {
+  const { directory, output } = await fixture();
+  const reference = path.join(directory, 'rgb-a.fits'), shifted = path.join(directory, 'rgb-b.fits');
+  const star = (index: number, levels: number[]) => levels.map(level => { const plane = new Array(25).fill(1); plane[index] = level; return plane; });
+  // Same star (R 300, G 200, B 100) one pixel to the right in the second frame, whose WCS says so.
+  await writeFile(reference, fitsCube(5, 5, star(12, [300, 200, 100]), celestial(3)));
+  await writeFile(shifted, fitsCube(5, 5, star(13, [300, 200, 100]), celestial(4)));
+  try {
+    const result = await stackFits([reference, shifted], output, { method: 'mean', register: true,
+      interpolation: 'nearest-neighbor', normalization: 'none' });
+    assert.equal(result.frameCount, 2);
+    assert.equal(result.frames[1].method, 'CCDProc WCS/nearest-neighbor');
+    const { metadata, pixels } = await outputPixels(output);
+    assert.equal(metadata.channels, 3);
+    assert.deepEqual([pixels[12], pixels[25 + 12], pixels[50 + 12]].map(Math.round), [300, 200, 100]);
+    assert.equal(metadata.headers.CTYPE1, 'RA---TAN');
+    assert.ok(!('PC1_1' in metadata.headers && 'CD1_1' in metadata.headers), 'one WCS convention only');
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('mono and colour frames are not mixed, and a missing EXPTIME falls back to median normalization', async () => {
+  const { directory, output } = await fixture();
+  const mono = path.join(directory, 'mono.fits'), rgb = path.join(directory, 'rgb.fits');
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  await writeFile(mono, fitsMono(2, 2, [1, 2, 3, 4]));
+  await writeFile(rgb, fitsCube(2, 2, [[1, 2, 3, 4], [1, 2, 3, 4], [1, 2, 3, 4]]));
+  await writeFile(a, fitsMono(3, 3, new Array(9).fill(100)));
+  await writeFile(b, fitsMono(3, 3, new Array(9).fill(200)));
+  try {
+    await assert.rejects(() => stackFits([mono, rgb], output, { register: false }), /Mono \(2-D\) and colour \(3-D\)/);
+    const result = await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'exposure' });
+    assert.ok(result.warnings.some(warning => /EXPTIME is missing/.test(warning)));
+    const { pixels } = await outputPixels(output);
+    assert.ok(pixels.every(value => Math.abs(value - 100) < 1e-4), `scaled to the reference median, got ${pixels[0]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('blank (NaN) pixels are masked instead of poisoning the stack', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits'), c = path.join(directory, 'c.fits');
+  await writeFile(a, fitsMono(2, 2, [Number.NaN, 10, 10, 10]));
+  await writeFile(b, fitsMono(2, 2, [12, 10, 10, 10.5]));
+  await writeFile(c, fitsMono(2, 2, [14, 10, 10, 9.5]));
+  try {
+    await stackFits([a, b, c], output, { method: 'mean', register: false, normalization: 'none' });
+    const { pixels } = await outputPixels(output);
+    assert.ok(Math.abs(pixels[0] - 13) < 1e-4, `mean of the valid values, got ${pixels[0]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('a missing analysis Python is reported clearly', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  await writeFile(a, fitsMono(2, 2, [1, 2, 3, 4])); await writeFile(b, fitsMono(2, 2, [2, 3, 4, 5]));
+  const previous = process.env.ASTROVIABIN_ANALYSIS_PYTHON;
+  process.env.ASTROVIABIN_ANALYSIS_PYTHON = path.join(directory, 'no-such-python');
+  try {
+    await assert.rejects(() => stackFits([a, b], output, { register: false }), /Python used for stacking was not found/);
+  } finally {
+    if (previous === undefined) delete process.env.ASTROVIABIN_ANALYSIS_PYTHON; else process.env.ASTROVIABIN_ANALYSIS_PYTHON = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -53,8 +53,14 @@ function schema(resources) {
           help: 'With "local network", phones, tablets and other computers on your network can open AstroviaBin at http://<this-computer>:<port>. Everyone still needs to sign in. Do not expose this port to the internet.' },
         { id: 'port', label: 'Port', type: 'number', default: 5000, min: 1024, max: 65535,
           help: 'The address becomes http://localhost:<port>. Change it only if another program already uses 5000.' },
-        { id: 'openBrowserOnStart', label: 'Open AstroviaBin in the browser when the server starts', type: 'bool', default: true,
-          help: 'You can always open it from the tray icon menu.' },
+        { id: 'openIn', label: 'Open AstroviaBin in', type: 'select', default: 'window',
+          options: [
+            { value: 'window', label: 'Its own app window (recommended)' },
+            { value: 'browser', label: 'My web browser' },
+          ],
+          help: 'The app window is AstroviaBin on its own, without browser tabs, and keeps you signed in. Links to other sites (SIMBAD, Aladin…) open in your browser. "Open in web browser" in the tray menu is always available.' },
+        { id: 'openBrowserOnStart', label: 'Open AstroviaBin when the server starts', type: 'bool', default: true,
+          help: 'Not when it starts in the background at login. You can always open it from the tray icon menu.' },
         { id: 'launchAtLogin', label: 'Start AstroviaBin when I log in', type: 'bool', default: true,
           help: 'Starts the tray icon and the server in the background after you log in.' },
       ],
@@ -289,6 +295,11 @@ function serverEnvironment(values, resources) {
     for (const setting of group.settings) {
       if (setting.env && values[setting.id] !== '' && values[setting.id] !== undefined) env[setting.env] = String(values[setting.id]);
     }
+  }
+  // A Python path saved by an older install (or on another machine) that no longer exists would make
+  // stacking and analyses fail; use the bundled Python instead.
+  if (resources.python && path.isAbsolute(String(values.pythonPath || '')) && !fs.existsSync(values.pythonPath)) {
+    env.ASTROVIABIN_ANALYSIS_PYTHON = resources.python;
   }
   if (values.hotpantsDir) env.HOTPANTS_BIN = path.join(values.hotpantsDir, isWindows ? 'hotpants.exe' : 'hotpants');
   // Bundled programs first on PATH, so the analysis scripts find hotpants and solve-field.

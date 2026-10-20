@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -88,11 +89,22 @@ def read_ccd(file_path: str, stored_wcs: Any = None, forced_unit: u.UnitBase | N
             header.remove(keyword, ignore_missing=True, remove_all=True)
         mask = np.asarray(hdul["MASK"].data, dtype=bool) if "MASK" in hdul else None
         uncertainty = StdDevUncertainty(np.asarray(hdul["UNCERT"].data, dtype=np.float64)) if "UNCERT" in hdul else None
+    if data.ndim == 3 and data.shape[0] == 1:
+        data = data[0]
+        mask = mask[0] if mask is not None and mask.ndim == 3 else mask
     if data.ndim not in (2, 3):
         fail(f"{Path(file_path).name}: expected a 2-D mono or 3-D colour FITS, got {data.ndim}-D")
+    if data.ndim == 3 and data.shape[0] > 4:
+        fail(f"{Path(file_path).name}: a {data.shape[0]}-plane data cube is not a colour image; stack 2-D frames or RGB cubes")
+    invalid = ~np.isfinite(data)
+    if invalid.any():
+        # Blank (NaN/Inf) pixels are excluded from every CCDProc step through the mask.
+        mask = invalid if mask is None else (np.asarray(mask, dtype=bool) | invalid)
+        data = np.where(invalid, 0.0, data)
     image_wcs = None
     try:
-        candidate = WCS(header)
+        # Colour cubes carry a 2-axis celestial WCS (SIP distortion is only defined in 2-D).
+        candidate = WCS(header, naxis=2) if data.ndim == 3 else WCS(header)
         if candidate.has_celestial:
             image_wcs = candidate.celestial
     except Exception:
@@ -118,7 +130,7 @@ def project_auxiliary(data: np.ndarray, source_wcs: WCS, target_wcs: WCS,
 
 def project_ccd(ccd: CCDData, target_wcs: WCS, shape: tuple[int, int], order: str) -> CCDData:
     if ccd.data.ndim != 2:
-        fail("WCS alignment is available for 2-D CCD frames; disable it for already registered colour FITS")
+        fail("internal error: WCS projection expects one 2-D plane")
     if ccd.wcs is None or not ccd.wcs.has_celestial:
         fail("frame has no celestial WCS; plate-solve it first or disable alignment")
     source_wcs = ccd.wcs.celestial
@@ -136,19 +148,52 @@ def project_ccd(ccd: CCDData, target_wcs: WCS, shape: tuple[int, int], order: st
     return projected
 
 
-def read_master(path_value: Any, unit: u.UnitBase) -> CCDData | None:
-    return read_ccd(str(path_value), forced_unit=unit) if isinstance(path_value, str) and path_value else None
+def plane(ccd: CCDData, index: int | None) -> CCDData:
+    """One colour plane of a 3-D frame as a 2-D CCD with the celestial WCS (or the frame itself)."""
+    if index is None or ccd.data.ndim == 2:
+        return ccd
+    def part(array: Any) -> Any:
+        return None if array is None else (array[index] if np.ndim(array) == 3 else array)
+    uncertainty = StdDevUncertainty(part(ccd.uncertainty.array)) if ccd.uncertainty is not None else None
+    meta = ccd.meta.copy()
+    meta["ASTVPLAN"] = (index, "AstroviaBin: colour plane processed by CCDProc")
+    return CCDData(np.array(ccd.data[index], dtype=np.float64), unit=ccd.unit, meta=meta, wcs=ccd.wcs,
+                   mask=part(ccd.mask), uncertainty=uncertainty)
 
 
-def calibrate(ccd: CCDData, settings: dict[str, Any], calibration: dict[str, Any]) -> CCDData:
+class Masters:
+    """Calibration masters, read once. 3-D masters are applied plane by plane; 2-D ones to every plane."""
+
+    def __init__(self, calibration: dict[str, Any], unit: u.UnitBase) -> None:
+        def load(key: str, master_unit: u.UnitBase) -> CCDData | None:
+            value = calibration.get(key)
+            return read_ccd(str(value), forced_unit=master_unit) if isinstance(value, str) and value else None
+        self.bias = load("biasPath", unit)
+        self.dark = load("darkPath", unit)
+        self.flat = load("flatPath", unit)
+        self.bad = load("badPixelMaskPath", u.dimensionless_unscaled)
+        self.ratio = load("ccdMaskRatioPath", u.dimensionless_unscaled)
+
+    def get(self, name: str, index: int | None) -> CCDData | None:
+        master = getattr(self, name)
+        if master is None or master.data.ndim == 2:
+            return master
+        if index is None:
+            fail(f"the {name} master is a colour cube but the frames are 2-D")
+        if index >= master.data.shape[0]:
+            fail(f"the {name} master has {master.data.shape[0]} planes; the frames have more")
+        return plane(master, index)
+
+
+def calibrate(ccd: CCDData, settings: dict[str, Any], masters: Masters, index: int | None = None) -> CCDData:
     gain_value = finite_number(settings.get("gain"))
     read_noise_value = finite_number(settings.get("readNoise"))
-    bias = read_master(calibration.get("biasPath"), ccd.unit)
-    dark = read_master(calibration.get("darkPath"), ccd.unit)
-    flat = read_master(calibration.get("flatPath"), ccd.unit)
-    bad_mask_ccd = read_master(calibration.get("badPixelMaskPath"), u.dimensionless_unscaled)
+    bias = masters.get("bias", index)
+    dark = masters.get("dark", index)
+    flat = masters.get("flat", index)
+    bad_mask_ccd = masters.get("bad", index)
     bad_mask = np.asarray(bad_mask_ccd.data != 0, dtype=bool) if bad_mask_ccd is not None else None
-    ratio_ccd = read_master(calibration.get("ccdMaskRatioPath"), u.dimensionless_unscaled)
+    ratio_ccd = masters.get("ratio", index)
     if ratio_ccd is not None:
         if ratio_ccd.data.ndim != 2:
             fail("CCDProc ccdmask requires a 2-D flat-ratio FITS")
@@ -191,8 +236,6 @@ def calibrate(ccd: CCDData, settings: dict[str, Any], calibration: dict[str, Any
     reduced = ccdproc.ccd_process(ccd, **kwargs)
     cosmic_method = str(settings.get("cosmicMethod") or "none")
     if cosmic_method != "none":
-        if reduced.data.ndim != 2:
-            fail("CCDProc cosmic-ray cleaning is only valid for 2-D CCD frames")
         if cosmic_method == "median":
             error_image: float | np.ndarray
             if reduced.uncertainty is not None:
@@ -288,6 +331,13 @@ def write_result(output_path: str, combined: CCDData, reference: CCDData,
     header["CCDPROC"] = (ccdproc.__version__, "CCDProc version used by AstroviaBin")
     header.add_history(f"AstroviaBin CCDProc stack: {frame_count} frames; method={settings.get('method', 'sigma-clip')}")
     header.add_history("Reduction, WCS projection and combination performed by Astropy/CCDProc")
+    for key in list(header.keys()):
+        # The reference's own celestial WCS (CD or PC/CDELT, SIP, poles) is replaced as a whole by the
+        # output WCS; mixing the two conventions would describe a different projection.
+        if re.fullmatch(r"(CTYPE|CRPIX|CRVAL|CDELT|CUNIT|CROTA)[12]|(CD|PC)[12]_[12]|(A|B|AP|BP)_(\d+_\d+|ORDER|DMAX)"
+                        r"|WCSAXES|LONPOLE|LATPOLE|RADESYS|RADECSYS|EQUINOX|WCSNAME|IMAGEW|IMAGEH", key):
+            header.remove(key, ignore_missing=True, remove_all=True)
+    header.remove("ASTVPLAN", ignore_missing=True)
     if combined.wcs is not None:
         header.update(combined.wcs.to_header(relax=True))
     hdus: list[Any] = [fits.PrimaryHDU(np.asarray(combined.data, dtype=np.float32), header=header)]
@@ -316,6 +366,8 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     for index, frame in enumerate(frames):
         if frame.unit != reference_unit:
             fail(f"{Path(paths[index]).name}: BUNIT {frame.unit} does not match {reference_unit}")
+    if len({frame.data.ndim for frame in frames}) > 1:
+        fail("Mono (2-D) and colour (3-D) FITS cannot be stacked together; select frames of one kind")
     filters = [str(frame.meta.get("FILTER", "")).strip().lower() for frame in frames]
     if any(filters) and any(not value or value != filters[0] for value in filters):
         fail("All frames must have the same FILTER to stack scientifically")
@@ -336,11 +388,21 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     if len(unique) < 2:
         fail("Stacking needs at least two different frames: the selection only contains duplicates")
 
+    # Mono frames are 2-D; colour frames are cubes (planes, y, x). CCDProc works on 2-D CCDs, so a
+    # colour stack calibrates, projects and combines each plane with the same frames, alignment and
+    # options, then reassembles the cube.
+    plane_counts = {frame.data.shape[0] if frame.data.ndim == 3 else 0 for _, frame in unique}
+    if len(plane_counts) > 1:
+        fail("Colour FITS with different numbers of planes cannot be stacked together")
+    plane_count = plane_counts.pop()
+    plane_indices: list[int | None] = list(range(plane_count)) if plane_count else [None]
+
     calibration = settings.get("calibration") if isinstance(settings.get("calibration"), dict) else {}
-    reduced: list[tuple[int, CCDData]] = []
+    masters = Masters(calibration, reference_unit)
+    reduced: dict[int, list[CCDData]] = {}
     for index, frame in unique:
         try:
-            reduced.append((index, calibrate(frame, settings, calibration)))
+            reduced[index] = [calibrate(plane(frame, channel), settings, masters, channel) for channel in plane_indices]
         except Exception as error:
             reports[index].update({"used": False, "method": "none", "reason": f"calibration failed: {error}"})
     if len(reduced) < 2:
@@ -351,26 +413,31 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     interpolation = str(settings.get("interpolation") or "bilinear")
     if interpolation not in {"nearest-neighbor", "bilinear", "biquadratic", "bicubic"}:
         interpolation = "bilinear"
-    reference = reduced[0][1]
+    reference_index = next(iter(reduced))
+    reference = reduced[reference_index][0]
     target_shape = tuple(int(value) for value in reference.data.shape[-2:])
     target_wcs = reference.wcs.celestial if reference.wcs is not None and reference.wcs.has_celestial else None
-    aligned: list[tuple[int, CCDData]] = []
+    if register and target_wcs is None:
+        fail("The reference frame (the first selected) has no plate solution (WCS). Plate-solve it, "
+             "or turn off alignment for frames that are already registered.")
+    aligned: dict[int, list[CCDData]] = {}
     offsets: list[dict[str, float]] = []
     warnings: list[str] = []
-    for index, frame in reduced:
+    for index, planes in reduced.items():
         try:
             if register:
-                if target_wcs is None:
-                    fail("reference frame has no celestial WCS; plate-solve it first or disable alignment")
-                dx, dy = report_offset(frame, target_wcs, target_shape)
-                output = frame if index == reduced[0][0] and tuple(frame.data.shape[-2:]) == target_shape else project_ccd(frame, target_wcs, target_shape, interpolation)
-                method = "reference" if index == reduced[0][0] else f"CCDProc WCS/{interpolation}"
+                dx, dy = report_offset(planes[0], target_wcs, target_shape)
+                if index == reference_index:
+                    outputs, method = planes, "reference"
+                else:
+                    outputs, method = [project_ccd(item, target_wcs, target_shape, interpolation) for item in planes], f"CCDProc WCS/{interpolation}"
             else:
-                if frame.data.shape != reference.data.shape:
+                if planes[0].data.shape != reference.data.shape:
                     fail("all frames must have identical dimensions when alignment is disabled")
-                output, dx, dy, method = frame, 0.0, 0.0, "none"
-            output.data = np.asarray(output.data, dtype=np.float64)
-            aligned.append((index, output))
+                outputs, dx, dy, method = planes, 0.0, 0.0, "none"
+            for item in outputs:
+                item.data = np.asarray(item.data, dtype=np.float64)
+            aligned[index] = outputs
             offsets.append({"dx": dx, "dy": dy})
             reports[index].update({"used": True, "method": method, "dx": dx, "dy": dy})
         except Exception as error:
@@ -387,16 +454,26 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     weighting = str(settings.get("weighting") or "none")
     if weighting not in {"none", "exposure", "inverse-variance"}:
         weighting = "none"
-    aligned_ccds = [item[1] for item in aligned]
-    scales = np.asarray([scalar_scale(frame, aligned_ccds[0], normalization, exposure_key)
-                         for frame in aligned_ccds], dtype=float)
-    weights = (np.asarray([scalar_weight(frame, weighting, exposure_key) for frame in aligned_ccds], dtype=float)
-               if weighting != "none" else None)
+    without_exposure = [reports[index]["name"] for index, planes in aligned.items()
+                        if not (exposure(planes[0], exposure_key) or 0) > 0]
+    if without_exposure and normalization == "exposure":
+        normalization = "median"
+        warnings.append(f"{exposure_key} is missing in {', '.join(without_exposure)}: frames were normalized "
+                        "to the reference's median level instead of by exposure time")
+    exposures = sorted({exposure(planes[0], exposure_key) for planes in aligned.values()} - {None})
+    # Within 1% counts as one exposure (shutter timing reported as 120 s and 120.199 s, for example).
+    if normalization == "exposure" and len(exposures) > 1 and exposures[-1] > exposures[0] * 1.01 \
+            and masters.bias is None and masters.dark is None:
+        warnings.append(f"Exposure times differ ({', '.join(f'{value:g} s' for value in exposures)}) and no master bias or dark "
+                        "was subtracted: exposure scaling also scales the bias pedestal. Add a master bias/dark, or "
+                        "stack frames of one exposure for photometry.")
+    if without_exposure and weighting == "exposure":
+        weighting = "none"
+        warnings.append(f"{exposure_key} is missing in {', '.join(without_exposure)}: frames were weighted equally")
+
     method = str(settings.get("method") or "sigma-clip")
     options: dict[str, Any] = {
         "method": "median" if method == "median" else "sum" if method == "sum" else "average",
-        "scale": scales,
-        "weights": weights if method != "median" else None,
         "mem_limit": int(finite_number(settings.get("memoryLimitMb"), 512) * 1024 * 1024),
         "dtype": np.float64,
     }
@@ -415,11 +492,34 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
     min_clip, max_clip = finite_number(settings.get("minimumClip")), finite_number(settings.get("maximumClip"))
     if min_clip is not None or max_clip is not None:
         options.update({"minmax_clip": True, "minmax_clip_min": min_clip, "minmax_clip_max": max_clip})
-    combined = ccdproc.combine(aligned_ccds, **options)
-    combined.meta = reference.meta.copy()
-    combined.wcs = target_wcs if register else reference.wcs
-    write_result(output_path, combined, reference, len(aligned_ccds), settings)
-    return {"frameCount": len(aligned_ccds), "offsets": offsets, "frames": reports, "warnings": warnings,
+
+    combined_planes: list[CCDData] = []
+    for channel in range(len(plane_indices)):
+        ccds = [planes[channel] for planes in aligned.values()]
+        # Exposure scaling is the same for every plane; median scaling and noise weights are measured
+        # per plane, so each colour keeps the reference frame's level.
+        scales = np.asarray([scalar_scale(frame, ccds[0], normalization, exposure_key) for frame in ccds], dtype=float)
+        weights = (np.asarray([scalar_weight(frame, weighting, exposure_key) for frame in ccds], dtype=float)
+                   if weighting != "none" and method != "median" else None)
+        combined_planes.append(ccdproc.combine(ccds, scale=scales, weights=weights, **options))
+
+    if plane_count:
+        data = np.stack([np.asarray(item.data) for item in combined_planes])
+        masks = [item.mask for item in combined_planes]
+        mask = np.stack([np.zeros(data.shape[1:], bool) if item is None else np.asarray(item, bool) for item in masks]) \
+            if any(item is not None for item in masks) else None
+        uncertainty = StdDevUncertainty(np.stack([np.asarray(item.uncertainty.array) for item in combined_planes])) \
+            if all(item.uncertainty is not None for item in combined_planes) else None
+        combined = CCDData(data, unit=combined_planes[0].unit, mask=mask, uncertainty=uncertainty)
+    else:
+        combined = combined_planes[0]
+    reference_frame = dict(unique)[reference_index]
+    combined.meta = reference_frame.meta.copy()
+    combined.wcs = target_wcs if register else (reference.wcs.celestial if reference.wcs is not None and reference.wcs.has_celestial else None)
+    write_result(output_path, combined, reference_frame, len(aligned), settings)
+    if plane_count:
+        warnings.append(f"Colour FITS: each of the {plane_count} planes was calibrated, aligned and combined separately")
+    return {"frameCount": len(aligned), "offsets": offsets, "frames": reports, "warnings": warnings,
             "engine": {"name": "Astropy/CCDProc", "ccdproc": ccdproc.__version__}}
 
 

@@ -22,6 +22,7 @@ import {
 import {
   runStackInThread,
   type StackInterpolation,
+  StackError,
   type StackMethod,
   type StackNormalization,
   type StackSettings,
@@ -482,6 +483,10 @@ app.post('/stack', async (c) => {
     return c.json({ image: stacked, output: outputName, frameCount: result.frameCount, offsets: result.offsets,
       frames: result.frames, warnings: result.warnings, engine: result.engine });
   } catch (error) {
+    if (error instanceof StackError) {
+      console.error('Failed to stack FITS frames:', error.message);
+      return c.json({ message: `Stacking failed: ${error.message}` }, 422);
+    }
     return handleRouteError(c, error, 'Failed to stack FITS frames');
   }
 });

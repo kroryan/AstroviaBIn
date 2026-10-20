@@ -3,7 +3,7 @@
 //   .stage/<linux|win>/runtime   the Node.js binary that runs the server
 //   .stage/<linux|win>/sky       offline sky catalogue (stars, deep-sky objects, constellations)
 //   .stage/<linux|win>/bin       HOTPANTS programs
-//   .stage/linux/wheels          Python wheels installed by the .deb into its virtual environment
+//   .stage/linux/python          self-contained CPython with the analysis packages
 //   .stage/win/python            embedded Python with the analysis packages
 // Usage: node scripts/stage.mjs <linux|win> [--no-build]
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -21,6 +21,12 @@ const stage = path.join(desktop, '.stage', platform);
 const NODE_VERSION = process.version.replace(/^v/, ''); // the ABI of the native modules installed below
 const PYTHON_VERSION = '3.13.12';
 const PYTHON_PACKAGES = ['ccdproc==2.5.1', 'photutils==3.1.1', 'astroscrappy==1.3.0'];
+// The numerical stack is pinned too, so the Linux and Windows packages run the same tested code.
+const ANALYSIS_PACKAGES = ['numpy==2.5.4', 'scipy==1.18.1', 'astropy==8.0.2', 'matplotlib==3.11.2', ...PYTHON_PACKAGES];
+const LINUX_PYTHON = {
+  url: `https://github.com/astral-sh/python-build-standalone/releases/download/20260325/cpython-${PYTHON_VERSION}%2B20260325-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz`,
+  sha256: 'ad178e36a84de3f845885d0ace5ca6f87fa9502d1f0cf53ba3dd42194277d42e',
+};
 
 const run = (command, args, options = {}) => {
   console.log(`$ ${command} ${args.join(' ')}`);
@@ -127,11 +133,32 @@ if (existsSync(hotpantsCache)) cpSync(hotpantsCache, bin, { recursive: true });
 // Downloads run as the current user so the staged files stay removable.
 const asUser = ['-u', `${process.getuid()}:${process.getgid()}`, '-e', 'HOME=/tmp'];
 if (platform === 'linux') {
-  // The .deb uses Debian's numerical stack and installs CCDProc/Photutils/AstroScrappy plus their
-  // missing pure/binary-wheel dependencies into its venv.
-  const wheels = path.join(stage, 'wheels');
-  mkdirSync(wheels, { recursive: true });
-  run('docker', ['run', '--rm', ...asUser, '-v', `${wheels}:/out`, 'python:3.13-slim', 'pip', 'download', '--only-binary=:all:', '-d', '/out', ...PYTHON_PACKAGES]);
+  // Linux: a self-contained CPython (python-build-standalone, pinned) with every analysis package
+  // installed at build time, so the .deb works the same on any distribution and Python version and
+  // never needs pip or internet while installing.
+  const python = path.join(stage, 'python');
+  const archive = download(LINUX_PYTHON.url, path.join(cache, path.basename(decodeURIComponent(LINUX_PYTHON.url))));
+  const digest = execFileSync('sha256sum', [archive]).toString().split(' ')[0];
+  if (digest !== LINUX_PYTHON.sha256) throw new Error(`${archive}: SHA-256 ${digest} does not match the pinned ${LINUX_PYTHON.sha256}`);
+  mkdirSync(python, { recursive: true });
+  run('tar', ['-xzf', archive, '-C', python, '--strip-components=1']);
+  // Install inside a matching manylinux userland so binary wheels are chosen exactly as on users' systems.
+  run('docker', ['run', '--rm', ...asUser, '-v', `${python}:/opt/python`, 'ubuntu:25.10', '/opt/python/bin/python3', '-m', 'pip', 'install',
+    '--no-cache-dir', '--only-binary=:all:', '--no-warn-script-location', ...ANALYSIS_PACKAGES]);
+  run(path.join(python, 'bin', 'python3'), ['-c', 'import numpy, scipy, astropy, matplotlib, ccdproc, photutils, astroscrappy; print("bundled python ok")']);
+  // pip and its caches are not needed at runtime.
+  for (const entry of readdirSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages'))) {
+    if (/^pip(-|$)/.test(entry)) rmSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages', entry), { recursive: true, force: true });
+  }
+  execFileSync('find', [python, '-name', '__pycache__', '-type', 'd', '-prune', '-exec', 'rm', '-rf', '{}', '+']);
+  // Subpackage test suites (site-packages/<package>/<module>/tests) are never imported at runtime; top-level
+  // <package>/tests stay because astropy imports its test runner on import.
+  execFileSync('find', [path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages'),
+    '-mindepth', '3', '-type', 'd', '-name', 'tests', '-prune', '-exec', 'rm', '-rf', '{}', '+']);
+  for (const unused of ['test', 'idlelib', 'turtledemo', 'ensurepip']) {
+    rmSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, unused), { recursive: true, force: true });
+  }
+  if (!existsSync(path.join(python, 'bin', 'python'))) execFileSync('ln', ['-s', 'python3', path.join(python, 'bin', 'python')]);
 } else {
   // Windows: embedded Python with every analysis package.
   const python = path.join(stage, 'python');
@@ -140,11 +167,13 @@ if (platform === 'linux') {
   const short = PYTHON_VERSION.split('.').slice(0, 2).join('');
   // Enable site-packages in the embedded distribution.
   writeFileSync(path.join(python, `python${short}._pth`), [`python${short}.zip`, '.', 'Lib\\site-packages', 'import site', ''].join('\r\n'));
-  const wheels = path.join(cache, `wheels-win-cp${short}`);
+  // Keyed by the pinned list, so a changed pin never mixes old and new wheels in one site-packages.
+  const pins = execFileSync('sha256sum', { input: ANALYSIS_PACKAGES.join('\n') }).toString().slice(0, 12);
+  const wheels = path.join(cache, `wheels-win-cp${short}-${pins}`);
   mkdirSync(wheels, { recursive: true });
   run('docker', ['run', '--rm', ...asUser, '-v', `${wheels}:/out`, 'python:3.13-slim', 'pip', 'download', '--only-binary=:all:', '--platform', 'win_amd64',
     '--python-version', PYTHON_VERSION.split('.').slice(0, 2).join('.'), '--implementation', 'cp', '-d', '/out',
-    'numpy', 'scipy', 'astropy', 'matplotlib', ...PYTHON_PACKAGES]);
+    ...ANALYSIS_PACKAGES]);
   const site = path.join(python, 'Lib', 'site-packages');
   mkdirSync(site, { recursive: true });
   for (const wheel of readdirSync(wheels).filter(name => name.endsWith('.whl'))) run('unzip', ['-q', '-o', path.join(wheels, wheel), '-d', site]);

@@ -487,7 +487,11 @@ export default function FitsStackingPage() {
                         : frame.reason}
                     </li>)}
                   </ul>}
-                  {stackMutation.data?.warnings?.length ? <p className="mt-2 text-xs text-amber-500">{stackMutation.data.warnings.length} warning(s): see the frames marked above.</p> : null}
+                  {stackMutation.data?.warnings?.length ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-amber-500">
+                      {stackMutation.data.warnings.map(warning => <li key={warning}>{warning}</li>)}
+                    </ul>
+                  ) : null}
                 </AlertDescription>
               </Alert>
             )}
