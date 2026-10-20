@@ -97,11 +97,13 @@ RUN set -eu; src=/tmp/sky-src; out=/usr/share/astroviabin/sky; mkdir -p "$src" "
     /usr/bin/python3 /tmp/build_sky_catalog.py --src "$src" --out "$out"; \
     cd /; rm -rf "$src" /tmp/build_sky_catalog.py
 
-# Photutils (source detection/photometry) and astroscrappy (L.A.Cosmic cosmic-ray
-# rejection) are BSD-3-Clause. Keep Debian's Astropy/NumPy/SciPy visible to avoid duplicate stacks.
+# CCDProc owns CCD calibration, WCS reprojection, masks, uncertainty propagation and
+# combination. Photutils and astroscrappy support source analysis and L.A.Cosmic.
+# Keep Debian's Astropy/NumPy/SciPy visible to avoid a duplicate numerical stack.
+COPY requirements-science.txt /tmp/requirements-science.txt
 RUN /usr/bin/python3 -m venv --system-site-packages /opt/astroviabin-python && \
-    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps photutils==3.1.1 && \
-    /opt/astroviabin-python/bin/pip install --no-cache-dir --no-deps --only-binary=:all: astroscrappy==1.3.0
+    /opt/astroviabin-python/bin/pip install --no-cache-dir -r /tmp/requirements-science.txt && \
+    rm /tmp/requirements-science.txt
 
 COPY --from=hotpants-builder /opt/hotpants/hotpants /usr/local/bin/hotpants
 COPY --from=hotpants-builder /opt/hotpants/extractkern /usr/local/bin/extractkern
@@ -123,6 +125,7 @@ COPY tools/scripts/hotpants_report.py ./tools/scripts/hotpants_report.py
 COPY tools/scripts/fits_normalize.py ./tools/scripts/fits_normalize.py
 COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
 COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
+COPY tools/scripts/ccdproc_stack.py ./tools/scripts/ccdproc_stack.py
 COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes
 
 # Create directories for runtime

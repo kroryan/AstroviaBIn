@@ -1,0 +1,20 @@
+[Unit]
+Description=AstroviaBin astrophotography library server (headless)
+Documentation=https://github.com/kroryan/AstroviaBIn
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Settings come from the desktop setup (~/.config/AstroviaBin/astroviabin-desktop.json);
+# ~/.config/AstroviaBin/server.env can override them and must hold ASTROVIABIN_ADMIN_PASSWORD when the desktop keeps it encrypted.
+EnvironmentFile=-%h/.config/AstroviaBin/server.env
+ExecStart=/usr/bin/astroviabin-server
+Restart=on-failure
+RestartSec=10
+# The server stops its plate-solving worker on SIGTERM; give a running solve time to stop cleanly.
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

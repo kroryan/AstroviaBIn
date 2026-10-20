@@ -21,6 +21,16 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
+      - name: Setup Python scientific runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Astropy and CCDProc
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --disable-pip-version-check -r requirements-science.txt
+
       - name: Install dependencies
         run: npm install
 
@@ -29,6 +39,11 @@ jobs:
 
       - name: Run unit tests
         run: npm run test
+        env:
+          ASTROVIABIN_ANALYSIS_PYTHON: ${{ github.workspace }}/.venv/bin/python
+
+      - name: Test desktop first-run and upgrade safety
+        run: node --test desktop/src/config.test.cjs desktop/src/preflight.test.cjs
 
       - name: Test security workflow reporting and digest selection
         run: node --test --test-isolation=none tools/scripts/security-workflows.test.mjs

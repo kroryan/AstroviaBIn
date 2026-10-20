@@ -91,6 +91,64 @@ app.get('/', async (c) => {
   }
 });
 
+// Fill missing annotation arrays for all successfully solved photos and FITS files. This uses the
+// saved WCS and private local originals; it never uploads an image. Online catalogue services see
+// only the solved field coordinates, just as they do when an image's annotation panel is opened.
+app.post('/auto-annotations', async (c) => {
+  try {
+    const images = await storage.getAstroImages({ plateSolved: true });
+    let annotated = 0;
+    let skipped = 0;
+    const failures: Array<{ imageId: number; error: string }> = [];
+
+    for (const image of images) {
+      try {
+        const job = await storage.getLatestPlateSolvingJob(image.id, 'success');
+        const result = job?.result && typeof job.result === 'object'
+          ? job.result as Record<string, unknown>
+          : null;
+        if (!job || !result || typeof result.annotationsGeneratedAt === 'string' || (Array.isArray(result.annotations) && result.annotations.length > 0)) {
+          skipped++;
+          continue;
+        }
+        const wcs = wcsFromStored(result.wcs);
+        if (!wcs) {
+          skipped++;
+          continue;
+        }
+
+        const captured = image.captureDate ? new Date(image.captureDate) : null;
+        const epoch = captured && !Number.isNaN(captured.getTime())
+          ? captured.getUTCFullYear() + captured.getUTCMonth() / 12
+          : undefined;
+        let overlay = computeSkyOverlay(wcs, { epoch });
+        if (overlay) {
+          const online = await getOnlineCatalog(image.id, {
+            ra: overlay.field.ra,
+            dec: overlay.field.dec,
+            radiusDeg: Math.hypot(overlay.field.widthDeg, overlay.field.heightDeg) / 2,
+            pixelScale: overlay.field.pixelScale,
+          }).catch(() => null);
+          if (online) overlay = mergeOnlineCatalog(overlay, wcs, online, epoch ?? new Date().getUTCFullYear());
+        }
+        const annotations = overlay ? overlayToAnnotations(overlay) : await computeSkyAnnotations(wcs);
+        // The timestamp makes a legitimately empty field idempotent: it was processed and must not
+        // be retried on every click merely because no catalogue label falls inside the frame.
+        await storage.updatePlateSolvingJob(job.id, {
+          result: { ...result, annotations, annotationsGeneratedAt: new Date().toISOString() } as any,
+        });
+        annotated++;
+      } catch (error) {
+        failures.push({ imageId: image.id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return c.json({ scanned: images.length, annotated, skipped, failed: failures.length, failures });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to add annotations to solved images');
+  }
+});
+
 // Download the original FITS or locally managed photo rather than a preview.
 app.get('/:id/download', async (c) => {
   try {

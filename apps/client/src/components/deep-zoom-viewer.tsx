@@ -24,6 +24,8 @@ interface DeepZoomViewerProps {
   fullHeight?: boolean;
   height?: string | number;
   disableZoom?: boolean;
+  /** Places the home/zoom indicator on the right so page-level controls can use the left. */
+  zoomPosition?: 'top-left' | 'top-right';
   /** Keep the current pan/zoom when `imageUrl` changes instead of re-fitting, for live-updating previews. */
   preserveViewport?: boolean;
   onLoad?: () => void;
@@ -58,7 +60,7 @@ if (typeof window !== 'undefined') {
   document.head.appendChild(style);
 }
 
-export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase, annotationSize, skyOverlay, skyLayers = DEFAULT_SKY_LAYERS }: DeepZoomViewerProps) {
+export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight = false, height, disableZoom = false, zoomPosition = 'top-left', preserveViewport = false, onLoad, onError, tileInfoUrl, tileUrlBase, annotationSize, skyOverlay, skyLayers = DEFAULT_SKY_LAYERS }: DeepZoomViewerProps) {
   const skyRendererRef = useRef<SkyOverlayRenderer | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const osdViewer = useRef<OpenSeadragon.Viewer | null>(null);
@@ -464,7 +466,7 @@ export function DeepZoomViewer({ imageUrl, annotations = [], onZoom, fullHeight 
           style={{
             position: "absolute",
             top: "10px",
-            left: "10px",
+            ...(zoomPosition === 'top-right' ? { right: "10px" } : { left: "10px" }),
             zIndex: 1000,
             background: "rgba(0, 0, 0, 0.7)",
             color: "white",

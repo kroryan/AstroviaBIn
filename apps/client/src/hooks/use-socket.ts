@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -87,18 +87,18 @@ function releaseManager() {
 }
 
 export function useSocket() {
-  const managerRef = useRef<WebSocketManager | null>(null);
+  const [socket, setSocket] = useState<WebSocketManager | null>(null);
 
   useEffect(() => {
-    managerRef.current = getManager();
+    const acquired = getManager();
+    setSocket(acquired);
 
     return () => {
       releaseManager();
-      managerRef.current = null;
     };
   }, []);
 
-  return managerRef.current;
+  return socket;
 }
 
 export function usePlateSolvingUpdates(callback: (data: any) => void) {

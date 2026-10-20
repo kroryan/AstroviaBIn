@@ -63,7 +63,7 @@ export function StackingGuide() {
             ["Dark flat / Flat dark", "Darks matching the flat exposure", "Each other → master dark flat", "Anything else"],
             ["Reduced / calibrated (e.g. LCO BANZAI e91, Slooh processed)", "Lights already bias/dark/flat-corrected", "Other reduced lights", "Raw lights (e00); do not calibrate them a second time"],
           ]} />
-          <p>AstroviaBin stacks lights. Calibrate them first (or use observatory-reduced frames); calibration masters are built from their own type only.</p>
+          <p>AstroviaBin can calibrate lights during stacking with CCDProc master bias, dark and flat frames. Masters must still be built from their own matching frame type; never select an individual light as a calibration master.</p>
         </Section>
 
         <Section title="Filters (bandpasses)">
@@ -90,7 +90,7 @@ export function StackingGuide() {
           <ul className="list-disc space-y-1 pl-4">
             <li><b>Linear vs stretched:</b> stack only linear data. Stretched, contrast-enhanced or exported (JPEG/PNG) images are non-linear and cannot be averaged meaningfully.</li>
             <li><b>Stacks:</b> do not re-stack a stack together with the frames it came from (their signal would count twice). Stacks of different frames of the same field and filter can be combined.</li>
-            <li><b>Binning / pixel scale / telescope:</b> frames are aligned through their plate solutions, so different setups do line up, but their PSFs differ and the result is softer. Prefer one setup per stack; plate-solve frames before stacking.</li>
+            <li><b>Binning / pixel scale / telescope:</b> CCDProc reprojects mono frames through their plate solutions, so different setups can line up, but their PSFs differ and the result is softer. Prefer one setup per stack and plate-solve every frame first.</li>
             <li><b>Mosaics:</b> panels of different fields do not overlap enough to stack — they need a mosaic tool.</li>
             <li><b>Exposure time:</b> different exposures are normalized by EXPTIME, but long frames may saturate stars that short ones do not; keep one exposure per stack when possible.</li>
             <li><b>Quality:</b> leave out frames with clouds, bad focus, trailing or much worse seeing — they add noise. Single satellite or plane trails are removed by sigma-clipping.</li>

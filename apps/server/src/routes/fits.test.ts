@@ -112,6 +112,17 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     assert.equal(preview.headers.get('cache-control'), 'private, no-store');
     assert.deepEqual(new Uint8Array(await preview.arrayBuffer()).slice(1, 4), new Uint8Array([80, 78, 71]));
 
+    const paletteMean = async (colorMap: string) => {
+      const response = await app.request(`/api/fits/${image.id}/preview?preview=interactive&stretch=linear&blackPoint=0&whitePoint=1000&colorMap=${colorMap}`);
+      assert.equal(response.status, 200, `${colorMap} preview should render`);
+      const stats = await sharp(await response.arrayBuffer()).toColourspace('srgb').stats();
+      return stats.channels.slice(0, 3).map(channel => Math.round(channel.mean));
+    };
+    const grey = await paletteMean('grey');
+    for (const palette of ['inverted', 'heat', 'cool', 'rainbow', 'viridis']) {
+      assert.notDeepEqual(await paletteMean(palette), grey, `${palette} must change the endpoint preview`);
+    }
+
     const processed = await app.request(`/api/fits/${image.id}/process`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ stretch: 'asinh', strength: 8, outputName: 'm42-interactive-result' }),
@@ -133,7 +144,8 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
 
     const stacked = await app.request('/api/fits/stack', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ imageIds: [image.id, secondFrame!.id], method: 'median', outputName: 'm42-stacked' }),
+      body: JSON.stringify({ imageIds: [image.id, secondFrame!.id], method: 'median', register: false,
+        normalization: 'none', outputName: 'm42-stacked' }),
     });
     assert.equal(stacked.status, 200);
     const stackedBody = await stacked.json() as { output: string; frameCount: number };

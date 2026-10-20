@@ -108,14 +108,27 @@ export function AboutSection() {
         </div>
       </div>
       <div>
-        <h3 className="font-semibold">Astropy, NumPy and SciPy</h3>
-        <p className="text-muted-foreground">AstroviaBin's star extractor for plate solving and the HOTPANTS pipeline use Astropy, NumPy and SciPy, all distributed under the BSD 3-Clause license, installed from Debian. Verification stamps and PDF reports are drawn with Matplotlib (Matplotlib license, PSF-based) and Pillow (MIT-CMU license), also from Debian.</p>
+        <h3 className="font-semibold">Astropy, CCDProc, NumPy and SciPy</h3>
+        <p className="text-muted-foreground">FITS stacking and CCD reduction use Astropy CCDData/FITS/WCS and CCDProc for overscan and trim, bias/dark/flat correction, bad-pixel masks, gain and uncertainty propagation, L.A.Cosmic cleaning, WCS reprojection, normalization, weighting and image combination. CCDProc and Astropy are BSD 3-Clause licensed. The pipeline calls their public APIs without modifying either project. NumPy and SciPy are also BSD licensed. Verification stamps and PDF reports use Matplotlib (PSF-based license) and Pillow (MIT-CMU).</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://www.astropy.org/" target="_blank" rel="noreferrer">Astropy</a>
+          <a className="text-primary underline" href="https://github.com/astropy/ccdproc" target="_blank" rel="noreferrer">CCDProc source</a>
+          <a className="text-primary underline" href="https://ccdproc.readthedocs.io/en/latest/license.html" target="_blank" rel="noreferrer">CCDProc BSD license</a>
           <a className="text-primary underline" href="https://numpy.org/" target="_blank" rel="noreferrer">NumPy</a>
           <a className="text-primary underline" href="https://scipy.org/" target="_blank" rel="noreferrer">SciPy</a>
           <a className="text-primary underline" href="https://matplotlib.org/stable/project/license.html" target="_blank" rel="noreferrer">Matplotlib license</a>
           <a className="text-primary underline" href="https://github.com/python-pillow/Pillow/blob/main/LICENSE" target="_blank" rel="noreferrer">Pillow license</a>
+        </div>
+      </div>
+      <div>
+        <h3 className="font-semibold">Desktop app and installers</h3>
+        <p className="text-muted-foreground">The AstroviaBin desktop app (system tray and setup window) is built with Electron (MIT) and packaged with electron-builder (MIT). The installers bundle the Node.js runtime (MIT, with the third-party notices in its LICENSE), better-sqlite3 (MIT) with SQLite (public domain) and sharp/libvips (Apache 2.0 / LGPL 3.0). The Windows installers also bundle the embeddable CPython distribution (PSF License) with NumPy, SciPy, Astropy, CCDProc, Photutils and astroscrappy, and HOTPANTS built against NASA HEASARC CFITSIO (a permissive NASA/GSFC license). The MSIX package is built with Microsoft's open-source MSIX Packaging SDK (MIT) and signed with osslsigncode (GPL 3.0); neither tool is shipped in the package.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://github.com/electron/electron/blob/main/LICENSE" target="_blank" rel="noreferrer">Electron license</a>
+          <a className="text-primary underline" href="https://github.com/nodejs/node/blob/main/LICENSE" target="_blank" rel="noreferrer">Node.js license</a>
+          <a className="text-primary underline" href="https://docs.python.org/3/license.html" target="_blank" rel="noreferrer">Python license</a>
+          <a className="text-primary underline" href="https://heasarc.gsfc.nasa.gov/docs/software/fitsio/c/f_user/node9.html" target="_blank" rel="noreferrer">CFITSIO license</a>
+          <a className="text-primary underline" href="https://github.com/microsoft/msix-packaging/blob/master/LICENSE" target="_blank" rel="noreferrer">MSIX Packaging SDK license</a>
         </div>
       </div>
       <div>

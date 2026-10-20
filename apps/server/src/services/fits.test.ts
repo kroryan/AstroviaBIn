@@ -276,3 +276,106 @@ test('creates a derivative with cosmetic correction, denoise, and background ext
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+function noise(seed: number) {
+  let state = seed;
+  return () => { state = (state * 1664525 + 1013904223) % 4294967296; return state / 4294967296; };
+}
+
+test('false-colour maps apply to RGB images too (on their luminance)', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 32;
+  const ramp = Array.from({ length: size * size }, (_, index) => (index % size) * 1000);
+  const filePath = path.join(directory, 'rgb.fits');
+  await writeFile(filePath, testFitsRgb(size, [ramp, ramp, ramp]));
+  try {
+    const means = async (colorMap: string) => (await sharp((await renderFitsPreview(filePath, { stretch: 'linear', colorMap: colorMap as never })).buffer).stats()).channels.slice(0, 3).map(channel => Math.round(channel.mean));
+    const grey = await means('grey');
+    for (const map of ['heat', 'cool', 'rainbow', 'viridis']) assert.notDeepEqual(await means(map), grey, `${map} must change an RGB preview`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('hot pixel removal leaves ordinary noise alone and removes a spike', async () => {
+  const { mkdtemp: _m } = await import('node:fs/promises');
+  const directory = await _m(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 40;
+  const random = noise(3);
+  // Quantized sky: most 3×3 neighbourhoods have MAD 0, which used to flag every ±1 ADU pixel.
+  const values = Array.from({ length: size * size }, () => 1000 + Math.round((random() - 0.5) * 2));
+  values[20 * size + 20] = 9000;
+  const source = path.join(directory, 'hot.fits');
+  const output = path.join(directory, 'hot-clean.fits');
+  await writeFile(source, testFitsMono(size, values));
+  try {
+    await createProcessedFits(source, output, { stretch: 'linear', hotPixelThreshold: 5, blackPoint: 990, whitePoint: 1010 });
+    const { readFile } = await import('node:fs/promises');
+    const { readPixels } = await import('./fits');
+    const metadata = await readFitsMetadata(output);
+    const pixels = readPixels(await readFile(output), metadata);
+    const expected = values.map(value => Math.max(0, Math.min(1, (value - 990) / 20)));
+    let changed = 0;
+    for (let index = 0; index < pixels.length; index++) if (index !== 20 * size + 20 && Math.abs(pixels[index] - expected[index]) > 1e-6) changed++;
+    assert.ok(changed < pixels.length * 0.01, `only real outliers may change (changed ${changed})`);
+    assert.ok(pixels[20 * size + 20] < 0.9, 'the hot pixel is replaced');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('background model follows a gradient but ignores stars and a galaxy', async () => {
+  const { backgroundModel } = await import('./fits');
+  const width = 240, height = 160;
+  const plane = new Float64Array(width * height);
+  const random = noise(5);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) plane[y * width + x] = 500 + 2 * x + y + (random() - 0.5) * 10;
+  const stars = [[40, 40], [120, 80], [200, 120], [60, 130]];
+  for (const [sx, sy] of stars) for (let y = sy - 6; y <= sy + 6; y++) for (let x = sx - 6; x <= sx + 6; x++) {
+    plane[y * width + x] += 20000 * Math.exp(-((x - sx) ** 2 + (y - sy) ** 2) / (2 * 1.5 ** 2));
+  }
+  const model = backgroundModel(plane, width, height);
+  let worst = 0;
+  for (let y = 10; y < height - 10; y += 5) for (let x = 10; x < width - 10; x += 5) worst = Math.max(worst, Math.abs(model[y * width + x] - (500 + 2 * x + y)));
+  assert.ok(worst < 25, `model within 25 ADU of the true sky everywhere (worst ${worst.toFixed(1)}), stars excluded`);
+});
+
+test('a processed derivative keeps the WCS and records every setting', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 16;
+  const cards = [card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(size)), card('NAXIS2', String(size)),
+    card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"), card('CRPIX1', '8.5'), card('CRPIX2', '8.5'),
+    card('CRVAL1', '83.82'), card('CRVAL2', '-5.39'), card('CD1_1', '-0.0004'), card('CD2_2', '0.0004'), card('END')];
+  const header = Buffer.from(cards.join(''), 'ascii');
+  const data = Buffer.alloc(size * size * 2);
+  for (let index = 0; index < size * size; index++) data.writeInt16BE(100 + index, index * 2);
+  const source = path.join(directory, 'wcs.fits');
+  const output = path.join(directory, 'wcs-processed.fits');
+  await writeFile(source, Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), data, Buffer.alloc(2880 - data.length)]));
+  try {
+    await createProcessedFits(source, output, { stretch: 'mtf', midtones: 0.2, gamma: 1.4, saturation: 1.3, sharpenAmount: 0.5 });
+    const metadata = await readFitsMetadata(output);
+    assert.equal(metadata.headers.CRVAL1, 83.82);
+    assert.equal(metadata.headers.CD2_2, 0.0004);
+    const history = metadata.cards.filter(line => line.startsWith('HISTORY')).join(' ');
+    for (const text of ['stretch=mtf', 'midtones=0.2', 'saturation=1.3', 'sharpenAmount=0.5']) assert.ok(history.includes(text), `${text} in HISTORY`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('preview downscaling averages blocks instead of skipping pixels', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-fits-'));
+  const size = 64;
+  // A checkerboard of 0/2000: point sampling every other pixel sees only one colour.
+  const values = Array.from({ length: size * size }, (_, index) => ((index % size) + Math.floor(index / size)) % 2 ? 2000 : 0);
+  const filePath = path.join(directory, 'checker.fits');
+  await writeFile(filePath, testFitsMono(size, values));
+  try {
+    const preview = await renderFitsPreview(filePath, { stretch: 'linear', blackPoint: 0, whitePoint: 2000 }, 32);
+    const mean = (await sharp(preview.buffer).stats()).channels[0].mean;
+    assert.ok(Math.abs(mean - 127.5) < 3, `average grey, not black or white (mean ${mean})`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

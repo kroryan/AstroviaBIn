@@ -341,6 +341,26 @@ function boxBlur(plane: Float32Array, width: number, height: number, radius: num
 }
 
 /**
+ * Gaussian blur of standard deviation `sigma` pixels, approximated by three successive box blurs
+ * (Wells 1986; accurate to a few per cent), so cost does not grow with the radius.
+ */
+function gaussianBlur(plane: Float32Array, width: number, height: number, sigma: number): Float32Array {
+  if (sigma <= 0) return Float32Array.from(plane);
+  // Box widths whose three-pass variance matches sigma² (Kovesi's "boxes for Gauss").
+  const ideal = Math.sqrt(12 * sigma * sigma / 3 + 1);
+  let lower = Math.floor(ideal);
+  if (lower % 2 === 0) lower--;
+  const upper = lower + 2;
+  const lowerCount = Math.round((12 * sigma * sigma - 3 * lower * lower - 12 * lower - 9) / (-4 * lower - 4));
+  let result = plane;
+  for (let pass = 0; pass < 3; pass++) {
+    const size = pass < lowerCount ? lower : upper;
+    result = boxBlur(result, width, height, Math.max(0, (size - 1) / 2));
+  }
+  return result;
+}
+
+/**
  * Luminance-only unsharp mask: sharpens perceived detail without introducing
  * colour fringing around stars, mirroring the luminance-preserving stretch above.
  */
@@ -354,7 +374,7 @@ function applySharpen(planes: Float32Array[], width: number, height: number, set
     for (let index = 0; index < size; index++) {
       luminance[index] = planes[0][index] * 0.2126 + planes[1][index] * 0.7152 + planes[2][index] * 0.0722;
     }
-    const blurred = boxBlur(luminance, width, height, radius);
+    const blurred = gaussianBlur(luminance, width, height, radius);
     for (let index = 0; index < size; index++) {
       const sharpened = clampUnit(luminance[index] + amount * (luminance[index] - blurred[index]));
       const factor = luminance[index] > Number.EPSILON ? sharpened / luminance[index] : 0;
@@ -362,18 +382,18 @@ function applySharpen(planes: Float32Array[], width: number, height: number, set
     }
   } else {
     const plane = planes[0];
-    const blurred = boxBlur(plane, width, height, radius);
+    const blurred = gaussianBlur(plane, width, height, radius);
     for (let index = 0; index < plane.length; index++) plane[index] = clampUnit(plane[index] + amount * (plane[index] - blurred[index]));
   }
 }
 
-/** Blends each pixel with a local blur; a simple, fast stand-in for proper noise reduction. */
+/** Blends each pixel with a Gaussian-smoothed copy (radius = σ in pixels): a simple low-pass noise reduction. */
 function applyDenoise(planes: Float32Array[], width: number, height: number, settings: FitsProcessingSettings): void {
   const amount = Math.max(0, Math.min(1, settings.denoiseAmount ?? 0));
   if (amount <= 0) return;
   const radius = Math.max(1, Math.min(4, Math.round(settings.denoiseRadius ?? 1)));
   for (const plane of planes) {
-    const blurred = boxBlur(plane, width, height, radius);
+    const blurred = gaussianBlur(plane, width, height, radius);
     for (let index = 0; index < plane.length; index++) plane[index] = clampUnit(plane[index] * (1 - amount) + blurred[index] * amount);
   }
 }
@@ -384,6 +404,23 @@ function applyDenoise(planes: Float32Array[], width: number, height: number, set
  * neighbourhood's robust spread (MAD), the same sigma-clipping idea Siril's cosmetic
  * correction tool uses. Runs on raw per-channel plane data, before stretching.
  */
+/**
+ * Robust per-plane noise σ from neighbouring-pixel differences (1.4826 · MAD / √2): insensitive to
+ * stars, nebulae and gradients, unlike the spread of the pixel values themselves.
+ */
+function planeNoiseSigma(pixels: Float64Array, base: number, width: number, height: number): number {
+  const differences: number[] = [];
+  const step = Math.max(1, Math.floor(width * height / 200_000));
+  for (let index = 0; index < width * height - 1; index += step) {
+    if ((index + 1) % width === 0) continue;
+    const difference = pixels[base + index + 1] - pixels[base + index];
+    if (Number.isFinite(difference)) differences.push(Math.abs(difference));
+  }
+  if (!differences.length) return 0;
+  differences.sort((a, b) => a - b);
+  return 1.4826 * differences[Math.floor(differences.length / 2)] / Math.SQRT2;
+}
+
 function removeHotPixels(pixels: Float64Array, metadata: FitsMetadata, threshold: number): Float64Array {
   if (threshold <= 0) return pixels;
   const { width, height, channels } = metadata;
@@ -392,6 +429,9 @@ function removeHotPixels(pixels: Float64Array, metadata: FitsMetadata, threshold
   const neighbors = new Array<number>(8);
   for (let channel = 0; channel < channels; channel++) {
     const base = channel * planeSize;
+    // The neighbourhood MAD is 0 in flat or quantized areas; the image noise is the floor, so only
+    // pixels that stand out from the noise (hot/cold pixels, cosmic-ray hits) are replaced.
+    const noiseFloor = Math.max(planeNoiseSigma(pixels, base, width, height), Number.EPSILON);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         let count = 0;
@@ -407,7 +447,7 @@ function removeHotPixels(pixels: Float64Array, metadata: FitsMetadata, threshold
         const median = sorted[Math.floor(sorted.length / 2)];
         const deviations = sorted.map(value => Math.abs(value - median)).sort((a, b) => a - b);
         const mad = deviations[Math.floor(deviations.length / 2)];
-        const scale = Math.max(mad * 1.4826, Number.EPSILON);
+        const scale = Math.max(mad * 1.4826, noiseFloor);
         const index = base + y * width + x;
         if (Math.abs(pixels[index] - median) > threshold * scale) result[index] = median;
       }
@@ -417,25 +457,87 @@ function removeHotPixels(pixels: Float64Array, metadata: FitsMetadata, threshold
 }
 
 /**
- * Removes a smooth large-scale gradient (light pollution, vignetting) by estimating the
- * background with a wide box blur and subtracting its variation from the raw data, the
- * same low-pass idea behind Siril's background extraction tool.
+ * Background model as in SExtractor / photutils Background2D: the image is divided into a mesh of
+ * boxes, each box's background is its iteratively 3σ-clipped median (stars and compact objects are
+ * clipped away), the mesh is median-filtered (3×3) to reject boxes dominated by large objects, and
+ * bilinearly interpolated back to full resolution. Exported for tests.
+ */
+export function backgroundModel(plane: Float64Array, width: number, height: number, boxSize = Math.max(4, Math.round(Math.min(width, height) / 12))): Float64Array {
+  // At least 3 boxes per axis, so even small images get a gradient.
+  const columns = Math.max(Math.min(3, width), Math.round(width / boxSize));
+  const rows = Math.max(Math.min(3, height), Math.round(height / boxSize));
+  const mesh = new Float64Array(columns * rows);
+  const values: number[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      values.length = 0;
+      const x0 = Math.floor(column * width / columns), x1 = Math.floor((column + 1) * width / columns);
+      const y0 = Math.floor(row * height / rows), y1 = Math.floor((row + 1) * height / rows);
+      const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 4000)));
+      for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) {
+        const value = plane[y * width + x];
+        if (Number.isFinite(value)) values.push(value);
+      }
+      let kept = values.sort((a, b) => a - b);
+      let median = kept.length ? kept[Math.floor(kept.length / 2)] : Number.NaN;
+      for (let pass = 0; pass < 5 && kept.length > 10; pass++) {
+        const sigma = 1.4826 * [...kept].map(value => Math.abs(value - median)).sort((a, b) => a - b)[Math.floor(kept.length / 2)];
+        const next = kept.filter(value => Math.abs(value - median) <= 3 * Math.max(sigma, Number.EPSILON));
+        if (next.length === kept.length) break;
+        kept = next;
+        median = kept[Math.floor(kept.length / 2)];
+      }
+      mesh[row * columns + column] = median;
+    }
+  }
+  // 3×3 median filter over the mesh.
+  const filtered = new Float64Array(mesh.length);
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const around: number[] = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const r = row + dy, c = column + dx;
+        if (r >= 0 && r < rows && c >= 0 && c < columns && Number.isFinite(mesh[r * columns + c])) around.push(mesh[r * columns + c]);
+      }
+      around.sort((a, b) => a - b);
+      filtered[row * columns + column] = around.length ? around[Math.floor(around.length / 2)] : 0;
+    }
+  }
+  // Bilinear interpolation between box centres, extrapolated linearly beyond the outer centres so
+  // a gradient continues to the image edges instead of flattening there.
+  const model = new Float64Array(width * height);
+  const cell = (position: number, count: number): [number, number, number] => {
+    if (count === 1) return [0, 0, 0];
+    const lower = Math.min(Math.max(Math.floor(position), 0), count - 2);
+    return [lower, lower + 1, position - lower];
+  };
+  for (let y = 0; y < height; y++) {
+    const [r0, r1, ty] = cell((y + 0.5) * rows / height - 0.5, rows);
+    for (let x = 0; x < width; x++) {
+      const [c0, c1, tx] = cell((x + 0.5) * columns / width - 0.5, columns);
+      model[y * width + x] = (filtered[r0 * columns + c0] * (1 - tx) + filtered[r0 * columns + c1] * tx) * (1 - ty)
+        + (filtered[r1 * columns + c0] * (1 - tx) + filtered[r1 * columns + c1] * tx) * ty;
+    }
+  }
+  return model;
+}
+
+/**
+ * Removes a smooth large-scale gradient (light pollution, vignetting): subtracts `amount` times the
+ * background model's variation about its median, so the overall sky level is kept and stars,
+ * galaxies and nebulae (clipped out of the model) keep their flux.
  */
 function extractBackground(pixels: Float64Array, metadata: FitsMetadata, amount: number): Float64Array {
   if (amount <= 0) return pixels;
   const { width, height, channels } = metadata;
   const planeSize = width * height;
-  const radius = Math.max(8, Math.round(Math.min(width, height) / 8));
   const result = Float64Array.from(pixels);
   for (let channel = 0; channel < channels; channel++) {
     const base = channel * planeSize;
-    const plane = new Float32Array(planeSize);
-    for (let index = 0; index < planeSize; index++) plane[index] = pixels[base + index];
-    const blurred = boxBlur(plane, width, height, radius);
-    let referenceSum = 0;
-    for (let index = 0; index < planeSize; index++) referenceSum += blurred[index];
-    const reference = referenceSum / planeSize;
-    for (let index = 0; index < planeSize; index++) result[base + index] = pixels[base + index] - amount * (blurred[index] - reference);
+    const model = backgroundModel(pixels.subarray(base, base + planeSize), width, height);
+    const sorted = Float64Array.from(model).sort();
+    const reference = sorted[Math.floor(sorted.length / 2)];
+    for (let index = 0; index < planeSize; index++) result[base + index] = pixels[base + index] - amount * (model[index] - reference);
   }
   return result;
 }
@@ -493,11 +595,14 @@ function viridisColor(t: number): [number, number, number] {
  * FITS derivatives never go through this: they always keep their real per-channel data.
  */
 function applyColorMap(planes: Float32Array[], colorMap: FitsColorMap): Float32Array[] {
+  let mono = planes[0];
   if (planes.length === 3) {
-    if (colorMap !== 'inverted') return planes;
-    return planes.map(plane => plane.map(value => 1 - value)) as Float32Array[];
+    // 'grey' keeps natural colour; a false-colour palette maps the luminance (Rec. 709 weights).
+    if (colorMap === 'grey') return planes;
+    if (colorMap === 'inverted') return planes.map(plane => plane.map(value => 1 - value)) as Float32Array[];
+    mono = new Float32Array(planes[0].length);
+    for (let index = 0; index < mono.length; index++) mono[index] = planes[0][index] * 0.2126 + planes[1][index] * 0.7152 + planes[2][index] * 0.0722;
   }
-  const mono = planes[0];
   if (colorMap === 'grey') return [mono];
   if (colorMap === 'inverted') return [mono.map(value => 1 - value)];
   const lut = colorMap === 'heat' ? heatColor : colorMap === 'cool' ? coolColor : colorMap === 'rainbow' ? rainbowColor : viridisColor;
@@ -522,27 +627,45 @@ function previewDimensions(width: number, height: number, maximum = 2048): { wid
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
+/**
+ * Reads a downscaled copy of the image by averaging each block of source pixels (area resampling),
+ * so the preview keeps faint stars and has the noise of a binned image instead of the aliasing of
+ * point sampling. NaN/blank pixels are left out of each block's mean.
+ */
 async function readPreviewPixels(filePath: string, metadata: FitsMetadata, width: number, height: number): Promise<Float64Array> {
   const bytes = bytesPerPixel(metadata.bitpix);
   const sourcePlaneSize = metadata.width * metadata.height;
   const previewPlaneSize = width * height;
   const pixels = new Float64Array(previewPlaneSize * metadata.channels);
-  const firstX = 0;
-  const lastX = Math.min(metadata.width - 1, Math.floor((width - 1) * metadata.width / width));
-  const row = Buffer.allocUnsafe((lastX - firstX + 1) * bytes);
+  const rowBytes = metadata.width * bytes;
+  const maxRows = Math.ceil(metadata.height / height) + 1;
+  const block = Buffer.allocUnsafe(rowBytes * maxRows);
+  const sums = new Float64Array(width);
+  const counts = new Uint32Array(width);
+  const columnOf = new Uint32Array(metadata.width);
+  for (let x = 0; x < metadata.width; x++) columnOf[x] = Math.min(width - 1, Math.floor(x * width / metadata.width));
   const handle = await open(filePath, 'r');
   try {
     for (let channel = 0; channel < metadata.channels; channel++) {
       for (let y = 0; y < height; y++) {
-        const sourceY = Math.min(metadata.height - 1, Math.floor(y * metadata.height / height));
-        const offset = metadata.dataOffset + (channel * sourcePlaneSize + sourceY * metadata.width + firstX) * bytes;
-        await readExactly(handle, row, row.length, offset);
-        for (let x = 0; x < width; x++) {
-          const sourceX = Math.min(metadata.width - 1, Math.floor(x * metadata.width / width));
-          const raw = readValue(row, (sourceX - firstX) * bytes, metadata.bitpix);
-          const value = raw * metadata.bscale + metadata.bzero;
-          pixels[channel * previewPlaneSize + y * width + x] = Number.isFinite(value) ? value : Number.NaN;
+        sums.fill(0);
+        counts.fill(0);
+        const firstRow = Math.floor(y * metadata.height / height);
+        const lastRow = Math.max(firstRow, Math.min(metadata.height - 1, Math.floor((y + 1) * metadata.height / height) - 1));
+        // The block's rows are contiguous in the file: one read per preview row.
+        const rowCount = lastRow - firstRow + 1;
+        await readExactly(handle, block, rowBytes * rowCount, metadata.dataOffset + (channel * sourcePlaneSize + firstRow * metadata.width) * bytes);
+        for (let line = 0; line < rowCount; line++) {
+          const start = line * rowBytes;
+          for (let sourceX = 0; sourceX < metadata.width; sourceX++) {
+            const value = readValue(block, start + sourceX * bytes, metadata.bitpix) * metadata.bscale + metadata.bzero;
+            if (!Number.isFinite(value)) continue;
+            sums[columnOf[sourceX]] += value;
+            counts[columnOf[sourceX]]++;
+          }
         }
+        const target = channel * previewPlaneSize + y * width;
+        for (let x = 0; x < width; x++) pixels[target + x] = counts[x] ? sums[x] / counts[x] : Number.NaN;
       }
     }
   } finally {
@@ -551,13 +674,30 @@ async function readPreviewPixels(filePath: string, metadata: FitsMetadata, width
   return pixels;
 }
 
+// The downscaled raw data does not depend on the processing settings: keep the last few in memory
+// so moving a slider only re-runs the processing, not the read of every row of a large FITS.
+const previewPixelCache = new Map<string, Promise<Float64Array>>();
+async function cachedPreviewPixels(filePath: string, metadata: FitsMetadata, width: number, height: number): Promise<Float64Array> {
+  const { mtimeMs, size } = await stat(filePath);
+  const key = `${filePath}|${mtimeMs}|${size}|${width}x${height}`;
+  let pending = previewPixelCache.get(key);
+  if (!pending) {
+    pending = readPreviewPixels(filePath, metadata, width, height);
+    previewPixelCache.set(key, pending);
+    pending.catch(() => previewPixelCache.delete(key));
+    while (previewPixelCache.size > 4) previewPixelCache.delete(previewPixelCache.keys().next().value!);
+  }
+  // preparePixels() copies before modifying, so the cached array is never altered.
+  return pending;
+}
+
 export async function renderFitsPreview(filePath: string, settings: FitsProcessingSettings = {}, maximumDimension = 2048): Promise<FitsPreview> {
   const metadata = await readFitsMetadata(filePath);
   const dimensions = previewDimensions(metadata.width, metadata.height, Math.min(maximumDimension, 4096));
   const previewMetadata = { ...metadata, width: dimensions.width, height: dimensions.height,
     pixelCount: dimensions.width * dimensions.height * metadata.channels };
   const [rawPixels, ranges] = await Promise.all([
-    readPreviewPixels(filePath, metadata, dimensions.width, dimensions.height),
+    cachedPreviewPixels(filePath, metadata, dimensions.width, dimensions.height),
     cachedFileProcessingRanges(filePath, metadata, settings),
   ]);
   const pixels = preparePixels(rawPixels, previewMetadata, settings);
@@ -633,13 +773,19 @@ export async function createProcessedFits(filePath: string, outputPath: string, 
     const value = copyHeaderValue(metadata.headers, key);
     if (value !== undefined) cards.push(fitsCard(key, value));
   }
+  // The geometry is unchanged, so the source's celestial WCS (with distortion terms) still applies.
+  for (const rawCard of metadata.cards) {
+    const key = rawCard.slice(0, 8).trim();
+    if (/^(CTYPE|CRPIX|CRVAL|CUNIT|CDELT|CROTA|CD\d|PC\d|WCSAXES|RADESYS|EQUINOX|LONPOLE|LATPOLE|PV\d|A_|B_|AP_|BP_)/.test(key)) cards.push(rawCard);
+  }
+  cards.push(fitsCard('BUNIT', "'normalized'"));
+  cards.push(fitsCard('COMMENT', 'Display-stretched (non-linear) data scaled 0-1: not for photometry.'));
   cards.push(fitsCard('HISTORY', 'AstroviaBin non-destructive derivative'));
-  cards.push(fitsCard('HISTORY', `stretch=${settings.stretch || 'asinh'} background=${Boolean(settings.backgroundNeutralization)}`));
-  if ((settings.scnrAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `scnrAmount=${settings.scnrAmount}`));
-  if ((settings.sharpenAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `sharpenAmount=${settings.sharpenAmount} sharpenRadius=${settings.sharpenRadius ?? 1}`));
-  if ((settings.denoiseAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `denoiseAmount=${settings.denoiseAmount} denoiseRadius=${settings.denoiseRadius ?? 1}`));
-  if ((settings.backgroundExtractionAmount ?? 0) > 0) cards.push(fitsCard('HISTORY', `backgroundExtractionAmount=${settings.backgroundExtractionAmount}`));
-  if ((settings.hotPixelThreshold ?? 0) > 0) cards.push(fitsCard('HISTORY', `hotPixelThreshold=${settings.hotPixelThreshold}`));
+  // Every setting, so the processing can be reproduced exactly.
+  const recorded = Object.entries(settings).filter(([key, value]) => key !== 'colorMap' && value !== undefined && value !== null);
+  for (let index = 0; index < recorded.length; index += 3) {
+    cards.push(fitsCard('HISTORY', recorded.slice(index, index + 3).map(([key, value]) => `${key}=${value}`).join(' ').slice(0, 70)));
+  }
   cards.push(fitsCard('END'));
   const header = Buffer.from(cards.join(''), 'ascii');
   const paddedHeader = Buffer.concat([header, Buffer.alloc(Math.ceil(header.length / FITS_BLOCK_SIZE) * FITS_BLOCK_SIZE - header.length, ' ')]);

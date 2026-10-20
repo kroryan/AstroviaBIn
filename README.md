@@ -460,7 +460,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-Third-party components keep their own licenses. In particular, the Docker image builds and ships the unmodified [HOTPANTS](vendor/hotpants) programs, which are distributed under the GNU GPL v2 (`vendor/hotpants/COPYING`); their complete source is included in this repository and in the image at `/usr/share/doc/hotpants/source`. Astrometry.net and its index files are installed from Debian under their respective licenses.
+Third-party components keep their own licenses. In particular, the Docker image builds and ships the unmodified [HOTPANTS](vendor/hotpants) programs, which are distributed under the GNU GPL v2 (`vendor/hotpants/COPYING`); their complete source is included in this repository and in the image at `/usr/share/doc/hotpants/source`. Astrometry.net and its index files are installed from Debian under their respective licenses. Scientific FITS reduction and stacking call the unmodified [Astropy](https://www.astropy.org/) and [CCDProc](https://github.com/astropy/ccdproc) Python packages under their BSD 3-Clause licenses; pinned top-level runtime versions are documented in `requirements-science.txt`.
 
 ## Acknowledgments
 
@@ -468,6 +468,7 @@ Third-party components keep their own licenses. In particular, the Docker image 
 - **[Astrometry.net](https://astrometry.net/)** - Locally installed plate-solving technology
 - **[HOTPANTS](https://github.com/acbecker/hotpants)** - Image subtraction (see bundled notices)
 - **[Photutils](https://github.com/astropy/photutils)** - Local point-source detection (BSD-3-Clause)
+- **[CCDProc](https://github.com/astropy/ccdproc)** - CCD calibration, WCS reprojection, masks, uncertainties and stacking (BSD-3-Clause)
 - **[shadcn/ui](https://ui.shadcn.com/)** - Beautiful and accessible React components
 - **[Drizzle ORM](https://orm.drizzle.team/)** - Type-safe database toolkit
 

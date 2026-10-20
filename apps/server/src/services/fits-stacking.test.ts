@@ -1,219 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { readFitsMetadata, readPixels } from './fits';
-import { runStackInThread, stackFits } from './fits-stacking';
+import { stackFits } from './fits-stacking';
 
 function card(key: string, value?: string): string {
   return (value === undefined ? key : `${key.padEnd(8, ' ')}= ${value}`).padEnd(80, ' ').slice(0, 80);
 }
 
-/** Builds a square mono FITS of arbitrary size from a flat row-major array of values. */
-function testFitsMono(size: number, values: number[], extraHeaders: string[] = []): Buffer {
-  const cards = [
-    card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(size)), card('NAXIS2', String(size)),
-    ...extraHeaders, card('END'),
-  ];
-  const header = Buffer.from(cards.join(''), 'ascii');
-  const paddedHeader = Buffer.concat([header, Buffer.alloc(2880 - header.length, ' ')]);
-  const data = Buffer.alloc(values.length * 2);
-  values.forEach((value, index) => data.writeInt16BE(value, index * 2));
-  const dataBlocks = Math.ceil(data.length / 2880) * 2880;
-  return Buffer.concat([paddedHeader, data, Buffer.alloc(dataBlocks - data.length)]);
-}
-
-/** A flat background with a distinct square patch, optionally shifted, so registration has texture to lock onto. */
-function patchFrame(size: number, offsetX: number, offsetY: number, background = 100, foreground = 900, patchSize = 6): number[] {
-  const values = new Array(size * size).fill(background);
-  const start = Math.floor(size / 2) - Math.floor(patchSize / 2);
-  for (let y = start + offsetY; y < start + offsetY + patchSize; y++) {
-    for (let x = start + offsetX; x < start + offsetX + patchSize; x++) {
-      if (x >= 0 && x < size && y >= 0 && y < size) values[y * size + x] = foreground;
-    }
-  }
-  return values;
-}
-
-async function readOutputPixels(outputPath: string): Promise<{ metadata: Awaited<ReturnType<typeof readFitsMetadata>>; pixels: Float64Array }> {
-  const metadata = await readFitsMetadata(outputPath);
-  const file = await import('node:fs/promises').then(fs => fs.readFile(outputPath));
-  return { metadata, pixels: readPixels(file, metadata) };
-}
-
-test('stacks identical frames back to the same pixel values', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 20;
-  const values = patchFrame(size, 0, 0);
-  // Three distinct exposures of the same scene (+1, 0, −1 in one corner pixel) average back to it.
-  const variants = [1, 0, -1].map(delta => values.map((value, index) => index === 0 ? value + delta : value));
-  const framePaths = [path.join(directory, 'a.fits'), path.join(directory, 'b.fits'), path.join(directory, 'c.fits')];
-  await Promise.all(framePaths.map((filePath, index) => writeFile(filePath, testFitsMono(size, variants[index]))));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    const result = await stackFits(framePaths, output, { method: 'mean', register: false });
-    assert.equal(result.frameCount, 3);
-    const { metadata, pixels } = await readOutputPixels(output);
-    assert.equal(metadata.bitpix, -32);
-    for (let index = 0; index < values.length; index++) assert.ok(Math.abs(pixels[index] - values[index]) < 1e-3);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('normalizes different exposure times and preserves the reference celestial WCS', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 10;
-  const wcs = [card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"), card('CRPIX1', '5.5'), card('CRPIX2', '5.5'),
-    card('CRVAL1', '83.25'), card('CRVAL2', '-5.2'), card('CDELT1', '-0.001'), card('CDELT2', '0.001')];
-  const first = path.join(directory, 'first.fits');
-  const second = path.join(directory, 'second.fits');
-  await writeFile(first, testFitsMono(size, new Array(size * size).fill(100), [...wcs, card('EXPTIME', '10'), card('FILTER', "'R'"), card('BUNIT', "'adu'")]));
-  await writeFile(second, testFitsMono(size, new Array(size * size).fill(200), [...wcs, card('EXPTIME', '20'), card('FILTER', "'R'"), card('BUNIT', "'adu'")]));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    await stackFits([first, second], output, { method: 'mean', register: false });
-    const { metadata, pixels } = await readOutputPixels(output);
-    assert.ok(Math.abs(pixels[55] - 100) < 1e-3, `exposure-normalized pixel should be 100, got ${pixels[55]}`);
-    assert.equal(metadata.headers.CRVAL1, 83.25);
-    assert.equal(metadata.headers.CRVAL2, -5.2);
-    assert.equal(metadata.headers.EXPTIME, 10);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('rejects frames with mismatched dimensions', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const a = path.join(directory, 'a.fits');
-  const b = path.join(directory, 'b.fits');
-  await writeFile(a, testFitsMono(10, new Array(100).fill(100)));
-  await writeFile(b, testFitsMono(12, new Array(144).fill(100)));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    await assert.rejects(() => stackFits([a, b], output, {}), /different size and no plate solution/);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('sigma-clip rejects a one-frame outlier (satellite trail / cosmic ray) that mean stacking would not', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 10;
-  const base = new Array(size * size).fill(200);
-  const outlierIndex = 42;
-  // Distinct exposures (a different value in the last pixel) so none is skipped as a duplicate.
-  const frames = [
-    base.map((value, index) => (index === 99 ? 201 : value)),
-    base.map((value, index) => (index === 99 ? 199 : value)),
-    [...base],
-    base.map((value, index) => (index === outlierIndex ? 20000 : value)), // one frame has a spike
-  ];
-  const framePaths = frames.map((_, index) => path.join(directory, `frame-${index}.fits`));
-  await Promise.all(frames.map((values, index) => writeFile(framePaths[index], testFitsMono(size, values))));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    const clipped = await stackFits(framePaths, output, { method: 'sigma-clip', sigmaClipThreshold: 2, register: false });
-    const { pixels: clippedPixels } = await readOutputPixels(output);
-    const meanOutput = path.join(directory, 'stacked-mean.fits');
-    const meanResult = await stackFits(framePaths, meanOutput, { method: 'mean', register: false });
-    const { pixels: meanPixels } = await readOutputPixels(meanOutput);
-    assert.ok(clippedPixels[outlierIndex] < 1000, `sigma-clip should reject the outlier, got ${clippedPixels[outlierIndex]}`);
-    assert.ok(meanPixels[outlierIndex] > 1000, `mean stacking is expected to be dragged up by the outlier, got ${meanPixels[outlierIndex]}`);
-    assert.ok(meanResult.frameCount === clipped.frameCount);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('registers a shifted frame before stacking', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 40;
-  const reference = patchFrame(size, 0, 0);
-  const shifted = patchFrame(size, 3, -2);
-  const framePaths = [path.join(directory, 'ref.fits'), path.join(directory, 'shifted.fits')];
-  await writeFile(framePaths[0], testFitsMono(size, reference));
-  await writeFile(framePaths[1], testFitsMono(size, shifted));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    const result = await stackFits(framePaths, output, { method: 'mean', register: true });
-    assert.equal(result.offsets[0].dx, 0);
-    assert.equal(result.offsets[0].dy, 0);
-    assert.equal(result.offsets[1].dx, 3);
-    assert.equal(result.offsets[1].dy, -2);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('keeps the original grid instead of inventing an offset for textureless frames', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const framePaths = [path.join(directory, 'flat-a.fits'), path.join(directory, 'flat-b.fits')];
-  await Promise.all(framePaths.map((filePath, index) => writeFile(filePath, testFitsMono(40, new Array(40 * 40).fill(100 + index)))));
-  try {
-    const result = await stackFits(framePaths, path.join(directory, 'stacked.fits'), { method: 'mean' });
-    assert.deepEqual(result.offsets, [{ dx: 0, dy: 0 }, { dx: 0, dy: 0 }]);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('registration is not thrown off by a different overall background level between frames', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 40;
-  const reference = patchFrame(size, 0, 0, 100, 900);
-  // Same shift as above, but this frame also has a much brighter sky background —
-  // a plain (non-zero-mean) cross-correlation would be biased toward that, not the shift.
-  const shiftedWithBrighterSky = patchFrame(size, 3, -2, 500, 900);
-  const framePaths = [path.join(directory, 'ref.fits'), path.join(directory, 'shifted.fits')];
-  await writeFile(framePaths[0], testFitsMono(size, reference));
-  await writeFile(framePaths[1], testFitsMono(size, shiftedWithBrighterSky));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    const result = await stackFits(framePaths, output, { method: 'mean', register: true });
-    assert.equal(result.offsets[1].dx, 3);
-    assert.equal(result.offsets[1].dy, -2);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('stacked output keeps a shifted frame aligned with the reference', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 40;
-  const framePaths = [path.join(directory, 'ref.fits'), path.join(directory, 'shifted.fits')];
-  await writeFile(framePaths[0], testFitsMono(size, patchFrame(size, 0, 0)));
-  await writeFile(framePaths[1], testFitsMono(size, patchFrame(size, 3, -2)));
-  const output = path.join(directory, 'stacked.fits');
-  try {
-    await stackFits(framePaths, output, { method: 'mean', register: true });
-    const { pixels } = await readOutputPixels(output);
-    // The patch must stay where the reference has it: centre pixels at full foreground value,
-    // and nothing left behind at the shifted frame's original position.
-    const centre = Math.floor(size / 2);
-    assert.equal(pixels[centre * size + centre], 900);
-    assert.equal(pixels[(centre - 2 - 3) * size + (centre + 3 + 3)], 100);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('writes standard HISTORY cards that CFITSIO readers accept', async () => {
-  const { fitsCard } = await import('./fits');
-  assert.equal(fitsCard('HISTORY', 'stack of 7 frames').slice(0, 10), 'HISTORY st');
-  assert.equal(fitsCard('EXPTIME', '120').slice(0, 10), 'EXPTIME = ');
-  // Fixed format: logical/numeric values end in column 30.
-  assert.equal(fitsCard('SIMPLE', 'T').slice(0, 30), 'SIMPLE  =                    T');
-  assert.equal(fitsCard('OBJECT', "'M 42'").slice(0, 16), "OBJECT  = 'M 42'");
-});
-
-/** Float FITS with arbitrary header cards. */
-function testFitsFloat(width: number, height: number, values: Float32Array, extraHeaders: string[] = []): Buffer {
-  const cards = [
-    card('SIMPLE', 'T'), card('BITPIX', '-32'), card('NAXIS', '2'), card('NAXIS1', String(width)), card('NAXIS2', String(height)),
-    ...extraHeaders, card('END'),
-  ];
+function fitsMono(width: number, height: number, values: number[], extra: string[] = []): Buffer {
+  const cards = [card('SIMPLE', 'T'), card('BITPIX', '-32'), card('NAXIS', '2'), card('NAXIS1', String(width)),
+    card('NAXIS2', String(height)), card('BUNIT', "'adu'"), ...extra, card('END')];
   const header = Buffer.from(cards.join(''), 'ascii');
   const paddedHeader = Buffer.concat([header, Buffer.alloc(Math.ceil(header.length / 2880) * 2880 - header.length, ' ')]);
   const data = Buffer.alloc(values.length * 4);
@@ -221,146 +20,161 @@ function testFitsFloat(width: number, height: number, values: Float32Array, extr
   return Buffer.concat([paddedHeader, data, Buffer.alloc(Math.ceil(data.length / 2880) * 2880 - data.length)]);
 }
 
-/** Deterministic pseudo-random numbers. */
-function generator(seed: number) {
-  let state = seed;
-  return () => { state = (state * 1664525 + 1013904223) % 4294967296; return state / 4294967296; };
+async function outputPixels(filePath: string) {
+  const metadata = await readFitsMetadata(filePath);
+  return { metadata, pixels: readPixels(await readFile(filePath), metadata) };
 }
 
-/**
- * A star field (Gaussian stars, sky noise) seen through a camera rotated by `angle` degrees and
- * shifted by (shiftX, shiftY) pixels relative to the reference camera. Returns the pixels and,
- * optionally, the matching TAN WCS cards.
- */
-function starField(size: number, stars: Array<[number, number, number]>, angle: number, shiftX: number, shiftY: number, seed: number) {
-  const random = generator(seed);
-  const values = new Float32Array(size * size);
-  for (let index = 0; index < values.length; index++) values[index] = 100 + (random() - 0.5) * 6;
-  const c = (size - 1) / 2;
-  const cos = Math.cos(angle * Math.PI / 180), sin = Math.sin(angle * Math.PI / 180);
-  const position = ([x, y]: [number, number, number]) => [c + cos * (x - c) - sin * (y - c) + shiftX, c + sin * (x - c) + cos * (y - c) + shiftY];
-  for (const star of stars) {
-    const [px, py] = position(star);
-    for (let y = Math.max(0, Math.floor(py - 8)); y <= Math.min(size - 1, Math.ceil(py + 8)); y++) {
-      for (let x = Math.max(0, Math.floor(px - 8)); x <= Math.min(size - 1, Math.ceil(px + 8)); x++) {
-        values[y * size + x] += star[2] * Math.exp(-((x - px) ** 2 + (y - py) ** 2) / (2 * 1.6 ** 2));
-      }
-    }
-  }
-  // The reference pixel (CRPIX, 1-based) maps to a fixed sky point; the frame's CD matrix is rotated.
-  const scale = 0.0003;
-  const [rx, ry] = position([c, c, 0]);
-  const wcs = [card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"),
-    card('CRPIX1', String(rx + 1)), card('CRPIX2', String(ry + 1)), card('CRVAL1', '150.0'), card('CRVAL2', '20.0'),
-    // Pixel → sky: undo the camera rotation, then the reference scale (RA increases to the left).
-    card('CD1_1', String(-scale * cos)), card('CD1_2', String(-scale * sin)),
-    card('CD2_1', String(-scale * sin)), card('CD2_2', String(scale * cos))];
-  return { values, wcs, position };
+async function fixture() {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-ccdproc-'));
+  return { directory, output: path.join(directory, 'stacked.fits') };
 }
 
-function randomStars(count: number, size: number, seed: number): Array<[number, number, number]> {
-  const random = generator(seed);
-  return Array.from({ length: count }, () => [20 + random() * (size - 40), 20 + random() * (size - 40), 400 + random() * 3000] as [number, number, number]);
-}
-
-/** Flux-weighted centroid of the stack around a predicted position. */
-function centroid(pixels: Float64Array, size: number, x: number, y: number): [number, number] {
-  let sum = 0, sx = 0, sy = 0;
-  for (let j = Math.round(y) - 4; j <= Math.round(y) + 4; j++) {
-    for (let i = Math.round(x) - 4; i <= Math.round(x) + 4; i++) {
-      const value = pixels[j * size + i] - 100;
-      if (value > 0) { sum += value; sx += value * i; sy += value * j; }
-    }
-  }
-  return [sx / sum, sy / sum];
-}
-
-for (const withWcs of [true, false]) {
-  test(`aligns a rotated and sub-pixel shifted frame ${withWcs ? 'through its WCS' : 'from stars alone'}`, async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-    const size = 320;
-    const stars = randomStars(140, size, 11);
-    const reference = starField(size, stars, 0, 0, 0, 1);
-    // 0.4° is twice the old translation-only tolerance; 1.6 px of rotation at the frame edges.
-    const rotated = starField(size, stars, 0.4, 7.3, -4.6, 2);
-    const framePaths = [path.join(directory, 'ref.fits'), path.join(directory, 'rotated.fits')];
-    await writeFile(framePaths[0], testFitsFloat(size, size, reference.values, withWcs ? reference.wcs : []));
-    await writeFile(framePaths[1], testFitsFloat(size, size, rotated.values, withWcs ? rotated.wcs : []));
-    const output = path.join(directory, 'stacked.fits');
-    try {
-      const result = await stackFits(framePaths, output, { method: 'mean' });
-      assert.equal(result.frameCount, 2);
-      assert.equal(result.frames[1].method, withWcs ? 'wcs+stars' : 'translation+stars');
-      assert.ok((result.frames[1].rmsPx ?? 9) < 0.2, `registration residual ${result.frames[1].rmsPx}`);
-      const { pixels } = await readOutputPixels(output);
-      // Every star in the stack sits where the reference has it, including at the edges.
-      let worst = 0;
-      const isolated = stars.filter(([x, y]) => x > 30 && y > 30 && x < size - 30 && y < size - 30 &&
-        stars.every(other => other[0] === x && other[1] === y || Math.hypot(other[0] - x, other[1] - y) > 12));
-      for (const star of isolated) {
-        const [cx, cy] = centroid(pixels, size, star[0], star[1]);
-        if (process.env.DEBUG_STACK) console.log(star[0].toFixed(1), star[1].toFixed(1), Math.hypot(cx - star[0], cy - star[1]).toFixed(3));
-        worst = Math.max(worst, Math.hypot(cx - star[0], cy - star[1]));
-      }
-      assert.ok(worst < 0.15, `worst stacked star offset ${worst.toFixed(3)} px`);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-}
-
-test('skips an exact duplicate frame and reports it', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 200;
-  const stars = randomStars(60, size, 3);
-  const a = starField(size, stars, 0, 0, 0, 1);
-  const b = starField(size, stars, 0, 2, 1, 2);
-  const framePaths = ['a', 'b', 'a-again'].map(name => path.join(directory, `${name}.fits`));
-  await writeFile(framePaths[0], testFitsFloat(size, size, a.values));
-  await writeFile(framePaths[1], testFitsFloat(size, size, b.values));
-  await writeFile(framePaths[2], testFitsFloat(size, size, a.values));
+test('CCDProc mean stack writes a float FITS with engine provenance and uncertainty', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  await writeFile(a, fitsMono(4, 4, new Array(16).fill(10).map((value, index) => index === 0 ? 9 : value)));
+  await writeFile(b, fitsMono(4, 4, new Array(16).fill(10).map((value, index) => index === 0 ? 11 : value)));
   try {
-    const result = await stackFits(framePaths, path.join(directory, 'stacked.fits'), { method: 'mean' });
+    const result = await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'none' });
+    assert.equal(result.engine.name, 'Astropy/CCDProc');
+    assert.match(result.engine.ccdproc, /^2\./);
     assert.equal(result.frameCount, 2);
-    assert.equal(result.frames[2].used, false);
-    assert.match(result.frames[2].reason ?? '', /duplicate/);
-    assert.ok(result.warnings.some(warning => /duplicate/.test(warning)));
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+    const { metadata, pixels } = await outputPixels(output);
+    assert.equal(metadata.bitpix, -32);
+    assert.equal(metadata.headers.NCOMBINE, 2);
+    assert.equal(pixels[0], 10);
+    assert.ok((await readFile(output)).includes(Buffer.from('UNCERT  ')));
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('excludes a frame whose stars do not line up instead of blending it in', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 200;
-  const stars = randomStars(60, size, 4);
-  const frames = [starField(size, stars, 0, 0, 0, 1), starField(size, stars, 0, 1.5, -2.5, 2),
-    starField(size, randomStars(60, size, 99), 0, 0, 0, 3)]; // a different field
-  const framePaths = frames.map((_, index) => path.join(directory, `f${index}.fits`));
-  await Promise.all(frames.map((frame, index) => writeFile(framePaths[index], testFitsFloat(size, size, frame.values))));
+test('CCDProc exposure normalization scales every light to the reference exposure', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, '10s.fits'), b = path.join(directory, '20s.fits');
+  await writeFile(a, fitsMono(3, 3, new Array(9).fill(100), [card('EXPTIME', '10'), card('FILTER', "'R'")]));
+  await writeFile(b, fitsMono(3, 3, new Array(9).fill(200), [card('EXPTIME', '20'), card('FILTER', "'R'")]));
   try {
-    const result = await stackFits(framePaths, path.join(directory, 'stacked.fits'), { method: 'mean' });
-    assert.equal(result.frameCount, 2);
-    assert.equal(result.frames[1].used, true);
-    assert.equal(result.frames[2].used, false);
-    assert.match(result.frames[2].reason ?? '', /not aligned/);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+    await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'exposure' });
+    const { pixels } = await outputPixels(output);
+    assert.ok(pixels.every(value => Math.abs(value - 100) < 1e-4));
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('runs a stack in a worker thread without blocking the caller', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-stack-'));
-  const size = 120;
-  const stars = randomStars(30, size, 5);
-  const framePaths = [0, 1].map(index => path.join(directory, `t${index}.fits`));
-  await writeFile(framePaths[0], testFitsFloat(size, size, starField(size, stars, 0, 0, 0, 1).values));
-  await writeFile(framePaths[1], testFitsFloat(size, size, starField(size, stars, 0, 2, -1, 2).values));
+test('CCDProc sigma clipping with MAD rejects a one-frame cosmic-ray outlier', async () => {
+  const { directory, output } = await fixture();
+  const paths = Array.from({ length: 5 }, (_, index) => path.join(directory, `${index}.fits`));
+  await Promise.all(paths.map((filePath, frame) => {
+    const values = new Array(25).fill(100); values[24] += frame - 2;
+    if (frame === 4) values[12] = 50_000;
+    return writeFile(filePath, fitsMono(5, 5, values));
+  }));
   try {
-    const result = await runStackInThread(framePaths, path.join(directory, 'stacked.fits'), { method: 'mean' });
-    assert.equal(result.frameCount, 2);
-    assert.equal(result.frames[1].used, true);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+    await stackFits(paths, output, { method: 'sigma-clip', sigmaClipLow: 2, sigmaClipHigh: 2, register: false, normalization: 'none' });
+    const { pixels } = await outputPixels(output);
+    assert.ok(pixels[12] < 500, `expected the outlier to be rejected, got ${pixels[12]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('CCDProc ccd_process applies master bias and flat calibration before combining', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  const bias = path.join(directory, 'master-bias.fits'), flat = path.join(directory, 'master-flat.fits');
+  await writeFile(a, fitsMono(2, 2, [30, 50, 30, 50]));
+  await writeFile(b, fitsMono(2, 2, [32, 52, 32, 52]));
+  await writeFile(bias, fitsMono(2, 2, [10, 10, 10, 10]));
+  await writeFile(flat, fitsMono(2, 2, [1, 2, 1, 2]));
+  try {
+    await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'none',
+      calibration: { biasPath: bias, flatPath: flat } });
+    const { pixels } = await outputPixels(output);
+    assert.ok(Math.abs(pixels[0] - 31.5) < 1e-4);
+    assert.ok(Math.abs(pixels[1] - 30.75) < 1e-4);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('CCDProc wcs_project aligns a shifted plate-solved frame to the reference grid', async () => {
+  const { directory, output } = await fixture();
+  const reference = path.join(directory, 'reference.fits'), shifted = path.join(directory, 'shifted.fits');
+  const baseWcs = [card('CTYPE1', "'RA---TAN'"), card('CTYPE2', "'DEC--TAN'"), card('CRPIX1', '3'), card('CRPIX2', '3'),
+    card('CRVAL1', '83'), card('CRVAL2', '-5'), card('CD1_1', '-0.001'), card('CD1_2', '0'), card('CD2_1', '0'), card('CD2_2', '0.001')];
+  const shiftedWcs = [...baseWcs.slice(0, 2), card('CRPIX1', '4'), ...baseWcs.slice(3)];
+  const refPixels = new Array(25).fill(0); refPixels[12] = 100;
+  const shiftedPixels = new Array(25).fill(0); shiftedPixels[13] = 100;
+  await writeFile(reference, fitsMono(5, 5, refPixels, baseWcs));
+  await writeFile(shifted, fitsMono(5, 5, shiftedPixels, shiftedWcs));
+  try {
+    const result = await stackFits([reference, shifted], output, { method: 'mean', register: true,
+      interpolation: 'nearest-neighbor', normalization: 'none' });
+    const { pixels } = await outputPixels(output);
+    assert.equal(result.frames[1].method, 'CCDProc WCS/nearest-neighbor');
+    assert.ok(pixels[12] > 90, `registered signal should remain at reference pixel, got ${pixels[12]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('duplicate frames and unregistered dimension mismatches are rejected clearly', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), duplicate = path.join(directory, 'duplicate.fits'), different = path.join(directory, 'different.fits');
+  const data = fitsMono(2, 2, [1, 2, 3, 4]);
+  await writeFile(a, data); await writeFile(duplicate, data); await writeFile(different, fitsMono(3, 3, new Array(9).fill(1)));
+  try {
+    await assert.rejects(() => stackFits([a, duplicate], output, { register: false, normalization: 'none' }), /only contains duplicates/);
+    await assert.rejects(() => stackFits([a, different], output, { register: false, normalization: 'none' }), /Fewer than two frames could be aligned/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('CCDProc median cosmic-ray cleaning masks and replaces an isolated hit', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  const clean = new Array(21 * 21).fill(100);
+  const hit = [...clean]; hit[220] = 40_000; hit[0] = 101;
+  await writeFile(a, fitsMono(21, 21, clean));
+  await writeFile(b, fitsMono(21, 21, hit));
+  try {
+    await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'none', cosmicMethod: 'median',
+      medianCosmicThreshold: 4, medianCosmicBox: 5, medianCosmicGrowBox: 0, medianCosmicReplaceBox: 5 });
+    const { pixels } = await outputPixels(output);
+    assert.ok(pixels[220] < 200, `median cleaner should remove the isolated hit, got ${pixels[220]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('CCDProc weighted combination and sum are available without custom pixel arithmetic', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'a.fits'), b = path.join(directory, 'b.fits');
+  await writeFile(a, fitsMono(2, 2, [1, 1, 1, 1], [card('EXPTIME', '1')]));
+  await writeFile(b, fitsMono(2, 2, [3, 3, 3, 4], [card('EXPTIME', '3')]));
+  try {
+    await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'none', weighting: 'exposure' });
+    let result = await outputPixels(output);
+    assert.ok(Math.abs(result.pixels[0] - 2.5) < 1e-4);
+    const summed = path.join(directory, 'summed.fits');
+    await stackFits([a, b], summed, { method: 'sum', register: false, normalization: 'none' });
+    result = await outputPixels(summed);
+    assert.ok(Math.abs(result.pixels[0] - 4) < 1e-4);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+/** Unsigned 16-bit FITS as cameras write them: BITPIX 16 with BZERO = 32768. */
+function fitsUint16(width: number, height: number, values: number[], extra: string[] = []): Buffer {
+  const cards = [card('SIMPLE', 'T'), card('BITPIX', '16'), card('NAXIS', '2'), card('NAXIS1', String(width)),
+    card('NAXIS2', String(height)), card('BZERO', '32768'), card('BSCALE', '1'), ...extra, card('END')];
+  const header = Buffer.from(cards.join(''), 'ascii');
+  const paddedHeader = Buffer.concat([header, Buffer.alloc(Math.ceil(header.length / 2880) * 2880 - header.length, ' ')]);
+  const data = Buffer.alloc(values.length * 2);
+  values.forEach((value, index) => data.writeInt16BE(value - 32768, index * 2));
+  return Buffer.concat([paddedHeader, data, Buffer.alloc(Math.ceil(data.length / 2880) * 2880 - data.length)]);
+}
+
+test('CCDProc stacks unsigned 16-bit camera frames (BZERO 32768) with the right values', async () => {
+  const { directory, output } = await fixture();
+  const a = path.join(directory, 'u16-a.fits'), b = path.join(directory, 'u16-b.fits');
+  // Values above 32767 only fit an unsigned frame through BZERO.
+  await writeFile(a, fitsUint16(4, 4, new Array(16).fill(40000)));
+  await writeFile(b, fitsUint16(4, 4, new Array(16).fill(40002)));
+  try {
+    await stackFits([a, b], output, { method: 'mean', register: false, normalization: 'none' });
+    const { metadata, pixels } = await outputPixels(output);
+    assert.equal(metadata.bitpix, -32);
+    assert.equal(metadata.headers.BZERO, undefined, 'float output carries no integer scaling keywords');
+    assert.ok(pixels.every(value => Math.abs(value - 40001) < 1e-3), `mean of 40000 and 40002, got ${pixels[0]}`);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

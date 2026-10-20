@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Header } from "@/components/header";
 import { SearchFilters } from "@/components/search-filters";
 import { ImageGallery, isFitsImage } from "@/components/image-gallery";
@@ -17,6 +17,7 @@ import { useSearch, useLocation } from "wouter";
 import type { AstroImage, Equipment } from "@shared/schema";
 
 export default function Home() {
+  const queryClient = useQueryClient();
   const [selectedImage, setSelectedImage] = useState<AstroImage | null>(null);
   const searchString = useSearch();
   const [, setLocation] = useLocation();
@@ -79,12 +80,15 @@ export default function Home() {
   });
 
   // Listen for real-time plate solving updates
-  usePlateSolvingUpdates((update) => {
+  const onPlateSolvingUpdate = useCallback((update: { imageId?: number }) => {
     console.log('Received plate solving update:', update);
-    // Refresh data when plate solving status changes
-    refetchImages();
-    refetchStats();
-  });
+    // A solve changes the image, annotations and automatic catalog membership together.
+    queryClient.invalidateQueries({ queryKey: ["/api/images"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/gallery-catalogs"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+  }, [queryClient]);
+  usePlateSolvingUpdates(onPlateSolvingUpdate);
 
   const filteredImages = images.filter((image: AstroImage) => {
     if (filters.search && !image.title.toLowerCase().includes(filters.search.toLowerCase())) {

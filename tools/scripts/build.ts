@@ -23,11 +23,6 @@ await Promise.all([
     ...commonOptions,
     entryPoints: ['apps/server/src/workers/worker.ts'],
   }),
-  // Stacking runs in a worker thread (dist/stack-thread.js) so the server stays responsive.
-  esbuild.build({
-    ...commonOptions,
-    entryPoints: ['apps/server/src/workers/stack-thread.ts'],
-  }),
   esbuild.build({
     ...commonOptions,
     entryPoints: ['tools/scripts/migrate-db.js'],

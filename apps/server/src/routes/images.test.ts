@@ -8,6 +8,45 @@ delete process.env.DATABASE_URL;
 process.env.SQLITE_DB_PATH = ':memory:';
 const { default: routes } = await import('./images');
 const { storage } = await import('../services/storage');
+const { parseWcsHeaders } = await import('../services/wcs');
+const { setSkyCatalog } = await import('../services/sky-catalog');
+
+it('auto-annotations fills and persists missing annotations without re-solving or uploading images', async t => {
+  const previousOnline = process.env.ASTROVIABIN_ONLINE_CATALOGS;
+  process.env.ASTROVIABIN_ONLINE_CATALOGS = 'false';
+  setSkyCatalog({
+    stars: { epoch: 2000, count: 0, ra: new Float64Array(), dec: new Float64Array(), mag: new Float32Array(), pmra: new Float32Array(), pmdec: new Float32Array(), hd: new Int32Array(), hip: new Int32Array(), name: [], bayer: [], flam: [] },
+    tycho: null,
+    dso: [{ name: 'M 42', messier: 'M42', common: ['Orion Nebula'], type: 'HII', ra: 83.8221, dec: -5.3911, maj: 10, min: 8, pa: 0, mag: 4 }],
+    constellations: [],
+  });
+  t.after(() => {
+    if (previousOnline === undefined) delete process.env.ASTROVIABIN_ONLINE_CATALOGS;
+    else process.env.ASTROVIABIN_ONLINE_CATALOGS = previousOnline;
+    setSkyCatalog(null);
+  });
+
+  const wcs = parseWcsHeaders({ CTYPE1: 'RA---TAN', CTYPE2: 'DEC--TAN', CRPIX1: 50.5, CRPIX2: 40.5, CRVAL1: 83.8221, CRVAL2: -5.3911, CD1_1: -0.001, CD1_2: 0, CD2_1: 0, CD2_2: 0.001 }, 100, 80);
+  t.mock.method(storage, 'getAstroImages', async filters => {
+    assert.deepEqual(filters, { plateSolved: true });
+    return [{ id: 42, plateSolved: true, captureDate: null }] as never;
+  });
+  t.mock.method(storage, 'getLatestPlateSolvingJob', async id => {
+    assert.equal(id, 42);
+    return { id: 99, imageId: 42, status: 'success', result: { ra: 83.8221, dec: -5.3911, pixscale: 3.6, radius: 0.1, orientation: 0, wcs } } as never;
+  });
+  let persisted: Record<string, unknown> | undefined;
+  t.mock.method(storage, 'updatePlateSolvingJob', async (_jobId, updates) => {
+    persisted = updates.result as Record<string, unknown>;
+    return undefined;
+  });
+
+  const app = new Hono().route('/api/images', routes);
+  const response = await app.request('/api/images/auto-annotations', { method: 'POST' });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { scanned: 1, annotated: 1, skipped: 0, failed: 0, failures: [] });
+  assert.equal((persisted?.annotations as unknown[]).length, 1);
+});
 
 it('keeps ordinary and untagged images in Not Solved but hides non-Deep-Sky Solar System frames', async t => {
   t.mock.method(storage, 'getAstroImages', async () => [

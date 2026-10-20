@@ -167,7 +167,12 @@ export class AstrometryService {
       status: 'success',
       astrometrySubmissionId: job.astrometrySubmissionId?.startsWith('local-') ? job.astrometrySubmissionId : localJobId,
       astrometryJobId: localJobId,
-      result: { ...result.calibration, annotations: result.annotations, ...(result.wcs ? { wcs: result.wcs } : {}) } as any,
+      result: {
+        ...result.calibration,
+        annotations: result.annotations,
+        annotationsGeneratedAt: new Date().toISOString(),
+        ...(result.wcs ? { wcs: result.wcs } : {}),
+      } as any,
     });
 
     if (job.imageId === null) return;

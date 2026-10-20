@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AstroviaBin setup</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <header class="topbar">
+    <img src="logo.svg" alt="" class="logo">
+    <div>
+      <h1 class="wordmark">ASTROVIA<span>BIN</span></h1>
+      <p class="subtitle" id="subtitle">Setup</p>
+    </div>
+    <div class="status" id="status" hidden><span class="dot"></span><span id="status-text"></span></div>
+  </header>
+
+  <div class="layout">
+    <nav class="steps" id="steps" aria-label="Setup steps"></nav>
+    <main class="panel" id="panel" tabindex="-1"></main>
+  </div>
+
+  <footer class="footer">
+    <p class="footer-note" id="footer-note"></p>
+    <div class="actions">
+      <button type="button" class="button ghost" id="back">Back</button>
+      <button type="button" class="button ghost" id="check">Check settings</button>
+      <button type="button" class="button primary" id="next">Next</button>
+    </div>
+  </footer>
+
+  <script src="setup.js"></script>
+</body>
+</html>

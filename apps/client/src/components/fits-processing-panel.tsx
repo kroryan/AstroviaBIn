@@ -160,12 +160,13 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         {!fullscreen && <DeepZoomViewer
           imageUrl={debouncedPreviewUrl}
           height="100%"
+          zoomPosition="top-right"
           preserveViewport
           onLoad={handlePreviewLoad}
           onError={handlePreviewError}
         />}
         {!previewReady && !previewError && <div className="absolute inset-0 grid place-items-center text-sm text-muted-foreground pointer-events-none">Rendering preview…</div>}
-        {previewReady && previewLoading && <span className="absolute right-2 top-2 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
+        {previewReady && previewLoading && <span className="absolute left-1/2 top-2 -translate-x-1/2 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
         {previewError && <div className="absolute inset-0 grid place-items-center px-3 text-sm text-red-300 bg-black/80">{previewError}</div>}
         {previewReady && <button
           type="button"
@@ -179,7 +180,7 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         <p className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/70 pointer-events-none">Scroll or pinch to zoom · drag to pan</p>
       </div>
       {fullscreen && <div className="fixed inset-0 z-50 flex flex-col bg-black" role="dialog" aria-modal="true" aria-label={`Full screen preview of ${image.title}`}>
-        <div className="flex items-center justify-between gap-2 p-3">
+        <div className="relative flex items-center justify-between gap-2 p-3">
           <span className="truncate text-sm text-white/80">{image.title}</span>
           <button type="button" onClick={() => setFullscreen(false)} aria-label="Exit full screen" title="Exit full screen" className="rounded bg-white/10 p-2 text-white hover:bg-white/20">
             <Minimize2 className="h-5 w-5" />
@@ -189,11 +190,12 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
           <DeepZoomViewer
             imageUrl={debouncedPreviewUrl}
             height="100%"
+            zoomPosition="top-right"
             preserveViewport
             onLoad={handlePreviewLoad}
             onError={handlePreviewError}
           />
-          {previewLoading && <span className="absolute right-3 top-3 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
+          {previewLoading && <span className="absolute left-1/2 top-3 -translate-x-1/2 rounded bg-black/70 px-2 py-1 text-xs text-white pointer-events-none">Updating preview…</span>}
         </div>
       </div>}
       <details open className="rounded-md border border-border p-3">

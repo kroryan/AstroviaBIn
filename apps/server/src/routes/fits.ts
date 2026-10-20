@@ -19,7 +19,14 @@ import {
   type FitsProcessingSettings,
   normalizeUploadedFits,
 } from '../services/fits';
-import { runStackInThread, type StackMethod } from '../services/fits-stacking';
+import {
+  runStackInThread,
+  type StackInterpolation,
+  type StackMethod,
+  type StackNormalization,
+  type StackSettings,
+  type StackWeighting,
+} from '../services/fits-stacking';
 import { wcsFromStored } from '../services/wcs';
 import { tileInfo } from '../services/tiles';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
@@ -352,9 +359,40 @@ app.post('/stack', async (c) => {
       framePaths.push(filePath);
     }
 
-    const method: StackMethod = ['mean', 'median', 'sigma-clip'].includes(String(body.method)) ? body.method : 'sigma-clip';
-    const sigmaClipThreshold = typeof body.sigmaClipThreshold === 'number' && Number.isFinite(body.sigmaClipThreshold) ? body.sigmaClipThreshold : undefined;
-    const register = body.register !== false;
+    const method: StackMethod = ['mean', 'median', 'sum', 'sigma-clip'].includes(String(body.method)) ? body.method : 'sigma-clip';
+    const number = (name: string, minimum: number, maximum: number): number | undefined => {
+      const value = Number(body[name]);
+      return Number.isFinite(value) && value >= minimum && value <= maximum ? value : undefined;
+    };
+    const optionalNumber = (name: string, minimum: number, maximum: number): number | undefined => {
+      if (body[name] === '' || body[name] === null || body[name] === undefined) return undefined;
+      return number(name, minimum, maximum);
+    };
+    const choice = <T extends string>(value: unknown, choices: readonly T[], fallback: T): T =>
+      choices.includes(value as T) ? value as T : fallback;
+    const section = (value: unknown): string | undefined => {
+      const text = typeof value === 'string' ? value.trim() : '';
+      if (!text) return undefined;
+      if (!/^\[[0-9*,:-]+\]$/.test(text) || text.length > 80) throw new Error('Overscan and trim must use a FITS section such as [1:50,1:2048]');
+      return text;
+    };
+    const calibrationPath = async (value: unknown, label: string): Promise<string | undefined> => {
+      if (value === null || value === undefined || value === '' || value === 'none') return undefined;
+      const id = Number(value);
+      if (!Number.isInteger(id) || id <= 0) throw new Error(`Invalid ${label} FITS selection`);
+      const image = await storage.getAstroImage(id);
+      const filePath = resolveFitsFile(image?.originalPath || null);
+      if (!image || !filePath) throw new Error(`${label} FITS is unavailable`);
+      return filePath;
+    };
+    const interpolation = choice<StackInterpolation>(body.interpolation,
+      ['nearest-neighbor', 'bilinear', 'biquadratic', 'bicubic'], 'bilinear');
+    const normalization = choice<StackNormalization>(body.normalization, ['none', 'exposure', 'median'], 'exposure');
+    const weighting = choice<StackWeighting>(body.weighting, ['none', 'exposure', 'inverse-variance'], 'none');
+    const cosmicCleanType = choice<NonNullable<StackSettings['cosmicCleanType']>>(body.cosmicCleanType,
+      ['median', 'medmask', 'meanmask', 'idw'], 'meanmask');
+    const exposureKeyword = typeof body.exposureKeyword === 'string' && /^[A-Z][A-Z0-9_-]{0,7}$/i.test(body.exposureKeyword.trim())
+      ? body.exposureKeyword.trim().toUpperCase() : 'EXPTIME';
     const outputName = outputFilename(body.outputName, framePaths[0]);
     const outputPath = path.join(fitsDerivedDirectory(), outputName);
     try {
@@ -368,7 +406,68 @@ app.post('/stack', async (c) => {
       return wcsFromStored((job?.result as Record<string, unknown> | undefined)?.wcs) ?? null;
     }));
     const frameNames = images.map((image, index) => image?.title ? `${image.title} (#${imageIds[index]})` : `#${imageIds[index]}`);
-    const result = await runStackInThread(framePaths, outputPath, { method, sigmaClipThreshold, register, frameWcs, frameNames });
+    const settings: StackSettings = {
+      method,
+      register: body.register !== false,
+      interpolation,
+      normalization,
+      weighting,
+      sigmaClipThreshold: number('sigmaClipThreshold', 0.5, 20),
+      sigmaClipLow: number('sigmaClipLow', 0.5, 20),
+      sigmaClipHigh: number('sigmaClipHigh', 0.5, 20),
+      memoryLimitMb: number('memoryLimitMb', 64, 8192),
+      clipExtrema: body.clipExtrema === true,
+      clipLowCount: number('clipLowCount', 0, 20),
+      clipHighCount: number('clipHighCount', 0, 20),
+      minimumClip: optionalNumber('minimumClip', -1e30, 1e30),
+      maximumClip: optionalNumber('maximumClip', -1e30, 1e30),
+      overscan: section(body.overscan),
+      overscanMedian: body.overscanMedian !== false,
+      overscanPolynomialDegree: optionalNumber('overscanPolynomialDegree', 0, 10),
+      trim: section(body.trim),
+      gain: optionalNumber('gain', 0.000001, 1e6),
+      readNoise: optionalNumber('readNoise', 0, 1e6),
+      flatMinimum: optionalNumber('flatMinimum', 0, 1e30),
+      darkScale: body.darkScale !== false,
+      calibrationMastersGainCorrected: body.calibrationMastersGainCorrected === true,
+      exposureKeyword,
+      cosmicMethod: choice(body.cosmicMethod, ['none', 'lacosmic', 'median'] as const, 'none'),
+      cosmicSigma: number('cosmicSigma', 1, 100),
+      cosmicFraction: number('cosmicFraction', 0.01, 1),
+      cosmicObjectLimit: number('cosmicObjectLimit', 0.1, 100),
+      cosmicIterations: number('cosmicIterations', 1, 20),
+      cosmicCleanType,
+      cosmicSeparateMedian: body.cosmicSeparateMedian !== false,
+      cosmicFineStructureMode: choice(body.cosmicFineStructureMode, ['median', 'convolve'] as const, 'median'),
+      cosmicPsfModel: choice(body.cosmicPsfModel, ['gauss', 'gaussx', 'gaussy', 'moffat'] as const, 'gauss'),
+      cosmicPsfFwhm: number('cosmicPsfFwhm', 0.1, 100),
+      cosmicPsfSize: number('cosmicPsfSize', 3, 101),
+      cosmicPsfBeta: number('cosmicPsfBeta', 0.1, 20),
+      saturationLevel: optionalNumber('saturationLevel', 1, 1e30),
+      medianCosmicThreshold: number('medianCosmicThreshold', 0.1, 100),
+      medianCosmicBox: number('medianCosmicBox', 3, 101),
+      medianCosmicGrowBox: number('medianCosmicGrowBox', 0, 101),
+      medianCosmicReplaceBox: number('medianCosmicReplaceBox', 0, 101),
+      ccdMaskFindBadColumns: body.ccdMaskFindBadColumns === true,
+      ccdMaskByBlocks: body.ccdMaskByBlocks === true,
+      ccdMaskLowSigma: number('ccdMaskLowSigma', 1, 100),
+      ccdMaskHighSigma: number('ccdMaskHighSigma', 1, 100),
+      ccdMaskColumnMedian: number('ccdMaskColumnMedian', 1, 101),
+      ccdMaskLineMedian: number('ccdMaskLineMedian', 1, 101),
+      ccdMaskColumnSigmaBox: number('ccdMaskColumnSigmaBox', 10, 501),
+      ccdMaskLineSigmaBox: number('ccdMaskLineSigmaBox', 10, 501),
+      ccdMaskGoodPixelGap: number('ccdMaskGoodPixelGap', 0, 100),
+      calibration: {
+        biasPath: await calibrationPath(body.masterBiasId, 'master bias'),
+        darkPath: await calibrationPath(body.masterDarkId, 'master dark'),
+        flatPath: await calibrationPath(body.masterFlatId, 'master flat'),
+        badPixelMaskPath: await calibrationPath(body.badPixelMaskId, 'bad-pixel mask'),
+        ccdMaskRatioPath: await calibrationPath(body.ccdMaskRatioId, 'flat-ratio mask source'),
+      },
+      frameWcs,
+      frameNames,
+    };
+    const result = await runStackInThread(framePaths, outputPath, settings);
     let stacked = await importFits(outputPath, fitsDerivedDirectory(), 'derived');
     const referenceImage = images[0];
     if (stacked && referenceImage) {
@@ -381,7 +480,7 @@ app.post('/stack', async (c) => {
       }
     }
     return c.json({ image: stacked, output: outputName, frameCount: result.frameCount, offsets: result.offsets,
-      frames: result.frames, warnings: result.warnings });
+      frames: result.frames, warnings: result.warnings, engine: result.engine });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to stack FITS frames');
   }
