@@ -24,6 +24,30 @@ install -D -m 644 "$INSTALL_DIR/resources/astroviabin.service" /usr/lib/systemd/
 rm -rf "$INSTALL_DIR/python"
 ln -s "$INSTALL_DIR/resources/python" "$INSTALL_DIR/python"
 
+# pPXF cannot be redistributed inside the .deb. Fetch the publisher's pinned wheel directly
+# during installation; it is kept under this application's directory and removed with it.
+# Three attempts; if all fail, the package stays unconfigured (never "installed" with spectroscopy broken)
+# and "sudo dpkg --configure -a" retries once the network is back.
+ppxf_ok=0
+for attempt in 1 2 3; do
+  if "$INSTALL_DIR/python/bin/python3" \
+      "$INSTALL_DIR/resources/server/tools/scripts/install_ppxf.py" \
+      "$INSTALL_DIR/resources/optional-ppxf"; then
+    ppxf_ok=1; break
+  fi
+  echo "AstroviaBin: pPXF download attempt $attempt failed" >&2
+  sleep $((attempt * 5))
+done
+if [ "$ppxf_ok" != 1 ]; then
+  cat >&2 <<'MSG'
+AstroviaBin: could not download pPXF/capfit from PyPI (needed for spectroscopy; their license forbids
+bundling them, so the installer fetches the official, checksum-verified packages). Check the Internet
+connection and run:   sudo dpkg --configure -a
+Your database, photos and FITS files are untouched.
+MSG
+  exit 1
+fi
+
 # Upgrades: services that are running restart on the new version (try-restart leaves stopped ones alone;
 # every start makes a verified database backup first).
 getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 { print $1 ":" $3 }' | while IFS=: read -r name uid; do

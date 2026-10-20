@@ -20,7 +20,7 @@ const cache = path.join(desktop, '.cache');
 const stage = path.join(desktop, '.stage', platform);
 const NODE_VERSION = process.version.replace(/^v/, ''); // the ABI of the native modules installed below
 const PYTHON_VERSION = '3.13.12';
-const PYTHON_PACKAGES = ['ccdproc==2.5.1', 'photutils==3.1.1', 'astroscrappy==1.3.0'];
+const PYTHON_PACKAGES = ['ccdproc==2.5.1', 'photutils==3.1.1', 'astroscrappy==1.3.0', 'specutils==2.4.0', 'specreduce==1.9.0', 'astroquery==0.4.11'];
 // The numerical stack is pinned too, so the Linux and Windows packages run the same tested code.
 const ANALYSIS_PACKAGES = ['numpy==2.5.4', 'scipy==1.18.1', 'astropy==8.0.2', 'matplotlib==3.11.2', ...PYTHON_PACKAGES];
 const LINUX_PYTHON = {
@@ -48,6 +48,8 @@ if (!process.argv.includes('--no-build')) run('npm', ['run', 'build'], { cwd: re
 const server = path.join(stage, 'server');
 cpSync(path.join(repo, 'dist'), path.join(server, 'dist'), { recursive: true });
 cpSync(path.join(repo, 'tools', 'migrations'), path.join(server, 'tools', 'migrations'), { recursive: true });
+// Standard-star library for spectral classification (spectroscopy.py).
+cpSync(path.join(repo, 'tools', 'data'), path.join(server, 'tools', 'data'), { recursive: true });
 mkdirSync(path.join(server, 'tools', 'scripts'), { recursive: true });
 for (const file of readdirSync(path.join(repo, 'tools', 'scripts'))) {
   if (file.endsWith('.py') && !file.startsWith('test_')) cpSync(path.join(repo, 'tools', 'scripts', file), path.join(server, 'tools', 'scripts', file));
@@ -145,7 +147,7 @@ if (platform === 'linux') {
   // Install inside a matching manylinux userland so binary wheels are chosen exactly as on users' systems.
   run('docker', ['run', '--rm', ...asUser, '-v', `${python}:/opt/python`, 'ubuntu:25.10', '/opt/python/bin/python3', '-m', 'pip', 'install',
     '--no-cache-dir', '--only-binary=:all:', '--no-warn-script-location', ...ANALYSIS_PACKAGES]);
-  run(path.join(python, 'bin', 'python3'), ['-c', 'import numpy, scipy, astropy, matplotlib, ccdproc, photutils, astroscrappy; print("bundled python ok")']);
+  run(path.join(python, 'bin', 'python3'), ['-c', 'import numpy, scipy, astropy, matplotlib, ccdproc, photutils, astroscrappy, specutils, specreduce, astroquery; print("bundled python ok")']);
   // pip and its caches are not needed at runtime.
   for (const entry of readdirSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages'))) {
     if (/^pip(-|$)/.test(entry)) rmSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages', entry), { recursive: true, force: true });

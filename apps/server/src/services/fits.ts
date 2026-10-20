@@ -914,15 +914,80 @@ export function resolveFitsFile(originalPath: string | null): string | null {
  */
 const FITS_RENDER_VERSION = 3;
 
+/** A 1-D spectrum stored as a 1 x N image (uploads of SDSS/tabular spectra, see spectroscopy.py to-image). */
+export function isSpectrumFits(metadata: FitsMetadata): boolean {
+  return metadata.headers.ASTVSPEC === true || (metadata.height === 1 && metadata.width > 16);
+}
+
+function escapeXml(text: string): string {
+  return text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!);
+}
+
+/** The gallery picture of a 1-D spectrum: flux against wavelength, drawn as SVG and rendered to PNG. */
+export async function renderSpectrumPreview(filePath: string, metadata: FitsMetadata, maximumDimension = 2048): Promise<Buffer> {
+  const width = Math.max(400, Math.min(1600, maximumDimension));
+  const height = Math.round(width * 0.56);
+  const flux = readPixels(await readFile(filePath), metadata).slice(0, metadata.width);
+  const count = flux.length;
+  const waveMin = Number(metadata.headers.WAVEMIN);
+  const waveMax = Number(metadata.headers.WAVEMAX);
+  const hasWave = Number.isFinite(waveMin) && Number.isFinite(waveMax) && waveMax > waveMin;
+  const logGrid = metadata.headers.SPECGRID === 'log';
+  const waveAt = (index: number) => !hasWave ? index
+    : logGrid ? waveMin * Math.pow(waveMax / waveMin, index / Math.max(count - 1, 1)) : waveMin + (waveMax - waveMin) * index / Math.max(count - 1, 1);
+  // One median per screen column keeps the shape without aliasing the noise.
+  const left = 70, right = 20, top = 48, bottom = 56;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const columns: Array<{ x: number; value: number }> = [];
+  for (let column = 0; column < plotWidth; column++) {
+    const start = Math.floor(column * count / plotWidth), end = Math.max(start + 1, Math.floor((column + 1) * count / plotWidth));
+    const values = Array.from(flux.subarray(start, end)).filter(Number.isFinite).sort((a, b) => a - b);
+    if (values.length) columns.push({ x: column, value: values[values.length >> 1] });
+  }
+  const sorted = columns.map(point => point.value).sort((a, b) => a - b);
+  const low = sorted[Math.floor(sorted.length * 0.005)] ?? 0;
+  const high = sorted[Math.floor(sorted.length * 0.995)] ?? 1;
+  const span = high - low || 1;
+  const yMin = low - 0.08 * span, yMax = high + 0.12 * span;
+  const yAt = (value: number) => top + plotHeight * (1 - (value - yMin) / (yMax - yMin));
+  const path = columns.map((point, index) => `${index ? 'L' : 'M'}${(left + point.x).toFixed(1)},${yAt(Math.min(Math.max(point.value, yMin), yMax)).toFixed(1)}`).join('');
+  const ticks: string[] = [];
+  if (hasWave) {
+    const step = (waveMax - waveMin) / 10 > 500 ? 1000 : 500;
+    for (let wave = Math.ceil(waveMin / step) * step; wave <= waveMax; wave += step) {
+      const fraction = logGrid ? Math.log(wave / waveMin) / Math.log(waveMax / waveMin) : (wave - waveMin) / (waveMax - waveMin);
+      const x = left + fraction * plotWidth;
+      ticks.push(`<line x1="${x.toFixed(1)}" y1="${top}" x2="${x.toFixed(1)}" y2="${top + plotHeight}" stroke="#1e293b" stroke-width="1"/>` +
+        `<text x="${x.toFixed(1)}" y="${top + plotHeight + 20}" fill="#94a3b8" font-size="15" text-anchor="middle">${wave / 10}</text>`);
+    }
+  }
+  const title = escapeXml(String(metadata.headers.OBJECT || 'Spectrum'));
+  const subtitle = escapeXml([metadata.headers.SPCLASS, metadata.headers.SPSUBCL].filter(Boolean).join(' ') || `${count} points`);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+<rect width="100%" height="100%" fill="#05030c"/>
+<rect x="${left}" y="${top}" width="${plotWidth}" height="${plotHeight}" fill="#0b0a18" stroke="#334155"/>
+${ticks.join('\n')}
+<path d="${path}" fill="none" stroke="#22d3ee" stroke-width="1.6" stroke-linejoin="round"/>
+<text x="${left}" y="30" fill="#e2e8f0" font-size="20" font-family="sans-serif" font-weight="bold">${title}</text>
+<text x="${width - right}" y="30" fill="#a78bfa" font-size="16" font-family="sans-serif" text-anchor="end">${subtitle}</text>
+<text x="${left + plotWidth / 2}" y="${height - 12}" fill="#94a3b8" font-size="15" font-family="sans-serif" text-anchor="middle">${hasWave ? 'Wavelength (nm, air)' : 'Sample'}</text>
+<text x="20" y="${top + plotHeight / 2}" fill="#94a3b8" font-size="15" font-family="sans-serif" text-anchor="middle" transform="rotate(-90 20 ${top + plotHeight / 2})">Flux</text>
+</svg>`;
+  return sharp(Buffer.from(svg)).png().toBuffer();
+}
+
 export async function cachedFitsPreview(filePath: string, settings: FitsProcessingSettings = {}, maximumDimension = 2048): Promise<Buffer> {
   const source = await stat(filePath);
   const key = createHash('sha256').update(JSON.stringify({ render: FITS_RENDER_VERSION, filePath, size: source.size, mtimeMs: source.mtimeMs, settings, maximumDimension })).digest('hex');
   const cachePath = path.join(fitsCacheDirectory(), `${key}.png`);
   try { return await readFile(cachePath); } catch { /* generate it below */ }
-  const preview = await renderFitsPreview(filePath, settings, maximumDimension);
+  const metadata = await readFitsMetadata(filePath);
+  const buffer = isSpectrumFits(metadata)
+    ? await renderSpectrumPreview(filePath, metadata, maximumDimension)
+    : (await renderFitsPreview(filePath, settings, maximumDimension)).buffer;
   await mkdir(path.dirname(cachePath), { recursive: true });
-  await writeFile(cachePath, preview.buffer);
-  return preview.buffer;
+  await writeFile(cachePath, buffer);
+  return buffer;
 }
 
 async function readExactly(handle: Awaited<ReturnType<typeof open>>, buffer: Buffer, length: number, position: number): Promise<void> {

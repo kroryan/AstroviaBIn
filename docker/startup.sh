@@ -3,6 +3,12 @@
 # AstroviaBin Container Startup Script
 set -e
 
+# The pPXF publisher forbids redistribution. The container fetches its pinned,
+# checksum-verified wheel on first start into its own writable layer; removing
+# the container removes this application-owned copy.
+export ASTROVIABIN_PPXF_DIR=/app/third-party/ppxf
+/opt/astroviabin-python/bin/python /app/tools/scripts/install_ppxf.py "$ASTROVIABIN_PPXF_DIR"
+
 mask_connection_string() {
     echo "$1" | sed 's|://[^:]*:[^@]*@|://****:****@|'
 }

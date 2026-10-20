@@ -38,6 +38,7 @@ function resources() {
     return {
       server: repo, node: 'node', sky: path.join(repo, 'data', 'sky'),
       python: process.env.ASTROVIABIN_ANALYSIS_PYTHON || 'python3', hotpants: '', icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      ppxf: process.env.ASTROVIABIN_PPXF_DIR || path.join(repo, '.venv-science', 'lib', 'python3.13', 'site-packages'),
       preflight: path.join(__dirname, 'preflight.cjs'),
     };
   }
@@ -50,6 +51,7 @@ function resources() {
     node: path.join(base, 'runtime', isWindows ? 'node.exe' : 'node'),
     sky: path.join(base, 'sky'),
     python: pythonCandidates.find(candidate => fs.existsSync(candidate)) || pythonCandidates[0],
+    ppxf: path.join(base, 'optional-ppxf'),
     hotpants: path.join(base, 'bin'),
     icon: path.join(base, 'icon.png'),
     preflight: path.join(base, 'server', 'preflight.cjs'),
@@ -57,6 +59,25 @@ function resources() {
 }
 
 const RES = resources();
+
+function ppxfMarker() {
+  return ['ppxf-9.5.2.dist-info', 'capfit-2.7.1.dist-info']
+    .every(name => fs.existsSync(path.join(RES.ppxf, name, 'METADATA')));
+}
+
+function ensurePpxf() {
+  if (!app.isPackaged || ppxfMarker()) return Promise.resolve();
+  const installer = path.join(RES.server, 'tools', 'scripts', 'install_ppxf.py');
+  setStatus('starting', 'Installing the astronomy runtime from PyPI…');
+  return new Promise((resolve, reject) => {
+    execFile(RES.python, [installer, RES.ppxf], { timeout: 180_000, windowsHide: true }, (error, stdout, stderr) => {
+      if (stdout) log(stdout);
+      if (stderr) log(stderr);
+      if (error) reject(new Error((stderr || error.message).trim()));
+      else resolve();
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------------------------
 // State
@@ -167,6 +188,13 @@ async function startServer() {
   if (state.child || state.status === 'starting') return;
   state.stopRequested = false;
   setStatus('starting', 'Starting the server…');
+  try {
+    await ensurePpxf();
+  } catch (error) {
+    setStatus('error', `The scientific runtime could not be downloaded. Check internet access and choose Start server to retry: ${error.message}`);
+    notify('AstroviaBin needs its scientific runtime', state.message);
+    return;
+  }
   try {
     ensureFolders(state.values);
   } catch (error) {
@@ -584,7 +612,7 @@ ipcMain.handle('check', async (_event, values) => {
     }
   }
   if (values.pythonPath) {
-    const python = await runCheck(values.pythonPath, ['-c', 'import numpy, scipy, astropy, ccdproc, photutils, astroscrappy, matplotlib; print("numpy", numpy.__version__, "astropy", astropy.__version__, "ccdproc", ccdproc.__version__)']);
+    const python = await runCheck(values.pythonPath, ['-c', 'import numpy, scipy, astropy, ccdproc, photutils, astroscrappy, specutils, specreduce, astroquery, matplotlib; print("numpy", numpy.__version__, "astropy", astropy.__version__, "ccdproc", ccdproc.__version__)']);
     results.pythonPath = python.ok ? { ok: true, message: `Ready (${python.output}).` } : { ok: false, message: `Missing analysis packages: ${python.output.split('\n').pop()}` };
   }
   if (values.hotpantsDir) {
@@ -626,6 +654,9 @@ ipcMain.handle('open-external', (_event, target) => shell.openExternal(target));
 
 app.whenReady().then(() => {
   if (isWindows) app.setAppUserModelId('io.github.kroryan.astroviabin');
+  // MSIX's installation directory is read-only. Its first launch completes the same
+  // direct PyPI installation in the app's private runtime folder.
+  if (isWindows && process.windowsStore) RES.ppxf = path.join(app.getPath('userData'), 'runtime', 'ppxf');
   loadConfig();
   createTray();
   if (!state.configured) {

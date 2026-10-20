@@ -96,6 +96,17 @@ cp .env.example .env.local
 - **Library:** Zod — always validate at API boundaries
 - **Location:** `packages/shared/src/schemas/`
 
+## Scientific Code
+
+AstroviaBin's science must be serious and defensible. **Every scientific feature is built on established, published libraries; our own code is only the glue** (I/O, orchestration, UI, reports).
+
+- Use the reference tool for each job: Astrometry.net (plate solving), ccdproc (CCD calibration, stacking), photutils (sources, background, PSF), astroscrappy (cosmic rays), HOTPANTS (image subtraction), specutils (spectral analysis: continuum, lines, equivalent widths), specreduce (2-D spectra: tracing, background, extraction, wavelength calibration), pPXF (template fitting, spectral type, radial velocity), astroquery (SIMBAD, Gaia, VizieR, SDSS), Astropy (FITS, WCS, units, coordinates).
+- Do not hand-write an algorithm that one of these provides. If no library covers a step, say so explicitly, keep the code minimal and document the method and its reference.
+- Read the library's documentation and use it as intended (e.g. pPXF needs templates with resolution at least as good as the data and the real wavelength grid for `log_rebin`).
+- Validate on several real datasets with a known answer before claiming a feature works (e.g. SDSS spectra of known class and velocity, published Star Analyser frames, real library images as negative tests), and keep those checks as automated tests where the data can be shipped or generated.
+- Report uncertainties and limits; never present a preliminary result (uncalibrated wavelengths, low S/N, objects outside a template library) as confirmed.
+- Credit every library and dataset in Admin → About.
+
 ## Code Conventions
 
 - **Modules:** ES modules (`import`/`export`) throughout — no CommonJS

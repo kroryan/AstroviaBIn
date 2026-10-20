@@ -7,12 +7,14 @@ decompressed and written as the primary HDU; observation keywords from the prima
 image extension are merged (the extension wins), structural/compression keywords are dropped.
 
 Usage: fits_normalize.py <input> <output>
-Prints a JSON summary; exits 2 when the file contains no 2D/3D image.
+A 1-D spectrum (no image) becomes a 1 x N image plus a SPECTRUM table (see spectroscopy.to_image).
+Prints a JSON summary; exits 2 when the file contains neither an image nor a 1-D spectrum.
 """
 
 import json
 import sys
 import warnings
+from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
@@ -35,8 +37,17 @@ def main(source, destination):
         index, image = next(((i, hdu) for i, hdu in enumerate(hdus)
                              if hdu.is_image and hdu.data is not None and hdu.data.ndim in (2, 3)), (None, None))
         if image is None:
-            print(json.dumps({'error': 'The FITS file contains no 2D or 3D image'}))
-            return 2
+            # No image: a 1-D spectrum (SDSS spec tables, tabular or 1-D image spectra) is written as a
+            # 1 x N image for the gallery with the full spectrum in a SPECTRUM table (spectroscopy.py).
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parent))
+                import spectroscopy
+                summary = spectroscopy.to_image(source, destination)
+                print(json.dumps(summary))
+                return 0
+            except Exception as error:  # noqa: BLE001 - reported to the uploader
+                print(json.dumps({'error': f'The FITS file contains no 2D or 3D image and no readable 1-D spectrum ({error})'}))
+                return 2
         header = fits.Header()
         for source_header in ([hdus[0].header] if index else []) + [image.header]:
             for card in source_header.cards:

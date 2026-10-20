@@ -291,6 +291,7 @@ function serverEnvironment(values, resources) {
     ASTROVIABIN_CACHE_MAX_BYTES: String(Math.round(Number(values.cacheMaxGB) * 1024 ** 3)),
     ASTROVIABIN_SKY_DATA_DIR: resources.sky,
   };
+  if (resources.ppxf) env.ASTROVIABIN_PPXF_DIR = resources.ppxf;
   for (const group of schema(resources)) {
     for (const setting of group.settings) {
       if (setting.env && values[setting.id] !== '' && values[setting.id] !== undefined) env[setting.env] = String(values[setting.id]);

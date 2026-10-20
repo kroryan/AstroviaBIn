@@ -15,6 +15,7 @@ import {
   renderFitsTile,
   readFitsMetadata,
   resolveFitsFile,
+  isSpectrumFits,
   type FitsSource,
   type FitsProcessingSettings,
   normalizeUploadedFits,
@@ -35,6 +36,7 @@ import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
 import { defaultImageTags } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
+import { detectSpectroscopy, spectroscopyHeaderHint, type SpectroscopyDetection } from '../services/spectroscopy';
 
 const app = new Hono();
 const FITS_EXTENSIONS = new Set(['.fit', '.fits', '.fts']);
@@ -98,7 +100,7 @@ function outputFilename(value: unknown, sourcePath: string): string {
   return `${base}${extension}`;
 }
 
-async function importFits(filePath: string, root: string, source: FitsSource) {
+async function importFits(filePath: string, root: string, source: FitsSource, detection: SpectroscopyDetection | null = null) {
   const relativePath = path.relative(root, filePath);
   const originalPath = fitsPathFor(relativePath, source);
   const metadata = await readFitsMetadata(filePath);
@@ -108,9 +110,19 @@ async function importFits(filePath: string, root: string, source: FitsSource) {
   const focalLength = numericHeader(metadata.headers, 'FOCALLEN');
   const apertureDiameter = numericHeader(metadata.headers, 'APTDIA');
   const derived = source === 'derived';
-  // Deep Sky (plate-solvable) unless OBJECT or the file name names a planet, the Sun or the Moon.
-  const kind = defaultImageTags(textHeader(metadata.headers, 'OBJECT'), path.basename(filePath, path.extname(filePath)));
+  const spectrum = isSpectrumFits(metadata);
+  // A slitless spectroscopic frame (Star Analyser, grism): from the upload's image test, or from the header.
+  const headerHint = spectrum ? null : spectroscopyHeaderHint(metadata.headers);
+  const slitless = !spectrum && (detection?.kind === 'slitless' || Boolean(headerHint));
+  // Deep Sky (plate-solvable) unless OBJECT or the file name names a planet, the Sun or the Moon. A 1-D
+  // spectrum has no image to plate-solve; a slitless frame does (its zero orders are stars), and needs it
+  // for the stars' coordinates.
+  const kind = spectrum ? ['Spectrum', '1-D spectrum']
+    : [...defaultImageTags(textHeader(metadata.headers, 'OBJECT'), path.basename(filePath, path.extname(filePath))), ...(slitless ? ['Spectroscopy', 'Slitless spectrum'] : [])];
   const tags = [...(derived ? ['FITS', 'FITS derived'] : source === 'upload' ? ['FITS', 'FITS uploaded'] : ['FITS']), ...kind];
+  const slitlessNote = slitless
+    ? ` · slitless spectrum${detection?.angleDeg !== undefined ? ` (first order at ${Math.round(detection.angleDeg)}°)` : headerHint ? ` (${headerHint.toLowerCase()})` : ''}`
+    : '';
   const values = {
     title,
     filename: path.basename(filePath),
@@ -126,7 +138,9 @@ async function importFits(filePath: string, root: string, source: FitsSource) {
     filters: textHeader(metadata.headers, 'FILTER') || null,
     targetName: textHeader(metadata.headers, 'OBJECT') || null,
     tags,
-    description: `FITS ${metadata.width}×${metadata.height} · ${metadata.channels === 3 ? 'RGB' : 'mono'} · ${metadata.bitpix}-bit${derived ? ' · AstroviaBin processed derivative' : ''}`,
+    description: spectrum
+      ? `1-D spectrum · ${metadata.width} points${Number(metadata.headers.WAVEMIN) ? ` · ${Math.round(Number(metadata.headers.WAVEMIN) / 10)}–${Math.round(Number(metadata.headers.WAVEMAX) / 10)} nm` : ''}${metadata.headers.SPCLASS ? ` · catalogue class ${textHeader(metadata.headers, 'SPCLASS')} ${textHeader(metadata.headers, 'SPSUBCL') || ''}`.trimEnd() : ''}`
+      : `FITS ${metadata.width}×${metadata.height} · ${metadata.channels === 3 ? 'RGB' : 'mono'} · ${metadata.bitpix}-bit${derived ? ' · AstroviaBin processed derivative' : ''}${slitlessNote}`,
   };
   if (existing) return storage.updateAstroImage(existing.id, values);
   const image = await storage.createAstroImage(values);
@@ -202,7 +216,10 @@ app.post('/upload', async (c) => {
     await writeUploadBody(c.req.raw.body, outputPath);
     // Extension or tile-compressed FITS (Slooh, fpack) become a standard FITS; the original is kept.
     const normalized = await normalizeUploadedFits(outputPath);
-    const image = await importFits(outputPath, fitsUploadDirectory(), 'upload');
+    // Spectroscopy is recognised on upload: 1-D spectra (by their structure) and slitless frames (by
+    // their header or the one-sided first orders of their stars) get their own tags.
+    const detection = await detectSpectroscopy(outputPath);
+    const image = await importFits(outputPath, fitsUploadDirectory(), 'upload', detection);
     return c.json({ image, output: outputName, normalized }, 201);
   } catch (error) {
     if (outputPath) {
@@ -303,6 +320,8 @@ app.get('/:imageId/tile-info', async (c) => {
     const filePath = resolveFitsFile(image?.originalPath || null);
     if (!image || !filePath) return c.json({ message: 'FITS image not found' }, 404);
     const metadata = await readFitsMetadata(filePath);
+    // A 1-D spectrum is shown as its plot (the preview), not as zoom tiles.
+    if (isSpectrumFits(metadata)) return c.json({ message: 'Spectra have no zoom tiles' }, 404);
     c.header('cache-control', 'private, no-store');
     return c.json(tileInfo(metadata.width, metadata.height));
   } catch (error) {

@@ -14,6 +14,17 @@
   !insertmacro AstroviaBinStopProcesses
 !macroend
 
+!macro customInstall
+  ; The publisher's non-redistributable pPXF wheel is fetched by the end user's installer,
+  ; checksum-verified and kept inside AstroviaBin's install folder.
+  astroviabin_ppxf_retry:
+  ExecWait '"$INSTDIR\resources\python\python.exe" "$INSTDIR\resources\server\tools\scripts\install_ppxf.py" "$INSTDIR\resources\optional-ppxf"' $0
+  IntCmp $0 0 astroviabin_ppxf_done
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Could not download pPXF and capfit from PyPI. They are needed for spectroscopy and their license does not allow AstroviaBin to bundle them, so the installer downloads the official, checksum-verified packages.$\r$\n$\r$\nCheck your internet connection and press Retry. Cancel stops the installation (your database, photos and FITS are untouched)." /SD IDCANCEL IDRETRY astroviabin_ppxf_retry
+    Abort
+  astroviabin_ppxf_done:
+!macroend
+
 !macro customUnInstall
   !insertmacro AstroviaBinStopProcesses
 

@@ -58,6 +58,7 @@ AstroviaBin is a fork of [Sidereal](https://github.com/sidereal-io/sidereal) (MI
 - **Exact annotations**: Every OpenNGC object in the field is projected through the stored WCS at native resolution, so overlays line up with the real objects at any zoom
 - **Hard fields**: A noise-robust star extractor, automatic hints (previous solution, FITS pointing, M/NGC/IC names in the title) and an optional manual RA/Dec hint rescue sparse or noisy frames; add narrow-field index files with `download-astrometry-indexes`
 - **FITS difference analysis**: HOTPANTS subtraction followed by Photutils point-source checks, saved evidence, and optional second-exposure verification
+- **Stellar spectroscopy**: slitless (Star Analyser) frames, 2-D strips and 1-D spectra analysed with CCDProc, Photutils, Specreduce, Specutils and pPXF (Pickles templates), with an optional SIMBAD/Gaia/SDSS check and a PDF report marking every star
 
 ### **Astrophotography Equipment Tracking**
 - **Telescope Catalog**: Manage your telescopes, mounts, and accessories with specifications
@@ -226,6 +227,8 @@ The FITS panel offers linear, asinh, logarithmic, and gamma stretches plus backg
 Tags are editable from every image sheet: create your own, remove them, or use the `Deep Sky`, `Solar System`, Sun, Moon, and planet presets. `Solar System` and each planet tag exclude an image from manual, bulk, and automatic plate solving, because Astrometry.net solves stellar fields rather than planetary images.
 
 Open a FITS and expand **HOTPANTS** above **FITS processing** to save a difference analysis. The pipeline uses the unmodified HOTPANTS binary and Photutils point-source detection. A historical DSS survey is useful for exploration but is often a different band, resolution, and epoch; its residuals are **not** supernova confirmations. A second, locally stored FITS from a different exposure in the same filter can provide repeat-detection evidence. You can delete any finished report and all of its generated files without deleting the original FITS. See [FITS difference analysis](docs/hotpants.md) for validation limits, privacy, advanced options, and licenses.
+
+Expand **Spectroscopy** below **FITS processing** to analyse a slitless frame (Star Analyser), a 2-D spectrum strip or a 1-D spectrum. Slitless wavelengths need your instrument's dispersion (Å/px or nm/px, or grating lines/mm with distance and pixel size); without it the spectra stay in pixels and no type is given. Spectral types are pPXF template matches against the Pickles library (about ±2 subclasses), not definitive classifications. Press **Check known spectroscopy** *before* the analysis to compare each star with SIMBAD, Gaia DR3 and SDSS (only coordinates are sent); otherwise no catalogue is queried.
 
 With Docker Compose, configure host folders in a Compose `.env` file or your shell before starting:
 
@@ -460,7 +463,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-Third-party components keep their own licenses. In particular, the Docker image builds and ships the unmodified [HOTPANTS](vendor/hotpants) programs, which are distributed under the GNU GPL v2 (`vendor/hotpants/COPYING`); their complete source is included in this repository and in the image at `/usr/share/doc/hotpants/source`. Astrometry.net and its index files are installed from Debian under their respective licenses. Scientific FITS reduction and stacking call the unmodified [Astropy](https://www.astropy.org/) and [CCDProc](https://github.com/astropy/ccdproc) Python packages under their BSD 3-Clause licenses; pinned top-level runtime versions are documented in `requirements-science.txt`.
+Third-party components keep their own licenses. In particular, the Docker image builds and ships the unmodified [HOTPANTS](vendor/hotpants) programs, which are distributed under the GNU GPL v2 (`vendor/hotpants/COPYING`); their complete source is included in this repository and in the image at `/usr/share/doc/hotpants/source`. Astrometry.net and its index files are installed from Debian under their respective licenses. Scientific FITS reduction and stacking call the unmodified [Astropy](https://www.astropy.org/) and [CCDProc](https://github.com/astropy/ccdproc) Python packages under their BSD 3-Clause licenses; pinned top-level runtime versions are documented in `requirements-science.txt`. Spectroscopy uses the BSD-licensed Specutils, Specreduce and Astroquery packages. [pPXF and capfit](https://pypi.org/project/ppxf/) by Michele Cappellari are free for non-commercial use and may not be redistributed, so they are **not** in this repository, the Docker image or the installers: the `.deb`, the Windows installer, the MSIX first start and the Docker entrypoint download the official, version-pinned, SHA-256-verified wheels from PyPI (`tools/scripts/install_ppxf.py`; Internet access is needed during installation) into the application's own folder, which uninstalling removes.
 
 ## Acknowledgments
 

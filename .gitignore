@@ -104,6 +104,10 @@ images/
 !assets/images/
 thumbnails/
 data/
+!tools/data/
+!tools/data/spectral-library.fits
+__pycache__/
+*.pyc
 
 # Legacy paths
 server/public
@@ -129,3 +133,4 @@ vite.config.ts.*
 /.agents/skills/openspec-*/
 /.agents/skills/.openspec-target
 /.agents/skills/.openspec-stamp
+.venv-science/
