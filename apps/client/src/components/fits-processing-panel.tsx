@@ -25,7 +25,7 @@ const DEFAULTS = {
   stretch: 'asinh', strength: 10, shadowPercentile: 0.5, highlightPercentile: 99.5, gamma: 2.2, midtones: 0.25,
   saturation: 1, redBalance: 1, greenBalance: 1, blueBalance: 1, backgroundNeutralization: true, scnrAmount: 0,
   sharpenAmount: 0, sharpenRadius: 1, denoiseAmount: 0, denoiseRadius: 1, backgroundExtractionAmount: 0,
-  hotPixelThreshold: 0, colorMap: 'grey',
+  hotPixelThreshold: 0, colorMap: 'original',
 };
 
 const defaultOutputName = (filename: string) => filename.replace(/\.(fit|fits|fts)$/i, '') + '-processed';
@@ -270,7 +270,7 @@ export function FitsProcessingPanel({ image }: { image: AstroImage }) {
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1 text-sm"><span className="flex items-center justify-between text-muted-foreground"><span>Palette</span><ResetButton label="Palette" changed={colorMap !== DEFAULTS.colorMap} onReset={() => setColorMap(DEFAULTS.colorMap)} /></span>
             <select aria-label="Palette" value={colorMap} onChange={(event) => setColorMap(event.target.value)} className="w-full bg-background border border-input rounded-md px-2 py-1">
-              <option value="grey">Grey</option><option value="inverted">Inverted</option><option value="heat">Heat</option><option value="cool">Cool</option><option value="rainbow">Rainbow</option><option value="viridis">Viridis</option>
+              <option value="original">Original (no colour map)</option><option value="grey">Grey</option><option value="inverted">Inverted</option><option value="heat">Heat</option><option value="cool">Cool</option><option value="rainbow">Rainbow</option><option value="viridis">Viridis</option>
             </select>
           </div>
           <p className="text-xs text-muted-foreground self-center">Preview only — saved derivatives always keep their real pixel data.</p>

@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stacking is now done with Astropy CCDProc (`tools/scripts/ccdproc_stack.py`, pinned in `requirements-science.txt`): optional bias/dark/flat calibration with overscan, trim, dark scaling by exposure and bad-pixel masks (`ccdmask`), cosmic-ray cleaning (astroscrappy L.A.Cosmic or median), registration of every frame onto the reference through its WCS (stored plate solutions are used when the header has none), exposure/median normalization and weighting, and mean/median/sigma-clip (MAD) combination with optional extrema and min/max clipping. Originals are opened read-only; each frame's offset, skipped duplicates and all settings are reported and written to the FITS HISTORY.
 - Stacking unsigned 16-bit camera frames (BITPIX 16 with BZERO = 32768, e.g. the Geographos set) failed with "Cannot load a memory-mapped image"; frames are now read into memory with their integer scaling applied, and the float output carries no BZERO/BSCALE.
 
+### Changed (FITS processing, 0.11.3)
+- New default colour map "Original (no colour map)": the preview shows the image as it is (natural colour for RGB FITS, grey for mono), so you can always return to it after trying a palette. "Grey" is now a true greyscale for RGB FITS too (luminance), and every palette's reset button returns to Original.
+
 ### Added (FITS processing, 0.11.2)
 - Every FITS processing option has its own reset button (enabled only when the option differs from its default), and "Reset all" — at the top and bottom of the panel, with the number of changed options — restores every option at once: stretch and its parameters, clipping, colour map, noise and detail, colour calibration, background neutralization and the output filename.
 

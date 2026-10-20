@@ -17,7 +17,7 @@ const fitsRangeJobs = new Map<string, Promise<ProcessingRanges>>();
 const fitsTileJobs = new Map<string, Promise<Buffer>>();
 
 export type FitsStretch = 'linear' | 'asinh' | 'log' | 'gamma' | 'mtf' | 'sqrt' | 'square';
-export type FitsColorMap = 'grey' | 'inverted' | 'heat' | 'cool' | 'rainbow' | 'viridis';
+export type FitsColorMap = 'original' | 'grey' | 'inverted' | 'heat' | 'cool' | 'rainbow' | 'viridis';
 
 export interface FitsProcessingSettings {
   stretch?: FitsStretch;
@@ -595,10 +595,11 @@ function viridisColor(t: number): [number, number, number] {
  * FITS derivatives never go through this: they always keep their real per-channel data.
  */
 function applyColorMap(planes: Float32Array[], colorMap: FitsColorMap): Float32Array[] {
+  // 'original' shows the image as it is: natural colour for RGB, grey for mono.
+  if (colorMap === 'original') return planes;
   let mono = planes[0];
   if (planes.length === 3) {
-    // 'grey' keeps natural colour; a false-colour palette maps the luminance (Rec. 709 weights).
-    if (colorMap === 'grey') return planes;
+    // 'grey' and the false-colour palettes map the luminance (Rec. 709 weights).
     if (colorMap === 'inverted') return planes.map(plane => plane.map(value => 1 - value)) as Float32Array[];
     mono = new Float32Array(planes[0].length);
     for (let index = 0; index < mono.length; index++) mono[index] = planes[0][index] * 0.2126 + planes[1][index] * 0.7152 + planes[2][index] * 0.0722;
@@ -715,7 +716,7 @@ export async function renderFitsPreview(filePath: string, settings: FitsProcessi
   }
   applyDenoise(planes, dimensions.width, dimensions.height, settings);
   applySharpen(planes, dimensions.width, dimensions.height, settings);
-  const colorMapped = applyColorMap(planes, settings.colorMap ?? 'grey');
+  const colorMapped = applyColorMap(planes, settings.colorMap ?? 'original');
   const outputChannels: 1 | 3 = colorMapped.length === 3 ? 3 : 1;
 
   const raw = Buffer.alloc(dimensions.width * dimensions.height * outputChannels);
@@ -1046,7 +1047,7 @@ export async function renderFitsTile(filePath: string, settings: FitsProcessingS
       processedPixel(pixels, index, tileMetadata, ranges, settings, scratch);
       for (let channel = 0; channel < metadata.channels; channel++) planes[channel][index] = scratch[channel];
     }
-    const mapped = applyColorMap(planes, settings.colorMap ?? 'grey');
+    const mapped = applyColorMap(planes, settings.colorMap ?? 'original');
     const outputChannels = mapped.length === 3 ? 3 : 1;
     const raw = Buffer.alloc(tilePlaneSize * outputChannels);
     for (let index = 0; index < tilePlaneSize; index++) {

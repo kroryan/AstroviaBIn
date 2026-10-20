@@ -60,7 +60,7 @@ function processingSettings(value: unknown): FitsProcessingSettings {
   if (!value || typeof value !== 'object') return {};
   const input = value as Record<string, unknown>;
   const stretch = ['linear', 'asinh', 'log', 'gamma', 'mtf', 'sqrt', 'square'].includes(String(input.stretch)) ? String(input.stretch) as FitsProcessingSettings['stretch'] : undefined;
-  const colorMap = ['grey', 'inverted', 'heat', 'cool', 'rainbow', 'viridis'].includes(String(input.colorMap)) ? String(input.colorMap) as FitsProcessingSettings['colorMap'] : undefined;
+  const colorMap = ['original', 'grey', 'inverted', 'heat', 'cool', 'rainbow', 'viridis'].includes(String(input.colorMap)) ? String(input.colorMap) as FitsProcessingSettings['colorMap'] : undefined;
   const number = (name: string) => typeof input[name] === 'number' && Number.isFinite(input[name]) ? input[name] as number : undefined;
   return {
     stretch,

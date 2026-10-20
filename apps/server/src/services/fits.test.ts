@@ -287,11 +287,16 @@ test('false-colour maps apply to RGB images too (on their luminance)', async () 
   const size = 32;
   const ramp = Array.from({ length: size * size }, (_, index) => (index % size) * 1000);
   const filePath = path.join(directory, 'rgb.fits');
-  await writeFile(filePath, testFitsRgb(size, [ramp, ramp, ramp]));
+  // Distinct channels (a coloured image), so natural colour, grey and false colour all differ.
+  await writeFile(filePath, testFitsRgb(size, [ramp, ramp.map(value => value / 2), ramp.map(value => 31_000 - value)]));
   try {
-    const means = async (colorMap: string) => (await sharp((await renderFitsPreview(filePath, { stretch: 'linear', colorMap: colorMap as never })).buffer).stats()).channels.slice(0, 3).map(channel => Math.round(channel.mean));
+    const means = async (colorMap: string | undefined) => (await sharp((await renderFitsPreview(filePath, { stretch: 'linear', colorMap: colorMap as never })).buffer).stats()).channels.slice(0, 3).map(channel => Math.round(channel.mean));
+    const original = await means('original');
+    for (const map of ['grey', 'heat', 'cool', 'rainbow', 'viridis']) assert.notDeepEqual(await means(map), original, `${map} must change an RGB preview`);
+    // The default is the image as it is; "grey" is a true greyscale (equal channels).
+    assert.deepEqual(await means(undefined), original);
     const grey = await means('grey');
-    for (const map of ['heat', 'cool', 'rainbow', 'viridis']) assert.notDeepEqual(await means(map), grey, `${map} must change an RGB preview`);
+    assert.ok(grey.length === 1 || (grey[0] === grey[1] && grey[1] === grey[2]), `grey must be neutral, got ${grey}`);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
