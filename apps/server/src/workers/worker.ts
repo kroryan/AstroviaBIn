@@ -3,6 +3,8 @@ import { storage } from "../services/storage";
 import { AstrometryService } from "../services/astrometry";
 import { configService } from "../services/config";
 import { isPlateSolvingEligible } from "../services/solar-system";
+import { plateSolvingPaused, requeueFailedForNewStrategy } from "../services/plate-solving-pause";
+import { abortLocalSolves } from "../services/astrometry-local";
 import WebSocket from "ws";
 
 class PlateSolvingWorker {
@@ -14,6 +16,7 @@ class PlateSolvingWorker {
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
   private loggedAutoDisabled = false;
+  private paused = false;
 
   constructor() {
     this.astrometryService = new AstrometryService(true);
@@ -69,6 +72,24 @@ class PlateSolvingWorker {
     this.maxConcurrent = astrometryConfig.maxConcurrent;
 
     this.isRunning = true;
+    const requeued = await requeueFailedForNewStrategy(tags => isPlateSolvingEligible(tags)).catch(error => {
+      console.error('Could not re-queue failed plate-solving jobs:', error);
+      return 0;
+    });
+    if (requeued) console.log(`Re-queued ${requeued} failed plate-solving job(s) for the improved solving strategy`);
+    // "Pause plate solving" takes effect within seconds, also in the middle of a solve: the solver
+    // processes are stopped and the job returns to the queue.
+    setInterval(() => {
+      plateSolvingPaused().then(paused => {
+        if (paused && !this.paused) console.log('Plate solving paused');
+        if (!paused && this.paused) console.log('Plate solving resumed');
+        this.paused = paused;
+        if (paused) {
+          const stopped = abortLocalSolves();
+          if (stopped) console.log(`Stopped ${stopped} solver process(es); the job goes back to the queue`);
+        }
+      }).catch(() => { /* keep the last known state */ });
+    }, 2000);
     console.log(`Starting plate solving worker with max ${this.maxConcurrent} concurrent jobs, check interval: ${astrometryConfig.checkInterval}s`);
 
     while (this.isRunning) {
@@ -77,8 +98,11 @@ class PlateSolvingWorker {
         this.checkInterval = currentConfig.checkInterval * 1000;
         this.maxConcurrent = currentConfig.maxConcurrent;
 
-        await this.createAndSubmitJobsForUnsolvedImages();
-        await this.checkProcessingJobs();
+        this.paused = await plateSolvingPaused().catch(() => this.paused);
+        if (!this.paused) {
+          await this.createAndSubmitJobsForUnsolvedImages();
+          await this.checkProcessingJobs();
+        }
         await this.sleep(this.checkInterval);
       } catch (error) {
         console.error("Worker error:", error);
@@ -162,6 +186,7 @@ class PlateSolvingWorker {
     }
 
     for (const job of processingJobs) {
+      if (this.paused) break;
       try {
         const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
         if (!isPlateSolvingEligible(image?.tags, Boolean(image?.plateSolved))) {

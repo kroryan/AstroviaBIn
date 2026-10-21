@@ -24,6 +24,12 @@ test('new images are Deep Sky unless their name is a planet, the Sun or the Moon
   assert.deepEqual(defaultImageTags('polux'), ['Deep Sky'], 'no planet inside other words');
   assert.deepEqual(defaultImageTags('Nebulosa (51 Andrómedas)'), ['Deep Sky']);
   assert.deepEqual(defaultImageTags(null, 'moon-mosaic'), ['Moon']);
+  // Slooh mission names join the words.
+  assert.deepEqual(defaultImageTags('waxinggibbousmoon_20261019_200840_0_hukw9d_m'), ['Moon']);
+  assert.deepEqual(defaultImageTags('fullmoon_20261017'), ['Moon']);
+  assert.deepEqual(defaultImageTags('firstquartermoon'), ['Moon']);
+  assert.deepEqual(defaultImageTags('moonlight nebula'), ['Deep Sky']);
+  assert.deepEqual(defaultImageTags('honeymoon'), ['Deep Sky']);
   assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'Saturn'], ['Deep Sky']), ['Saturn']);
   assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'Comet', 'Solar System'], ['Deep Sky']), ['Deep Sky', 'Comet', 'Solar System'], 'comets keep Deep Sky');
   assert.deepEqual(withoutDeepSkyForPlanets(['Deep Sky', 'NGC 253'], []), ['Deep Sky', 'NGC 253']);

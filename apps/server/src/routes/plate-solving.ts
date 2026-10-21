@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { plateSolvingPaused, setPlateSolvingPaused } from '../services/plate-solving-pause';
 import { storage } from '../services/storage';
 import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
@@ -104,12 +105,25 @@ export default (wsManager?: WsManager) => {
       const recent = [...jobs].sort((a, b) => time(b.submittedAt) - time(a.submittedAt) || b.id - a.id).slice(0, 4)
         .map(job => ({ id: job.id, imageId: job.imageId, status: job.status, submittedAt: job.submittedAt, completedAt: job.completedAt }));
       return c.json({
+        paused: await plateSolvingPaused(),
         processing: jobs.filter(job => job.status === 'processing').length,
         pending: jobs.filter(job => job.status === 'pending').length,
         recent,
       });
     } catch (error) {
       return handleRouteError(c, error, 'Failed to fetch plate solving status');
+    }
+  });
+
+  // Pause / resume the whole queue (the solve in progress is stopped and re-queued, not failed).
+  app.post('/pause', async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({})) as { paused?: unknown };
+      if (typeof body.paused !== 'boolean') return c.json({ message: 'paused (true/false) is required' }, 400);
+      await setPlateSolvingPaused(body.paused);
+      return c.json({ paused: body.paused });
+    } catch (error) {
+      return handleRouteError(c, error, 'Failed to change the plate solving pause');
     }
   });
 

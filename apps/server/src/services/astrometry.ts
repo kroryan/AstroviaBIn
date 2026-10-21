@@ -6,7 +6,7 @@ import { getConstellationFromCoordinates } from './constellation-utils';
 import { filterRelevantTags } from './tags-utils';
 import { catalogService } from './catalog';
 import { classifyGallery } from './gallery-auto-classify';
-import { solveImageLocally, type SolveHint } from './astrometry-local';
+import { resetLocalSolveAbort, SolveAbortedError, solveImageLocally, type SolveHint } from './astrometry-local';
 import type { WcsSolution } from './wcs';
 
 import type { WsManager } from './ws-manager';
@@ -262,10 +262,17 @@ export class AstrometryService {
         await storage.updatePlateSolvingJob(job.id, { status: 'processing' });
         if (wsManager) wsManager.broadcast('plate-solving-update', { jobId: job.id, status: 'processing', imageId: job.imageId });
       }
+      resetLocalSolveAbort();
       const result = await solveImageLocally(image, { hint: hintFromStoredJob(job.result) });
       await this.updateJobAndImage(job.id, result);
       return { status: 'success', result };
     } catch (error) {
+      if (error instanceof SolveAbortedError) {
+        // Paused: the job goes back to the queue untouched (not failed) and resumes later.
+        await storage.updatePlateSolvingJob(job.id, { status: 'pending' });
+        if (wsManager) wsManager.broadcast('plate-solving-update', { jobId: job.id, status: 'pending', imageId: job.imageId });
+        return { status: 'pending' };
+      }
       const message = error instanceof Error ? error.message : 'Unknown local plate-solving error';
       const localJobId = `local-${job.id}`;
       await storage.updatePlateSolvingJob(job.id, {

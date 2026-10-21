@@ -53,14 +53,42 @@ function appendOutput(current: string, chunk: Buffer): string {
   return `${current}${chunk.toString('utf8')}`.slice(-6000);
 }
 
+/** Thrown when plate solving is paused while a solve runs: the job goes back to the queue, it did not fail. */
+export class SolveAbortedError extends Error {
+  constructor() {
+    super('Plate solving was paused');
+    this.name = 'SolveAbortedError';
+  }
+}
+
+const runningSolvers = new Set<() => void>();
+let abortRequested = false;
+
+/** Stops every solver process started by this process (their process groups) and refuses new ones until reset. */
+export function abortLocalSolves(): number {
+  abortRequested = true;
+  const count = runningSolvers.size;
+  for (const stop of [...runningSolvers]) stop();
+  return count;
+}
+
+export function resetLocalSolveAbort(): void {
+  abortRequested = false;
+}
+
+export function runSolverProcess(command: string, args: string[], timeoutMs: number): Promise<string> {
+  return run(command, args, timeoutMs);
+}
+
 function run(command: string, args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (abortRequested) {
+      reject(new SolveAbortedError());
+      return;
+    }
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
-    let output = '';
-    let errorOutput = '';
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
+    let aborted = false;
+    const killGroup = () => {
       if (process.platform !== 'win32' && child.pid) {
         try {
           process.kill(-child.pid, 'SIGKILL');
@@ -70,16 +98,28 @@ function run(command: string, args: string[], timeoutMs: number): Promise<string
         }
       }
       child.kill('SIGKILL');
+    };
+    const stop = () => { aborted = true; killGroup(); };
+    runningSolvers.add(stop);
+    let output = '';
+    let errorOutput = '';
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      killGroup();
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => { output = appendOutput(output, chunk); });
     child.stderr.on('data', (chunk: Buffer) => { errorOutput = appendOutput(errorOutput, chunk); });
     child.on('error', error => {
       clearTimeout(timeout);
+      runningSolvers.delete(stop);
       reject(error);
     });
     child.on('close', code => {
       clearTimeout(timeout);
-      if (code === 0) resolve(output);
+      runningSolvers.delete(stop);
+      if (aborted) reject(new SolveAbortedError());
+      else if (code === 0) resolve(output);
       else if (timedOut) reject(new Error(`Local astrometry solver timed out after ${timeoutMs}ms: ${(errorOutput || output).trim() || 'no details'}`));
       else reject(new Error(`Local astrometry solver exited with code ${code}: ${(errorOutput || output).trim() || 'no details'}`));
     });
@@ -363,6 +403,7 @@ async function extractStars(source: SolveSource, workDirectory: string): Promise
     const sources = Number(JSON.parse(summary.trim().split('\n').pop() || '{}').sources);
     return sources >= 8 ? output : null;
   } catch (error) {
+    if (error instanceof SolveAbortedError) throw error;
     console.warn('Star extraction unavailable, falling back to solve-field source extraction:', error instanceof Error ? error.message : error);
     return null;
   }
@@ -449,6 +490,9 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
     const hintBudget = Number(process.env.ASTROMETRY_HINT_TIMEOUT_MS || 90_000);
     for (const hint of hints) {
       attempts.push({ label: `${hint.label} (${xylist ? 'robust star list' : 'solve-field extraction'})`, xylist, hint, budgetMs: hintBudget });
+      // Sparse frames (short, binned, blue) can need minutes with the robust list but seconds with
+      // solve-field's own extraction around the same hint; try both before searching blind.
+      if (xylist) attempts.push({ label: `${hint.label} (solve-field extraction)`, xylist: null, hint, budgetMs: hintBudget });
     }
     const scale = headerScale(source.headers);
     if (scale) {
@@ -476,6 +520,7 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
         console.log(`Local solve for image ${image.id} succeeded with ${attempt.label}`);
         break;
       } catch (error) {
+        if (error instanceof SolveAbortedError) throw error;
         failures.push(`${attempt.label}: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
       }
     }

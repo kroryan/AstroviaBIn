@@ -9,8 +9,13 @@ import {
   BarChart3, 
   Tags, 
   CloudUpload,
-  Activity
+  Activity,
+  Pause,
+  Play
 } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import { formatDateTime } from "@/lib/datetime";
 import type { PlateSolvingJob } from "@shared/schema";
 
@@ -27,11 +32,17 @@ interface SidebarProps {
 
 export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
   // A small summary (counts + latest four jobs): the full job list carries every solution and grows with the library.
-  const { data: summary } = useQuery<{ processing: number; pending: number; recent: Array<Pick<PlateSolvingJob, "id" | "imageId" | "status" | "submittedAt" | "completedAt">> }>({
+  const { data: summary } = useQuery<{ paused?: boolean; processing: number; pending: number; recent: Array<Pick<PlateSolvingJob, "id" | "imageId" | "status" | "submittedAt" | "completedAt">> }>({
     queryKey: ["/api/plate-solving/jobs/summary"],
     refetchInterval: query => (query.state.data && (query.state.data.processing || query.state.data.pending) ? 5000 : 30_000),
   });
 
+  const { canEdit } = useCurrentUser();
+  const pause = useMutation({
+    mutationFn: async (paused: boolean) => (await apiRequest("POST", "/api/plate-solving/pause", { paused })).json(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] }),
+  });
+  const paused = Boolean(summary?.paused);
   const recentJobs = summary?.recent ?? [];
   const processingJobs = { length: summary?.processing ?? 0 };
   const queuedJobs = { length: summary?.pending ?? 0 };
@@ -60,6 +71,18 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
             <p className="text-xs text-muted-foreground">
               Images are solved one at a time on this server; large or sparse frames can take several minutes each.
             </p>
+          )}
+          {paused && (
+            <p className="text-xs text-yellow-400">
+              Paused: no image is being solved. Queued jobs wait here until you resume.
+            </p>
+          )}
+          {canEdit && (
+            <Button variant="outline" className="w-full" disabled={pause.isPending} onClick={() => pause.mutate(!paused)}
+              title={paused ? "Resume plate solving" : "Pause plate solving now: the solve in progress stops and goes back to the queue"}>
+              {paused ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}
+              {paused ? "Resume plate solving" : "Pause plate solving"}
+            </Button>
           )}
           <div>
             <Link href="/plate-solving">

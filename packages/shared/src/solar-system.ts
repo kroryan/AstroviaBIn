@@ -39,7 +39,10 @@ export function shouldShowInNotSolvedFilter(tags: string[] | null | undefined): 
 
 // Spanish and English names in titles/file names ("Saturno1 canarias.png", "sol2", "Moon").
 const BODY_NAMES: Array<[RegExp, string]> = [
-  [/^(sol|sun|solar)$/, 'Sun'], [/^(luna|moon|lunar)$/, 'Moon'], [/^(mercurio|mercury)$/, 'Mercury'],
+  [/^(sol|sun|solar)$/, 'Sun'], [/^(luna|moon|lunar)$/, 'Moon'],
+  // Slooh joins the words of its mission names: "waxinggibbousmoon", "fullmoon", "lunanueva".
+  [/^(?:waxing|waning|full|new|crescent|gibbous|first|last|third|quarter|half|harvest|blue|super|blood)+moons?$/, 'Moon'],
+  [/^(?:luna)(?:llena|nueva|creciente|menguante|gibosa)+$/, 'Moon'], [/^(mercurio|mercury)$/, 'Mercury'],
   [/^venus$/, 'Venus'], [/^(marte|mars)$/, 'Mars'], [/^(j[uú]piter)$/, 'Jupiter'], [/^(saturno|saturn)$/, 'Saturn'],
   [/^(urano|uranus)$/, 'Uranus'], [/^(neptuno|neptune)$/, 'Neptune'], [/^(plut[oó]n?|pluto)$/, 'Pluto'],
 ];

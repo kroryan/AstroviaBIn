@@ -1,8 +1,9 @@
 'use strict';
 
 // Runs before the application imports its database module (and therefore before migrations).
-// Existing SQLite databases are checked and backed up with SQLite's online backup API. Source
-// databases and media are never moved, renamed, truncated, or deleted here.
+// Existing SQLite databases are checked and backed up with SQLite's online backup API (after SQLite's
+// own crash recovery, if a power cut left a journal). Source databases and media are never moved,
+// renamed, truncated, or deleted here.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -22,6 +23,19 @@ async function backupExistingDatabase({
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
 
   const Database = require('better-sqlite3');
+  // After a power cut SQLite can leave a hot rollback journal (or an un-checkpointed WAL). Only a
+  // read-write connection may replay it, so let SQLite do its own crash recovery first; a read-only
+  // open would fail with "attempt to write a readonly database" on every start.
+  const journal = `${source}-journal`;
+  const wal = `${source}-wal`;
+  if ((fs.existsSync(journal) && fs.statSync(journal).size > 0) || fs.existsSync(wal)) {
+    const recovery = new Database(source, { fileMustExist: true });
+    try {
+      recovery.pragma('quick_check', { simple: true });
+    } finally {
+      recovery.close();
+    }
+  }
   const database = new Database(source, { readonly: true, fileMustExist: true });
   try {
     const integrity = database.pragma('quick_check', { simple: true });
