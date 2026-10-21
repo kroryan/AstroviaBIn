@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle2, CopyCheck, Loader2, Upload, X, XCircle } from "lucide-react";
 import { createSHA256 } from "hash-wasm";
 import { uploadNameKey } from "@shared/upload-names";
+import { serverVersionChanged } from "@/lib/version";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -106,6 +107,15 @@ export function useUploadQueue() {
   const run = useCallback(async () => {
     if (running.current) return;
     running.current = true;
+    // A page left open across an update runs the old upload code: reload first, then pick the files again.
+    if (await serverVersionChanged()) {
+      const dropped = queue.current.splice(0);
+      setItems(previous => previous.filter(item => !dropped.some(({ id }) => id === item.id)));
+      running.current = false;
+      toast({ title: "AstroviaBin was updated", description: "Reloading the page with the new version. Choose the files again afterwards." });
+      setTimeout(() => window.location.reload(), 1500);
+      return;
+    }
     while (queue.current.length) {
       // 1. Review the whole selection before uploading anything. Skipped: files with the name and size of
       //    a stored file, and files whose content (SHA-256) is stored under another name. Only files with
@@ -125,6 +135,7 @@ export function useUploadQueue() {
       const hashes = new Map<number, string>();
       for (const { id, file } of candidates) {
         try { hashes.set(id, await sha256Of(file)); } catch { /* unreadable here: the server still checks */ }
+        update(id, { progress: 100 });
       }
       const stored = await existingHashes(candidates.flatMap(({ id, file }) => hashes.has(id) ? [{ size: file.size, sha256: hashes.get(id)! }] : []))
         .catch(() => new Set<string>());
@@ -135,7 +146,7 @@ export function useUploadQueue() {
           update(item.id, { stage: "duplicate", progress: 100 });
           batch.current.duplicates++;
         } else {
-          if (hashes.has(item.id) || candidates.includes(item)) update(item.id, { stage: "queued" });
+          if (hashes.has(item.id) || candidates.includes(item)) update(item.id, { stage: "queued", progress: 0 });
           toUpload.push(item);
         }
       }
@@ -204,6 +215,17 @@ export function useUploadQueue() {
     void run();
   }, [run, toast]);
 
+  // Coming back to an open tab after an update: reload when nothing is uploading.
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState !== "visible" || running.current) return;
+      void serverVersionChanged().then(changed => { if (changed && !running.current) window.location.reload(); });
+    };
+    document.addEventListener("visibilitychange", check);
+    const timer = window.setInterval(check, 5 * 60_000);
+    return () => { document.removeEventListener("visibilitychange", check); window.clearInterval(timer); };
+  }, []);
+
   const clear = useCallback(() => setItems(previous => previous.filter(item => ACTIVE.includes(item.stage))), []);
   const busy = items.some(item => ACTIVE.includes(item.stage));
   return { items, busy, enqueue, clear };
@@ -217,7 +239,7 @@ export function UploadQueuePanel({ items, busy, onClose }: { items: UploadItem[]
   return (
     <div className="fixed bottom-4 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card p-3 shadow-lg" role="status" aria-live="polite">
       <div className="mb-2 flex items-center justify-between gap-2 text-sm">
-        <span className="font-medium">{items.some(item => item.stage === "checking") ? `Checking ${items.length} file${items.length === 1 ? "" : "s"} against the server…` : busy ? `Uploading ${Math.min(finished + 1, items.length)} of ${items.length}` : `Uploads finished (${items.length})`}
+        <span className="font-medium">{items.some(item => item.stage === "checking") ? `Checking ${items.length} file${items.length === 1 ? "" : "s"} against the server (${items.filter(item => item.stage !== "checking" || item.progress === 100).length}/${items.length})…` : busy ? `Uploading ${Math.min(finished + 1, items.length)} of ${items.length}` : `Uploads finished (${items.length})`}
           {duplicates > 0 && <span className="ml-1 font-normal text-muted-foreground">· {duplicates} already stored</span>}</span>
         {!busy && <button type="button" aria-label="Close upload panel" className="text-muted-foreground hover:text-foreground" onClick={onClose}><X className="h-4 w-4" /></button>}
       </div>

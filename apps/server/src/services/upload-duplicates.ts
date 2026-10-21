@@ -132,3 +132,20 @@ export async function rememberFitsUpload(storedPath: string, sha256: string): Pr
     // Cache only.
   }
 }
+
+/**
+ * Hashes every stored FITS once in the background (after start-up), so the first duplicate check of a
+ * large folder does not have to read the whole library from disk while the user waits.
+ */
+export async function warmUploadHashes(): Promise<number> {
+  const hashes = await loadCache();
+  let computed = 0;
+  for (const fits of await knownFits()) {
+    const cached = hashes.get(fits.file);
+    if (cached && cached.size === fits.size && cached.mtimeMs === fits.mtimeMs) continue;
+    if (await fitsHash(fits, hashes)) computed++;
+    if (computed % 50 === 0) await saveCache();
+  }
+  if (computed) await saveCache();
+  return computed;
+}

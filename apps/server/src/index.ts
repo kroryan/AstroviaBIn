@@ -15,6 +15,7 @@ import { registerAuth } from './routes/auth';
 import { loadSkyCatalog } from './services/sky-catalog';
 import { refreshImageConstellations } from './services/maintenance';
 import { classifyLooseSpectra } from './services/gallery-auto-classify';
+import { warmUploadHashes } from './services/upload-duplicates';
 import { authDisabled, internalToken, usingDefaultCredentials } from './services/auth';
 
 const app = new Hono();
@@ -78,6 +79,8 @@ async function startServer() {
     const indexPath = path.join(publicPath, 'index.html');
     try {
       const html = fs.readFileSync(indexPath, 'utf8');
+      // Never cached: after an update the browser must fetch the new bundle names.
+      c.header('cache-control', 'no-cache');
       return c.html(html);
     } catch {
       return c.text('Frontend not built. Run npm run build first.', 404);
@@ -107,6 +110,11 @@ async function startServer() {
   classifyLooseSpectra()
     .then(count => { if (count > 0) console.log(`Placed ${count} spectroscopy FITS in the catalog of their field`); })
     .catch(error => console.error('Could not classify spectroscopy FITS:', error));
+  setTimeout(() => {
+    warmUploadHashes()
+      .then(count => { if (count > 0) console.log(`Indexed ${count} FITS for upload duplicate checks`); })
+      .catch(error => console.error('Could not index FITS for duplicate checks:', error));
+  }, 15_000);
 
   // Set WebSocket manager in services for real-time updates
   setWsManager(wsManager);

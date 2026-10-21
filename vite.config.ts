@@ -1,8 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { readFileSync } from "fs";
+
+const { version } = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "package.json"), "utf8")) as { version: string };
 
 export default defineConfig({
+  // The client compares this with the server's version to notice a page left open across an update.
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
   ],
