@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { galleryThumbnail } from "@/lib/fits";
 import { Card, CardContent } from "@/components/ui/card";
 import { Heart, Share, Plus, Settings } from "lucide-react";
 import type { AstroImage, Equipment } from "@shared/schema";
@@ -100,7 +101,7 @@ export function ImageGallery({
             title={[image.title, image.targetName && image.targetName !== image.title ? image.targetName : null, formatExposureData(image), formatIntegrationData(image)].filter(Boolean).join("\n")}>
             <div className="relative aspect-square overflow-hidden">
               <RemoteImage
-                src={image.thumbnailUrl || image.fullUrl || ""}
+                src={galleryThumbnail(image.thumbnailUrl || image.fullUrl)}
                 alt={image.title || "Astronomy image"}
                 className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
               />

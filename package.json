@@ -1,6 +1,6 @@
 {
   "name": "astroviabin",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "type": "module",
   "license": "MIT",
   "allowScripts": {
@@ -80,6 +80,7 @@
     "drizzle-zod": "^0.8.3",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^14.1.0",
+    "hash-wasm": "^4.12.0",
     "hono": "^4.13.13",
     "input-otp": "^1.5.0",
     "leaflet": "^1.9.4",

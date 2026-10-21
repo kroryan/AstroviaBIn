@@ -86,7 +86,7 @@ export default function Home() {
     queryClient.invalidateQueries({ queryKey: ["/api/images"] });
     queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
     queryClient.invalidateQueries({ queryKey: ["/api/gallery-catalogs"] });
-    queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] }); queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] });
   }, [queryClient]);
   usePlateSolvingUpdates(onPlateSolvingUpdate);
 

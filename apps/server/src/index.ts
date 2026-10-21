@@ -14,6 +14,7 @@ import { storage } from './services/storage';
 import { registerAuth } from './routes/auth';
 import { loadSkyCatalog } from './services/sky-catalog';
 import { refreshImageConstellations } from './services/maintenance';
+import { classifyLooseSpectra } from './services/gallery-auto-classify';
 import { authDisabled, internalToken, usingDefaultCredentials } from './services/auth';
 
 const app = new Hono();
@@ -103,6 +104,9 @@ async function startServer() {
   refreshImageConstellations()
     .then(count => { if (count > 0) console.log(`Corrected the constellation of ${count} solved image(s) using the IAU boundaries`); })
     .catch(error => console.error('Could not refresh image constellations:', error));
+  classifyLooseSpectra()
+    .then(count => { if (count > 0) console.log(`Placed ${count} spectroscopy FITS in the catalog of their field`); })
+    .catch(error => console.error('Could not classify spectroscopy FITS:', error));
 
   // Set WebSocket manager in services for real-time updates
   setWsManager(wsManager);

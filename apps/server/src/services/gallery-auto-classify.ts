@@ -3,6 +3,8 @@ import { isSolarSystemTagged } from './solar-system';
 import { db, schema } from '../db';
 import { storage } from './storage';
 import { angularDistanceDegrees } from './wcs';
+import { readFitsMetadata, resolveFitsFile } from './fits';
+import { parseCoordinate } from './astrometry-local';
 
 /**
  * Automatic gallery catalogs:
@@ -13,7 +15,9 @@ import { angularDistanceDegrees } from './wcs';
  *
  * Only images that are in no catalog yet are added, so manual organisation is never undone:
  * when some images of a field are already in one of the user's catalogs, the rest join it.
- * Unsolved images stay loose until they are solved.
+ * Unsolved images stay loose until they are solved, except spectroscopy FITS: a 1-D spectrum has no image
+ * to plate-solve, so its target position from the FITS header places it as a point in the field (and
+ * the catalog) that contains it, or with other spectra within 15′; a field solved later joins the catalog of a spectrum inside it.
  */
 
 export const SOLAR_SYSTEM_CATALOG = 'Solar System';
@@ -28,7 +32,12 @@ export interface FieldImage {
   target: string | null;
   constellation: string | null;
   title?: string | null;
+  /** A pointing without a field (a spectrum's target position); `size` is ignored. */
+  point?: boolean;
 }
+
+/** Two pointings closer than this (about one small field) share a catalog. */
+const NEARBY_POINTING_DEGREES = 0.25;
 
 /** "29.8' × 29.8'" (or degrees/arcsec) → largest dimension in degrees. */
 export function fieldSizeDegrees(fieldOfView: string | null | undefined): number | null {
@@ -48,6 +57,11 @@ function normalizedTarget(target: string | null): string | null {
 
 /** Two solutions show the same field when their centres are within half the smaller field. */
 export function sameField(a: FieldImage, b: FieldImage): boolean {
+  if (a.point || b.point) {
+    const distance = angularDistanceDegrees(a.ra, a.dec, b.ra, b.dec);
+    if (a.point && b.point) return distance <= NEARBY_POINTING_DEGREES;
+    return distance <= 0.5 * (a.point ? b.size : a.size);
+  }
   return angularDistanceDegrees(a.ra, a.dec, b.ra, b.dec) <= 0.5 * Math.min(a.size, b.size);
 }
 
@@ -162,6 +176,30 @@ async function catalogNamed(name: string, description: string, members: number[]
  * Classifies the whole gallery, or only the group of `imageId` (after it is solved or tagged).
  * Returns how many images were added and which catalogs were created.
  */
+const SPECTRUM_TAGS = new Set(['Spectrum', 'Spectroscopy']);
+const pointingCache = new Map<string, { ra: number; dec: number } | null>();
+
+/** Target position of a spectroscopy FITS from its header (SDSS PLUG_RA/DEC is the fibre, RA/DEC the plate centre). */
+export function spectrumPosition(headers: Record<string, string | number | boolean>): { ra: number; dec: number } | null {
+  const ra = parseCoordinate(headers.PLUG_RA ?? headers.OBJCTRA ?? headers.RA ?? headers.RA_OBJ ?? headers.TARG_RA, 'ra');
+  const dec = parseCoordinate(headers.PLUG_DEC ?? headers.OBJCTDEC ?? headers.DEC ?? headers.DEC_OBJ ?? headers.TARG_DEC, 'dec');
+  if (ra === undefined || dec === undefined || !Number.isFinite(ra) || !Number.isFinite(dec) || Math.abs(dec) > 90) return null;
+  return { ra: ra < 0 ? ra + 360 : ra >= 360 ? ra - 360 : ra, dec };
+}
+
+async function spectrumPointing(originalPath: string | null): Promise<{ ra: number; dec: number } | null> {
+  const file = resolveFitsFile(originalPath);
+  if (!file) return null;
+  if (!pointingCache.has(file)) {
+    try {
+      pointingCache.set(file, spectrumPosition((await readFitsMetadata(file)).headers));
+    } catch {
+      pointingCache.set(file, null);
+    }
+  }
+  return pointingCache.get(file)!;
+}
+
 export async function classifyGallery(options: { imageId?: number } = {}): Promise<{ added: number; created: string[]; renamed: string[] }> {
   const images = await storage.getAstroImages();
   const memberships = await db.select({ catalogId: schema.galleryCatalogImages.catalogId, imageId: schema.galleryCatalogImages.imageId })
@@ -187,6 +225,12 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
     if (!image.plateSolved || isSolarSystemTagged(image.tags) || !image.ra || !image.dec || !Number.isFinite(ra) || !Number.isFinite(dec) || !size) return [];
     return [{ id: image.id, ra, dec, size, target: image.targetName ?? null, constellation: image.constellation ?? null, title: image.title }];
   });
+  const points: FieldImage[] = [];
+  for (const image of images) {
+    if (image.plateSolved || !image.tags?.some(tag => SPECTRUM_TAGS.has(tag)) || isSolarSystemTagged(image.tags)) continue;
+    const position = await spectrumPointing(image.originalPath ?? null);
+    if (position) points.push({ id: image.id, ...position, size: 0, point: true, target: image.targetName ?? null, constellation: image.constellation ?? null, title: image.title });
+  }
   const byId = new Map(fields.map(field => [field.id, field]));
   for (const group of clusterFields(fields)) {
     if (options.imageId !== undefined && !group.includes(options.imageId)) continue;
@@ -198,7 +242,10 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
       ? (loose(options.imageId) ? [options.imageId] : [])
       : group.filter(loose);
     if (!toAdd.length) continue;
-    let catalogId = existing;
+    // A field with no catalog yet joins that of a spectrum already filed inside it.
+    let catalogId = existing ?? mostCommon(points
+      .filter(point => catalogsOf.has(point.id) && group.some(id => sameField(point, byId.get(id)!)))
+      .flatMap(point => catalogsOf.get(point.id)!));
     if (catalogId === undefined) {
       const catalog = await catalogNamed(await clusterName(group.map(id => byId.get(id)!)), AUTO_DESCRIPTION, group, catalogsOf);
       if (catalog.created) created.push(catalog.name);
@@ -207,6 +254,24 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
     added += await storage.addImagesToGalleryCatalog(catalogId, toAdd);
     for (const id of toAdd) catalogsOf.set(id, [catalogId]);
   }
+  // Spectra (points) join the catalog of the solved field that contains them (the closest centre), else
+  // that of a nearby spectrum (within 15'), else a catalog of their own. They never link two fields.
+  for (const point of points) {
+    if (!loose(point.id)) continue;
+    const containing = fields.filter(field => sameField(point, field) && catalogsOf.has(field.id))
+      .sort((a, b) => angularDistanceDegrees(point.ra, point.dec, a.ra, a.dec) / a.size - angularDistanceDegrees(point.ra, point.dec, b.ra, b.dec) / b.size)[0];
+    const nearby = points.find(other => other.id !== point.id && catalogsOf.has(other.id) && sameField(point, other));
+    if (options.imageId !== undefined && options.imageId !== point.id && options.imageId !== containing?.id) continue;
+    let catalogId = mostCommon((containing ? catalogsOf.get(containing.id) : nearby ? catalogsOf.get(nearby.id) : undefined) ?? []);
+    if (catalogId === undefined) {
+      const catalog = await catalogNamed(await clusterName([point]), AUTO_DESCRIPTION, [point.id], catalogsOf);
+      if (catalog.created) created.push(catalog.name);
+      catalogId = catalog.id;
+    }
+    added += await storage.addImagesToGalleryCatalog(catalogId, [point.id]);
+    catalogsOf.set(point.id, [catalogId]);
+  }
+  for (const point of points) byId.set(point.id, point);
   // Automatic catalogs still carrying a generated position name get a better name once one exists
   // (a descriptive title or an identified target). A name the user typed is never changed.
   if (options.imageId === undefined) {
@@ -225,3 +290,15 @@ export async function classifyGallery(options: { imageId?: number } = {}): Promi
 }
 
 const GENERATED_FIELD_NAME = /^(?:[A-Za-z ]+ )?field \d{2}h\d{2} [+−]\d+°$/;
+
+/** Spectroscopy FITS that are in no catalog yet (e.g. uploaded before 0.12.1) join their field's catalog. */
+export async function classifyLooseSpectra(): Promise<number> {
+  const memberships = await db.select({ imageId: schema.galleryCatalogImages.imageId }).from(schema.galleryCatalogImages).execute() as Array<{ imageId: number }>;
+  const inCatalog = new Set(memberships.map(row => row.imageId));
+  let added = 0;
+  for (const image of await storage.getAstroImages()) {
+    if (image.plateSolved || inCatalog.has(image.id) || !image.tags?.some(tag => SPECTRUM_TAGS.has(tag))) continue;
+    added += (await classifyGallery({ imageId: image.id })).added;
+  }
+  return added;
+}

@@ -134,6 +134,13 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">hash-wasm</h3>
+        <p className="text-muted-foreground">Before an upload, the browser computes SHA-256 checksums with hash-wasm by Dani Biró (MIT license) to skip files already stored on the server. Only checksums and sizes are sent; files that are already stored are not uploaded.</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://github.com/Daninet/hash-wasm/blob/master/LICENSE" target="_blank" rel="noreferrer">hash-wasm license</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">Desktop app and installers</h3>
         <p className="text-muted-foreground">The AstroviaBin desktop app (system tray and setup window) is built with Electron (MIT) and packaged with electron-builder (MIT). The installers bundle the Node.js runtime (MIT, with the third-party notices in its LICENSE), better-sqlite3 (MIT) with SQLite (public domain) and sharp/libvips (Apache 2.0 / LGPL 3.0). Both installers bundle CPython (PSF License) with NumPy, SciPy, Astropy, Matplotlib, CCDProc, Photutils, reproject, scikit-image, astroscrappy, Specutils, Specreduce and Astroquery (BSD-style licenses; pPXF and capfit are downloaded during installation, not bundled): the Linux package uses the python-build-standalone distribution by Astral (BSD 3-Clause, with the third-party licenses it lists) and Windows the official embeddable CPython. HOTPANTS is built against NASA HEASARC CFITSIO (a permissive NASA/GSFC license). The MSIX package is built with Microsoft's open-source MSIX Packaging SDK (MIT) and signed with osslsigncode (GPL 3.0); neither tool is shipped in the package.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">

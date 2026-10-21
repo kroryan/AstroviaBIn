@@ -10,6 +10,7 @@ import { libraryStorageDirectory, resolveLibraryAssetPath } from '../services/li
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
 import { defaultImageTags } from '../services/solar-system';
 import { handleRouteError } from './route-utils';
+import { existingUploads, knownUploads } from '../services/upload-duplicates';
 
 const app = new Hono();
 const UPLOADABLE_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp', '.gif', '.bmp', '.avif', '.heic', '.heif']);
@@ -33,6 +34,11 @@ app.post('/upload', async (c) => {
     const relativePath = `originals/${id}${extension}`;
     outputPath = path.join(libraryStorageDirectory(), relativePath);
     const { byteSize, sha256 } = await writeUploadBody(c.req.raw.body, outputPath);
+    // Same content already in the library (whatever its name): keep the existing copy, drop this one.
+    if ((await existingUploads([{ size: byteSize, sha256 }])).size) {
+      await rm(outputPath, { force: true });
+      return c.json({ duplicate: true, message: 'Already in the library' }, 200);
+    }
     const imageMetadata = await sharp(outputPath, { limitInputPixels: false }).metadata();
     if (!imageMetadata.width || !imageMetadata.height || !imageMetadata.format) {
       throw new UploadRequestError('The uploaded file is not a supported image');
@@ -79,6 +85,29 @@ app.post('/upload', async (c) => {
     if (outputPath) await rm(outputPath, { force: true }).catch(() => {});
     if (error instanceof UploadRequestError) return c.json({ message: error.message }, error.status);
     return handleRouteError(c, error, 'Failed to upload image to the private AstroviaBin library');
+  }
+});
+
+/** Upload pre-check: sizes of everything stored, then which of the client's (size, SHA-256) are already here. */
+app.get('/upload-check', async (c) => {
+  try {
+    return c.json(await knownUploads());
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to read the library for duplicates');
+  }
+});
+
+app.post('/upload-check', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null) as { files?: unknown } | null;
+    const files = Array.isArray(body?.files) ? body.files : [];
+    const valid = files.filter((file): file is { size: number; sha256: string } =>
+      Boolean(file) && typeof file === 'object' && Number.isSafeInteger((file as { size?: unknown }).size)
+      && typeof (file as { sha256?: unknown }).sha256 === 'string' && /^[0-9a-f]{64}$/i.test((file as { sha256: string }).sha256));
+    if (valid.length > 20000) return c.json({ message: 'Too many files in one check' }, 400);
+    return c.json({ existing: [...await existingUploads(valid)] });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to check for duplicates');
   }
 });
 

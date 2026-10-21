@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z, ZodError } from 'zod';
 import { storage } from '../services/storage';
-import { classifyGallery } from '../services/gallery-auto-classify';
+import { classifyGallery, classifyLooseSpectra } from '../services/gallery-auto-classify';
 import { handleRouteError } from './route-utils';
 
 const app = new Hono();
@@ -46,6 +46,15 @@ app.post('/auto-classify', async (c) => {
     return c.json(await classifyGallery());
   } catch (error) {
     return handleRouteError(c, error, 'Failed to auto-classify the gallery');
+  }
+});
+
+// Files spectroscopy FITS (not plate-solvable) by the target position in their header.
+app.post('/classify-spectra', async (c) => {
+  try {
+    return c.json({ added: await classifyLooseSpectra() });
+  } catch (error) {
+    return handleRouteError(c, error, 'Failed to classify the spectra');
   }
 });
 

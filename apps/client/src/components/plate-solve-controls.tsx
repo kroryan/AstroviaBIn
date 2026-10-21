@@ -39,7 +39,7 @@ export function PlateSolveControls({ image, job, annotationsSource, annotationsM
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/images", image.id, "plate-solving-job"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] }); queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] });
     },
   });
 

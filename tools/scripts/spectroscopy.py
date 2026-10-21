@@ -2204,7 +2204,7 @@ def to_image(source: str, destination: str) -> dict[str, Any]:
     header = fits.Header()
     with fits.open(source, memmap=False) as hdus:
         for key, value in hdus[0].header.items():
-            if key in ("OBJECT", "RA", "DEC", "DATE-OBS", "MJD", "TELESCOP", "INSTRUME", "OBSERVER", "EXPTIME", "PLATEID", "FIBERID"):
+            if key in ("OBJECT", "RA", "DEC", "OBJCTRA", "OBJCTDEC", "PLUG_RA", "PLUG_DEC", "RA_OBJ", "DEC_OBJ", "TARG_RA", "TARG_DEC", "DATE-OBS", "MJD", "TELESCOP", "INSTRUME", "OBSERVER", "EXPTIME", "PLATEID", "FIBERID"):
                 header[key] = value
     meta = spectrum.meta
     if finite(meta.get("SDSS_PLUG_RA")) is not None:

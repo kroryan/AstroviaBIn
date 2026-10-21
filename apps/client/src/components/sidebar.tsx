@@ -26,14 +26,15 @@ interface SidebarProps {
 }
 
 export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
-  const { data: plateSolvingJobs = [] } = useQuery<PlateSolvingJob[]>({
-    queryKey: ["/api/plate-solving/jobs"],
-    refetchInterval: 5000, // Poll every 5 seconds
+  // A small summary (counts + latest four jobs): the full job list carries every solution and grows with the library.
+  const { data: summary } = useQuery<{ processing: number; pending: number; recent: Array<Pick<PlateSolvingJob, "id" | "imageId" | "status" | "submittedAt" | "completedAt">> }>({
+    queryKey: ["/api/plate-solving/jobs/summary"],
+    refetchInterval: query => (query.state.data && (query.state.data.processing || query.state.data.pending) ? 5000 : 30_000),
   });
 
-  const recentJobs = (plateSolvingJobs as PlateSolvingJob[]).slice(0, 4);
-  const processingJobs = (plateSolvingJobs as PlateSolvingJob[]).filter((job: PlateSolvingJob) => job.status === "processing");
-  const queuedJobs = (plateSolvingJobs as PlateSolvingJob[]).filter((job: PlateSolvingJob) => job.status === "pending");
+  const recentJobs = summary?.recent ?? [];
+  const processingJobs = { length: summary?.processing ?? 0 };
+  const queuedJobs = { length: summary?.pending ?? 0 };
 
   return (
     <aside className="lg:w-80 space-y-6 overflow-hidden overflow-y-hidden">
@@ -81,7 +82,7 @@ export function Sidebar({ stats, tags, onTagClick }: SidebarProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {recentJobs.length > 0 ? (
-            recentJobs.map((job: PlateSolvingJob) => (
+            recentJobs.map(job => (
               <div key={job.id} className="flex items-center space-x-3 text-sm">
                 <div className={`w-2 h-2 rounded-full ${
                   job.status === "success" ? "bg-green-400" :

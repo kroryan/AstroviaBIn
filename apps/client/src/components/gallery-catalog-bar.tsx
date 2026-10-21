@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FolderPlus, Library, Pencil, Sparkles, Trash2, X, Tags, Loader2 } from "lucide-react";
+import { Check, FolderPlus, Library, Pencil, Sparkles, Trash2, X, Tags, Loader2, Rainbow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -66,14 +66,23 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
       refresh();
     },
   });
+  const classifySpectra = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/gallery-catalogs/classify-spectra", {})).json() as Promise<{ added: number }>,
+    onSuccess: (result) => {
+      setLastAdded(result.added
+        ? `${result.added} spectr${result.added === 1 ? "um" : "a"} filed with the images of their field`
+        : "No unfiled spectrum with a position in its FITS header");
+      refresh();
+    },
+  });
   const autoAnnotations = useMutation({
     mutationFn: async () => (await apiRequest("POST", "/api/images/auto-annotations", {})).json() as Promise<{ scanned: number; annotated: number; skipped: number; failed: number }> ,
     onSuccess: result => {
       setLastAdded(`${result.annotated} image${result.annotated === 1 ? "" : "s"} annotated; ${result.skipped} already complete or without a usable WCS${result.failed ? `; ${result.failed} failed` : ""}`);
-      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] }); queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] });
     },
   });
-  const error = cleanError(classify.error) || cleanError(autoAnnotations.error) || cleanError(create.error) || cleanError(update.error) || cleanError(remove.error) || cleanError(addShown.error);
+  const error = cleanError(classify.error) || cleanError(classifySpectra.error) || cleanError(autoAnnotations.error) || cleanError(create.error) || cleanError(update.error) || cleanError(remove.error) || cleanError(addShown.error);
 
   const chip = (active: boolean) =>
     `px-3 py-1 rounded-full text-xs border transition-colors whitespace-nowrap ${active ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:text-foreground"}`;
@@ -103,6 +112,12 @@ export function GalleryCatalogBar({ selectedId, onSelect, visibleImageIds }: Gal
           title="File unclassified images: Solar System frames together, plate-solved images by field and target"
           onClick={() => classify.mutate()}>
           <Sparkles className="h-3 w-3 mr-1" /> {classify.isPending ? "Classifying…" : "Auto-classify"}
+        </Button>}
+        {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" disabled={classifySpectra.isPending}
+          title="File spectroscopy FITS (which cannot be plate-solved) with the images of their field, using the target position in their FITS header"
+          onClick={() => classifySpectra.mutate()}>
+          {classifySpectra.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Rainbow className="h-3 w-3 mr-1" />}
+          {classifySpectra.isPending ? "Classifying spectra…" : "Classify spectra"}
         </Button>}
         {canEdit && <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" disabled={autoAnnotations.isPending}
           title="Generate and save missing annotations for every plate-solved photo and FITS"

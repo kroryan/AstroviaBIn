@@ -86,15 +86,36 @@ export default (wsManager?: WsManager) => {
   });
 
   // Check plate solving status and update results
+  // One query for the images instead of one per job.
+  async function visiblePlateSolvingJobs() {
+    const [jobs, images] = await Promise.all([storage.getPlateSolvingJobs(), storage.getAstroImages()]);
+    const byId = new Map(images.map(image => [image.id, image]));
+    return jobs.filter(job => {
+      const image = job.imageId === null ? undefined : byId.get(job.imageId);
+      return image?.plateSolved || isPlateSolvingEligible(image?.tags);
+    });
+  }
+
+  // Small status for the sidebar, which polls it: counts and the latest jobs without their (large) results.
+  app.get('/jobs/summary', async (c) => {
+    try {
+      const jobs = await visiblePlateSolvingJobs();
+      const time = (value: unknown) => (value ? new Date(value as string | number | Date).getTime() : 0) || 0;
+      const recent = [...jobs].sort((a, b) => time(b.submittedAt) - time(a.submittedAt) || b.id - a.id).slice(0, 4)
+        .map(job => ({ id: job.id, imageId: job.imageId, status: job.status, submittedAt: job.submittedAt, completedAt: job.completedAt }));
+      return c.json({
+        processing: jobs.filter(job => job.status === 'processing').length,
+        pending: jobs.filter(job => job.status === 'pending').length,
+        recent,
+      });
+    } catch (error) {
+      return handleRouteError(c, error, 'Failed to fetch plate solving status');
+    }
+  });
+
   app.get('/jobs', async (c) => {
     try {
-      const jobs = await storage.getPlateSolvingJobs();
-      const visibleJobs = [];
-      for (const job of jobs) {
-        const image = job.imageId === null ? undefined : await storage.getAstroImage(job.imageId);
-        if (image?.plateSolved || isPlateSolvingEligible(image?.tags)) visibleJobs.push(job);
-      }
-      return c.json(visibleJobs);
+      return c.json(await visiblePlateSolvingJobs());
     } catch (error) {
       return handleRouteError(c, error, 'Failed to fetch plate solving jobs');
     }

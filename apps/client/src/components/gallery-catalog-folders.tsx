@@ -1,4 +1,5 @@
 import { Folder, Sparkles } from "lucide-react";
+import { galleryThumbnail } from "@/lib/fits";
 import { Card } from "@/components/ui/card";
 import type { AstroImage } from "@shared/schema";
 import type { GalleryCatalogSummary } from "./gallery-catalog-picker";
@@ -30,7 +31,7 @@ export function GalleryCatalogFolders({ catalogs, images, onOpen }: {
               onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(catalog.id); } }}
               className="group cursor-pointer overflow-hidden min-w-0" title={`${catalog.name} — ${catalog.imageCount} item${catalog.imageCount === 1 ? "" : "s"}${catalog.description ? `\n${catalog.description}` : ""}`}>
               <div className="relative aspect-square overflow-hidden bg-muted">
-                {covers[0] && <RemoteImage src={covers[0].thumbnailUrl || covers[0].fullUrl || ""} alt={catalog.name}
+                {covers[0] && <RemoteImage src={galleryThumbnail(covers[0].thumbnailUrl || covers[0].fullUrl)} alt={catalog.name}
                   className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />}
                 <span className="absolute left-1 top-1 inline-flex items-center gap-0.5 rounded bg-black/65 px-1 py-0.5 font-mono text-[10px] text-white">
                   <Folder className="h-3 w-3" /> {catalog.imageCount}

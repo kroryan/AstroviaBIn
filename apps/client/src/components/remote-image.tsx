@@ -11,5 +11,6 @@ interface RemoteImageProps {
 export const RemoteImage: React.FC<RemoteImageProps> = ({ src, alt, className, onClick, onLoad }) => {
     // For relative paths, prepend origin; for absolute URLs, use as-is to preserve query params
     const resolvedSrc = src.startsWith('http') ? src : new URL(src, window.location.origin).toString();
-  return <img src={resolvedSrc} alt={alt} className={className} onClick={onClick} onLoad={onLoad} />;
+  // Lazy: a gallery of hundreds only asks the server for the thumbnails scrolled into view.
+  return <img src={resolvedSrc} alt={alt} className={className} onClick={onClick} onLoad={onLoad} loading="lazy" decoding="async" />;
 };

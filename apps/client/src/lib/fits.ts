@@ -47,3 +47,9 @@ export function formatCaptureMoment(
       : 'unverified';
   return { text, status };
 }
+
+/** Gallery-tile URL: FITS previews switch to the small, browser-cacheable thumbnail rendering. */
+export function galleryThumbnail(url: string | null | undefined): string {
+  if (!url) return "";
+  return /^\/api\/fits\/\d+\/preview$/.test(url) ? `${url}?thumb=1` : url;
+}

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -78,11 +78,25 @@ test('scan indexes FITS into the existing gallery and serves a preview', async (
     const upload = await app.request(`/api/fits/upload?filename=${encodeURIComponent('M42 final.FITS')}`, {
       method: 'POST',
       headers: { 'content-type': 'application/fits' },
-      body: new Uint8Array(testFits()),
+      body: new Uint8Array(testFits([1, 100, 500, 1000])),
     });
     assert.equal(upload.status, 201);
     const uploaded = await upload.json() as { image: { originalPath: string } };
     assert.match(uploaded.image.originalPath, /^fits-upload:\/\/M42_final-\d+\.fits$/);
+
+    // Duplicates are found by content, not by name: the scanned file under another name and the same
+    // upload again are dropped; a different FITS with an already used name is stored normally.
+    for (const [name, bytes] of [['renamed copy.fits', testFits()], ['M42 final.FITS', testFits([1, 100, 500, 1000])]] as const) {
+      const duplicate = await app.request(`/api/fits/upload?filename=${encodeURIComponent(name)}`, { method: 'POST', body: new Uint8Array(bytes) });
+      assert.equal(duplicate.status, 200);
+      assert.equal((await duplicate.json() as { duplicate?: boolean }).duplicate, true);
+    }
+    const sameName = await app.request(`/api/fits/upload?filename=${encodeURIComponent('M42 final.FITS')}`, { method: 'POST', body: new Uint8Array(testFits([2, 100, 500, 1000])) });
+    assert.equal(sameName.status, 201);
+    const sameNameImage = (await sameName.json() as { image: { id: number; originalPath: string } }).image;
+    assert.notEqual(sameNameImage.originalPath, uploaded.image.originalPath);
+    const uploadedFiles = (await readdir(uploadsDirectory)).filter(name => !name.endsWith('.orig'));
+    assert.equal(uploadedFiles.length, 2, 'the existing upload is kept and only the new content is added');
 
     const largeHeaderUpload = await app.request('/api/fits/upload?filename=long-header.fits', {
       method: 'POST',

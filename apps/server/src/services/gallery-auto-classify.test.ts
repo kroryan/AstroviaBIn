@@ -85,3 +85,58 @@ it('names catalogs after a descriptive title unless a title names the identified
   assert.ok(titleReferencesTarget('IC153.png', 'IC 153'));
   assert.ok(!titleReferencesTarget('Pallas (2 Pallas)', 'IC 86'));
 });
+
+it('places spectroscopy FITS by their header position: inside a solved field, with the same star, or alone', async () => {
+  const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const { spectrumPosition } = await import('./gallery-auto-classify');
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-spectra-'));
+  const previous = process.env.FITS_UPLOAD_DIR;
+  process.env.FITS_UPLOAD_DIR = directory;
+  const card = (key: string, value?: string) => (value === undefined ? key : `${key.padEnd(8, ' ')}= ${value}`).padEnd(80, ' ').slice(0, 80);
+  const spectrumFits = (cards: string[]) => {
+    const header = Buffer.from([card('SIMPLE', 'T'), card('BITPIX', '-32'), card('NAXIS', '2'), card('NAXIS1', '4'), card('NAXIS2', '1'), ...cards, card('END')].join(''), 'ascii');
+    return Buffer.concat([header, Buffer.alloc(2880 - header.length, ' '), Buffer.alloc(2880)]);
+  };
+  try {
+    // SDSS: RA/DEC is the plate centre, PLUG_RA/PLUG_DEC the fibre on the star.
+    assert.deepEqual(spectrumPosition({ RA: 40.9, DEC: 0, PLUG_RA: 40.3934, PLUG_DEC: -1.017 }), { ra: 40.3934, dec: -1.017 });
+    assert.deepEqual(spectrumPosition({ OBJCTRA: '10 00 00', OBJCTDEC: '+45 00 00' }), { ra: 150, dec: 45 });
+    assert.equal(spectrumPosition({ OBJECT: 'no position' }), null);
+
+    const spectrum = async (name: string, cards: string[]) => {
+      await writeFile(path.join(directory, name), spectrumFits(cards));
+      return storage.createAstroImage({ title: name, filename: name, originalPath: `fits-upload://${name}`, tags: ['FITS', 'Spectrum', '1-D spectrum'] } as any);
+    };
+    const inField = await spectrum('pollux-spec.fits', [card('PLUG_RA', '116.36'), card('PLUG_DEC', '28.07')]);
+    const alone = await spectrum('far-star.fits', [card('OBJCTRA', "'10 00 00'"), card('OBJCTDEC', "'+45 00 00'")]);
+    const sameStar = await spectrum('far-star-2.fits', [card('RA', '150.001'), card('DEC', '45.001')]);
+    const noPosition = await spectrum('unknown.fits', []);
+
+    await classifyGallery({ imageId: inField.id });
+    await classifyGallery({ imageId: alone.id });
+    await classifyGallery({ imageId: sameStar.id });
+    await classifyGallery({ imageId: noPosition.id });
+    const catalogs = await storage.getGalleryCatalogs();
+    const of = (id: number) => catalogs.filter(catalog => catalog.imageIds.includes(id)).map(catalog => catalog.name);
+    assert.deepEqual(of(inField.id), ['lonely'], 'a spectrum inside a solved field joins that field');
+    assert.equal(of(alone.id).length, 1);
+    assert.deepEqual(of(sameStar.id), of(alone.id), 'two spectra of the same star share a catalog');
+    assert.notDeepEqual(of(alone.id), ['lonely']);
+    assert.deepEqual(of(noPosition.id), [], 'without a header position a spectrum stays loose');
+
+    // Later arrivals near the spectrum: another spectrum 5' away and a plate-solved image of that field.
+    const near = await spectrum('far-star-3.fits', [card('RA', '150.08'), card('DEC', '45.03')]);
+    await classifyGallery({ imageId: near.id });
+    const solvedLater = await storage.createAstroImage({ title: 'field 10h', filename: 'field.fits', plateSolved: true, ra: '150.02', dec: '45.01', fieldOfView: "40' × 30'", targetName: null, tags: ['Deep Sky'] } as any);
+    await classifyGallery({ imageId: solvedLater.id });
+    const now = await storage.getGalleryCatalogs();
+    const in_ = (id: number) => now.filter(catalog => catalog.imageIds.includes(id)).map(catalog => catalog.name);
+    assert.deepEqual(in_(near.id), in_(alone.id), 'a nearby spectrum joins the same album');
+    assert.deepEqual(in_(solvedLater.id), in_(alone.id), 'an image solved later in that area joins the spectrum album');
+  } finally {
+    if (previous === undefined) delete process.env.FITS_UPLOAD_DIR; else process.env.FITS_UPLOAD_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
+});

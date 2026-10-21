@@ -61,7 +61,7 @@ export default function PlateSolvingPage() {
     try {
       const response = await fetch(`/api/plate-solving/update/${jobId}`, { method: "POST", credentials: "include" });
       if (!response.ok) throw new Error("Status check failed");
-      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] }); queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] });
       refreshResults();
     } catch {
       setCheckErrors(errors => new Set(errors).add(jobId));
@@ -117,7 +117,7 @@ export default function PlateSolvingPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/images"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs"] }); queryClient.invalidateQueries({ queryKey: ["/api/plate-solving/jobs/summary"] });
       queryClient.invalidateQueries({ queryKey: ["/api/stats"] });
       setSelectedImages(new Set()); // Clear selection after submission
     },

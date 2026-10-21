@@ -1,5 +1,8 @@
+import { existsSync } from 'node:fs';
 import { Hono } from 'hono';
-import { access, mkdir, readdir, rm } from 'node:fs/promises';
+import { access, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import path from 'node:path';
@@ -31,6 +34,8 @@ import {
 } from '../services/fits-stacking';
 import { wcsFromStored } from '../services/wcs';
 import { tileInfo } from '../services/tiles';
+import { existingUploads, rememberFitsUpload } from '../services/upload-duplicates';
+import { classifyGallery, classifyLooseSpectra } from '../services/gallery-auto-classify';
 import { rejectDeclaredOversize, sanitizedUploadFilename, UploadRequestError, writeUploadBody } from '../services/upload-stream';
 import { astrometryService } from '../services/astrometry';
 import { configService } from '../services/config';
@@ -195,11 +200,14 @@ app.post('/scan', async (c) => {
         }
       }
     }
+    if (imported) await classifyLooseSpectra().catch(error => console.error('Failed to classify spectroscopy FITS:', error));
     return c.json({ imported, updated, errors });
   } catch (error) {
     return handleRouteError(c, error, 'Failed to scan the FITS library');
   }
 });
+
+let lastUploadStamp = 0;
 
 app.post('/upload', async (c) => {
   let outputPath: string | undefined;
@@ -210,16 +218,31 @@ app.post('/upload', async (c) => {
     if (!FITS_EXTENSIONS.has(extension)) return c.json({ message: 'Only .fit, .fits, and .fts files are supported' }, 415);
     const basename = originalName.slice(0, -extension.length).replace(/[^a-z0-9._-]+/gi, '_').replace(/^[_ .-]+|[_ .-]+$/g, '');
     if (!basename) return c.json({ message: 'Invalid FITS filename' }, 400);
-    const outputName = `${basename}-${Date.now()}${extension}`;
+    // Unique even for parallel uploads of files that share a name: a stamp never reused by this process.
+    let stamp = Math.max(Date.now(), lastUploadStamp + 1);
+    while (existsSync(path.join(fitsUploadDirectory(), `${basename}-${stamp}${extension}`))) stamp++;
+    lastUploadStamp = stamp;
+    const outputName = `${basename}-${stamp}${extension}`;
     outputPath = path.join(fitsUploadDirectory(), outputName);
     await mkdir(fitsUploadDirectory(), { recursive: true });
-    await writeUploadBody(c.req.raw.body, outputPath);
+    const { byteSize, sha256 } = await writeUploadBody(c.req.raw.body, outputPath);
+    // Same content already stored (by SHA-256, not by name): existing FITS stay untouched, this copy is dropped.
+    if ((await existingUploads([{ size: byteSize, sha256 }])).size) {
+      await rm(outputPath, { force: true });
+      outputPath = undefined;
+      return c.json({ duplicate: true, message: 'Already in the library' }, 200);
+    }
     // Extension or tile-compressed FITS (Slooh, fpack) become a standard FITS; the original is kept.
     const normalized = await normalizeUploadedFits(outputPath);
     // Spectroscopy is recognised on upload: 1-D spectra (by their structure) and slitless frames (by
     // their header or the one-sided first orders of their stars) get their own tags.
     const detection = await detectSpectroscopy(outputPath);
     const image = await importFits(outputPath, fitsUploadDirectory(), 'upload', detection);
+    await rememberFitsUpload(outputPath, sha256);
+    // A spectrum cannot be plate-solved: it joins the catalog of its field from its header position now.
+    if (image?.tags?.some(tag => tag === 'Spectrum' || tag === 'Spectroscopy')) {
+      await classifyGallery({ imageId: image.id }).catch(error => console.error(`Failed to classify spectrum ${image.id}:`, error));
+    }
     return c.json({ image, output: outputName, normalized }, 201);
   } catch (error) {
     if (outputPath) {
@@ -266,6 +289,9 @@ app.get('/:imageId/metadata', async (c) => {
   }
 });
 
+/** Bump when the thumbnail rendering changes (part of the thumbnail ETag). */
+const FITS_THUMBNAIL_VERSION = 1;
+
 app.get('/:imageId/preview', async (c) => {
   try {
     const image = await storage.getAstroImage(Number(c.req.param('imageId')));
@@ -298,6 +324,16 @@ app.get('/:imageId/preview', async (c) => {
     });
     // `full` is the non-tiled fallback; native-resolution viewing goes through /tile. Cap it so a single
     // request cannot allocate gigabytes for a very large frame.
+    // Gallery thumbnails: small JPEG with an ETag (file, size, modification time, rendering version), so
+    // browsers keep them and revalidation costs a stat instead of a render.
+    if (query.thumb === '1') {
+      const info = await stat(filePath);
+      const etag = `"${createHash('sha256').update(JSON.stringify({ filePath, size: info.size, mtime: info.mtimeMs, render: FITS_THUMBNAIL_VERSION, settings })).digest('hex').slice(0, 32)}"`;
+      if (c.req.header('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag, 'cache-control': 'private, no-cache' } });
+      const png = await cachedFitsPreview(filePath, settings, 512);
+      const jpeg = await sharp(png).flatten({ background: '#000000' }).jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+      return new Response(new Uint8Array(jpeg), { headers: { 'content-type': 'image/jpeg', etag, 'cache-control': 'private, no-cache', 'x-content-type-options': 'nosniff' } });
+    }
     const fullMaximum = Number(process.env.FITS_FULL_PREVIEW_MAX) > 0 ? Number(process.env.FITS_FULL_PREVIEW_MAX) : 4096;
     const maximumDimension = query.preview === 'interactive' ? 1024 : query.preview === 'full' ? fullMaximum : 2048;
     const preview = await cachedFitsPreview(filePath, settings, maximumDimension);
