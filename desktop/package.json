@@ -1,7 +1,7 @@
 {
   "name": "astroviabin-desktop",
   "productName": "AstroviaBin",
-  "version": "0.12.4",
+  "version": "0.12.5",
   "description": "AstroviaBin desktop server: system tray app that runs your private astrophotography library",
   "main": "src/main.js",
   "author": {

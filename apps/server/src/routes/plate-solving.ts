@@ -91,9 +91,13 @@ export default (wsManager?: WsManager) => {
   async function visiblePlateSolvingJobs() {
     const [jobs, images] = await Promise.all([storage.getPlateSolvingJobs(), storage.getAstroImages()]);
     const byId = new Map(images.map(image => [image.id, image]));
+    // A failed attempt is history once a later job solved the same image: not shown as a failure.
+    const lastSuccess = new Map<number | null, number>();
+    for (const job of jobs) if (job.status === 'success') lastSuccess.set(job.imageId, Math.max(job.id, lastSuccess.get(job.imageId) ?? 0));
+    const superseded = (job: (typeof jobs)[number]) => job.status === 'failed' && (lastSuccess.get(job.imageId) ?? 0) > job.id;
     return jobs.filter(job => {
       const image = job.imageId === null ? undefined : byId.get(job.imageId);
-      return image?.plateSolved || isPlateSolvingEligible(image?.tags);
+      return (image?.plateSolved || isPlateSolvingEligible(image?.tags)) && !superseded(job);
     });
   }
 
