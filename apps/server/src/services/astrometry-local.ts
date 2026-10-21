@@ -293,6 +293,44 @@ async function siblingHint(image: LocalImage): Promise<HintAttempt | null> {
   return validPosition(ra, dec) ? { label: `same session as image ${sibling.id}`, ra, dec, radiusDeg: 2 } : null;
 }
 
+/**
+ * A frame of the same session (same name prefix), same telescope and same size that is already solved:
+ * the observatory took both filters back to back without moving, so the sparse frame is aligned to it
+ * (astroalign) and inherits its WCS (tools/scripts/wcs_transfer.py, with strict same-pointing checks).
+ */
+async function sessionWcsTransfer(image: LocalImage, source: SolveSource, workDirectory: string): Promise<{ path: string; label: string } | null> {
+  if (source.kind !== 'fits') return null;
+  const prefix = (image.filename || '').toLowerCase().split('_').slice(0, 2).join('_');
+  if (!/^[a-z0-9+-]{2,}_\d{6,8}$/.test(prefix)) return null;
+  const python = process.env.ASTROVIABIN_ANALYSIS_PYTHON || '/opt/astroviabin-python/bin/python';
+  const script = process.env.WCS_TRANSFER_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/wcs_transfer.py');
+  try { await access(script); } catch { return null; }
+  const self = await storage.getAstroImage(image.id);
+  const jobs = await storage.getPlateSolvingJobs();
+  const solved = (await storage.getAstroImages({ plateSolved: true }))
+    .filter(other => other.id !== image.id && (other.filename || '').toLowerCase().startsWith(`${prefix}_`)
+      && (!self?.telescope || other.telescope === self.telescope));
+  const time = (value: unknown) => (value ? new Date(value as string).getTime() : 0) || 0;
+  solved.sort((a, b) => Math.abs(time(a.captureDate) - time(self?.captureDate)) - Math.abs(time(b.captureDate) - time(self?.captureDate)));
+  for (const sibling of solved.slice(0, 3)) {
+    const job = jobs.find(candidate => candidate.imageId === sibling.id && candidate.status === 'success');
+    const wcs = (job?.result as { wcs?: { imageWidth?: number; imageHeight?: number } } | null)?.wcs;
+    const reference = resolveFitsFile(sibling.originalPath || null);
+    if (!wcs || !reference || wcs.imageWidth !== source.width || wcs.imageHeight !== source.height) continue;
+    const wcsJson = path.join(workDirectory, `reference-${sibling.id}.json`);
+    const output = path.join(workDirectory, `transfer-${sibling.id}.wcs`);
+    await writeFile(wcsJson, JSON.stringify(wcs));
+    try {
+      const summary = await run(python, [script, source.path, reference, wcsJson, output], 120_000);
+      console.log(`WCS transfer for image ${image.id} from image ${sibling.id}: ${summary.trim().split('\n').pop()}`);
+      return { path: output, label: `aligned to the solved frame ${sibling.id} of the same pointing` };
+    } catch (error) {
+      if (error instanceof SolveAbortedError) throw error;
+    }
+  }
+  return null;
+}
+
 async function hintAttempts(image: LocalImage, source: SolveSource, userHint?: SolveHint): Promise<HintAttempt[]> {
   const attempts: HintAttempt[] = [];
   if (userHint && validPosition(userHint.ra, userHint.dec)) {
@@ -505,7 +543,14 @@ export async function solveImageLocally(image: LocalImage, options: { hint?: Sol
 
     const failures: string[] = [];
     let wcsPath: string | undefined;
-    for (const [index, attempt] of attempts.entries()) {
+    // Frames too sparse to solve on their own (a few seconds through a blue filter) get the WCS of a
+    // solved frame of the same pointing; Astrometry.net runs as usual when there is none.
+    const transferred = await sessionWcsTransfer(image, source, workDirectory);
+    if (transferred) {
+      wcsPath = transferred.path;
+      console.log(`Local solve for image ${image.id} succeeded: ${transferred.label}`);
+    }
+    for (const [index, attempt] of (wcsPath ? [] : attempts).entries()) {
       const remaining = totalBudgetMs - (Date.now() - startedAt);
       if (remaining < 20_000) break;
       // The last two blind attempts share what is left; hinted ones are capped.

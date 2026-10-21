@@ -127,6 +127,7 @@ COPY tools/scripts/hotpants_aux.py ./tools/scripts/hotpants_aux.py
 COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
 COPY tools/scripts/ccdproc_stack.py ./tools/scripts/ccdproc_stack.py
 COPY tools/scripts/spectroscopy.py ./tools/scripts/spectroscopy.py
+COPY tools/scripts/wcs_transfer.py ./tools/scripts/wcs_transfer.py
 COPY tools/scripts/install_ppxf.py ./tools/scripts/install_ppxf.py
 COPY tools/data/spectral-library.fits ./tools/data/spectral-library.fits
 COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes

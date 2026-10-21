@@ -134,6 +134,14 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">astroalign and SEP</h3>
+        <p className="text-muted-foreground">Frames too sparse to plate-solve (a few seconds through a blue filter) are aligned to a solved frame of the same pointing with astroalign by Martin Beroiz and contributors (MIT license; Beroiz, Cabral &amp; Sanchez 2020, Astronomy and Computing 32, 100384), which uses SEP, the Source Extractor library by Kyle Barbary and contributors (LGPL 3.0 or later, with BSD parts; Barbary 2016, JOSS 1, 58), bundled unmodified. The WCS is fitted with Astropy to the matched stars and accepted only for the same pointing (at least 15 stars, residuals under 1 pixel, same scale and rotation).</p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="https://github.com/quatrope/astroalign/blob/master/LICENSE.txt" target="_blank" rel="noreferrer">astroalign license</a>
+          <a className="text-primary underline" href="https://github.com/kbarbary/sep" target="_blank" rel="noreferrer">SEP source and licenses</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">hash-wasm</h3>
         <p className="text-muted-foreground">Before an upload, the browser computes SHA-256 checksums with hash-wasm by Dani Biró (MIT license) to skip files already stored on the server. Only checksums and sizes are sent; files that are already stored are not uploaded.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">

@@ -20,8 +20,9 @@ export async function setPlateSolvingPaused(paused: boolean): Promise<void> {
  * Bump when the local solving strategy improves: failed Deep Sky jobs of unsolved images are queued
  * again once (with their stored hints), so they get the new attempts without anyone resubmitting them.
  * 2: hinted attempts also use solve-field's own source extraction.
+ * 3: frames too sparse to solve get the WCS of a solved frame of the same pointing (astroalign).
  */
-export const SOLVING_STRATEGY_VERSION = 2;
+export const SOLVING_STRATEGY_VERSION = 3;
 
 export async function requeueFailedForNewStrategy(eligible: (tags: string[] | null | undefined) => boolean): Promise<number> {
   const settings = await storage.getAdminSettings();
