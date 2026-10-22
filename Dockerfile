@@ -1,7 +1,7 @@
 # Multi-stage build for AstroviaBin
 # SECURITY: This image does not contain any secrets or API keys
 # All sensitive configuration is provided via environment variables at runtime
-FROM node:24-alpine AS builder
+FROM node:25-alpine AS builder
 
 # Build tools for native modules (better-sqlite3) that lack a prebuilt binary
 # hadolint ignore=DL3018
@@ -32,14 +32,14 @@ RUN npm run build:docker
 
 # Build vendored upstream HOTPANTS programs, including its alternative
 # extractkernOnes helper. The C source and numerical methods are unmodified.
-FROM node:24-trixie-slim AS hotpants-builder
+FROM node:25-trixie-slim AS hotpants-builder
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make gcc libc6-dev libcfitsio-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY vendor/hotpants/ /opt/hotpants/
 RUN cd /opt/hotpants && make CFITSIOINCDIR=/usr/include LIBDIR=/usr/lib CC='gcc -fcommon' && \
     gcc -fcommon -O3 -std=c99 -D_GNU_SOURCE -I/usr/include extractkernOnes.c -o extractkern-ones -lm -lcfitsio
 
 # Production stage
-FROM node:24-trixie-slim AS runtime
+FROM node:25-trixie-slim AS runtime
 
 # Upgrade npm to the newest 11.x; node:24-alpine bundles an npm whose own
 # dependencies (tar, brace-expansion, ip-address) have known CVEs
