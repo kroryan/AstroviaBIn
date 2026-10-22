@@ -12,7 +12,7 @@ import { DescriptionEditorModal } from "./description-editor-modal";
 import { TargetPickerModal } from "./target-picker-modal";
 import { FitsProcessingPanel } from "./fits-processing-panel";
 import { HotpantsAnalysis } from "./hotpants-analysis";
-import { SpectroscopyPanel } from "./spectroscopy-panel";
+import { isSpectroscopyImage, SpectroscopyPanel } from "./spectroscopy-panel";
 import { ImageTagsEditor } from "./image-tags-editor";
 import { PlateSolveControls } from "./plate-solve-controls";
 import { SkyLayerToggles, useSkyLayers } from "./sky-layer-toggles";
@@ -330,7 +330,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
             </section>
             {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
             <FitsProcessingPanel image={currentImage} />
-            <SpectroscopyPanel image={currentImage} />
+            {isSpectroscopyImage(currentImage) && <SpectroscopyPanel image={currentImage} />}
             {/* Location */}
             {(image.latitude || image.longitude) && (
               <section className="bg-muted/30 rounded-xl p-4 mb-2 shadow border border-black/20">
@@ -798,7 +798,7 @@ export function ImageOverlay({ image, onClose, onFilterByEquipment }: ImageOverl
 
             {/^(fits|fits-derived|fits-upload):\/\//.test(currentImage.originalPath || '') && <HotpantsAnalysis image={currentImage} />}
             <FitsProcessingPanel image={currentImage} />
-            <SpectroscopyPanel image={currentImage} />
+            {isSpectroscopyImage(currentImage) && <SpectroscopyPanel image={currentImage} />}
           </div>
         </aside>
       )}

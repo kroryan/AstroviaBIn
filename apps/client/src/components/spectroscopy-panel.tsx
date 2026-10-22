@@ -191,6 +191,12 @@ function StarDetail({ star, comparison }: { star: Star; comparison?: Comparison 
   </div>;
 }
 
+/** Spectroscopy tools only apply to spectra: 1-D spectra and slitless/grating frames (tagged on upload). */
+const SPECTROSCOPY_TAGS = ['Spectrum', 'Spectroscopy', 'Slitless spectrum', '1-D spectrum'];
+export function isSpectroscopyImage(image: AstroImage): boolean {
+  return (image.tags ?? []).some(tag => SPECTROSCOPY_TAGS.includes(tag));
+}
+
 export function SpectroscopyPanel({ image }: { image: AstroImage }) {
   const fits = isFits(image);
   const { canEdit } = useCurrentUser();
