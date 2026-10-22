@@ -49,6 +49,18 @@ USER_AGENT = 'AstroviaBin/1.0 (HOTPANTS candidate verification)'
 CYAN, MAGENTA, YELLOW, RED = '#00c8d7', '#ff2bd6', '#f9d302', '#ff3b3b'
 
 
+# ----------------------------------------------------------------------------- progress log
+# Read by the server and shown in the verification console: "PROGRESS {json}" lines set the bar,
+# every other stderr line is a time-stamped log entry.
+
+def log(message):
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
+
+
+def progress(percent, step):
+    print('PROGRESS ' + json.dumps({'percent': round(float(percent), 1), 'step': step}), file=sys.stderr, flush=True)
+
+
 # ----------------------------------------------------------------------------- data access
 
 def load(path):
@@ -96,6 +108,7 @@ def number(value):
 
 def gaia_stars(ra, dec, radius_arcsec, epoch):
     """Gaia DR3 stars (G < 20) around a position, propagated from J2016.0 to `epoch`."""
+    started = datetime.datetime.now()
     rows = vizier('I/355/gaiadr3', ra, dec, radius_arcsec,
                   ['Source', 'RA_ICRS', 'DE_ICRS', 'pmRA', 'pmDE', 'Gmag', 'RUWE'], {'Gmag': '<20'})
     stars = []
@@ -109,10 +122,13 @@ def gaia_stars(ra, dec, radius_arcsec, epoch):
         r_now = r + pmra * years / 3.6e6 / max(1e-6, math.cos(math.radians(d)))
         stars.append({'source': row.get('Source'), 'ra': r_now, 'dec': d_now, 'g': g,
                       'pmra': pmra, 'pmdec': pmdec, 'ruwe': number(row.get('RUWE'))})
+    seconds = (datetime.datetime.now() - started).total_seconds()
+    log(f"Gaia DR3 (VizieR I/355) at {ra:.5f} {dec:+.5f}, radius {radius_arcsec / 60:.1f}': {len(stars)} stars in {seconds:.1f} s")
     return stars
 
 
 def vsx_variables(ra, dec, radius_arcsec):
+    started = datetime.datetime.now()
     rows = vizier('B/vsx/vsx', ra, dec, radius_arcsec, ['Name', 'Type', 'max', 'min', 'RAJ2000', 'DEJ2000'])
     result = []
     for row in rows:
@@ -121,6 +137,7 @@ def vsx_variables(ra, dec, radius_arcsec):
             continue
         result.append({'name': row.get('Name'), 'type': row.get('Type'), 'max': row.get('max'),
                        'min': row.get('min'), 'ra': r, 'dec': d})
+    log(f"AAVSO VSX at {ra:.5f} {dec:+.5f}: {len(result)} variable(s) within {radius_arcsec:.0f}\" in {(datetime.datetime.now() - started).total_seconds():.1f} s")
     return result
 
 
@@ -129,7 +146,9 @@ def simbad_objects(ra, dec, radius_arcsec):
              f"POINT('ICRS', {ra:.7f}, {dec:.7f})) AS dist FROM basic WHERE CONTAINS(POINT('ICRS', ra, dec), "
              f"CIRCLE('ICRS', {ra:.7f}, {dec:.7f}, {radius_arcsec / 3600:.6f})) = 1 ORDER BY dist")
     params = urllib.parse.urlencode({'request': 'doQuery', 'lang': 'adql', 'format': 'json', 'query': query})
+    started = datetime.datetime.now()
     data = json.loads(fetch('https://simbad.cds.unistra.fr/simbad/sim-tap/sync?' + params)).get('data') or []
+    log(f"SIMBAD at {ra:.5f} {dec:+.5f}: {len(data)} object(s) within {radius_arcsec:.0f}\" in {(datetime.datetime.now() - started).total_seconds():.1f} s")
     return [{'name': ' '.join(str(name).split()), 'type': str(otype), 'ra': float(r), 'dec': float(d),
              'separationArcsec': round(float(dist) * 3600, 2)} for name, otype, r, d, dist in data
             if r is not None and d is not None]
@@ -210,33 +229,90 @@ def observation_epoch(header):
         return 2016.0
 
 
-def local_calibration(science, wcs, x, y, fwhm, stars, saturation):
-    """Local astrometric offset and photometric zero point from Gaia stars near the candidate."""
+def field_sources(science, fwhm):
+    """Stars detected once in the whole science image (photutils DAOStarFinder, Stetson 1987) with a
+    KD-tree for matching; every candidate's local calibration reuses them."""
+    from astropy.stats import sigma_clipped_stats
+    from photutils.detection import DAOStarFinder
+    from scipy.spatial import cKDTree
+
+    _, median, std = sigma_clipped_stats(science[np.isfinite(science)], sigma=3.0)
+    table = DAOStarFinder(fwhm=fwhm, threshold=3 * std, exclude_border=True)(np.nan_to_num(science - median))
+    if table is None or len(table) == 0:
+        return {'x': np.array([]), 'y': np.array([]), 'peak': np.array([]), 'tree': None, 'median': float(median)}
+    column = (lambda *names: np.asarray(table[next(name for name in names if name in table.colnames)], dtype=float))
+    x, y = column('x_centroid', 'xcentroid'), column('y_centroid', 'ycentroid')
+    return {'x': x, 'y': y, 'peak': column('peak'), 'tree': cKDTree(np.column_stack([x, y])), 'median': float(median),
+            'refined': {}, 'fwhm': fwhm}
+
+
+def refined_centroid(science, sources, index):
+    """2-D Gaussian centroid (photutils centroid_2dg) of one detected star, computed once and cached:
+    more precise than the DAOFIND marginal centroid for the astrometric offsets."""
+    if index not in sources['refined']:
+        from photutils.centroids import centroid_2dg, centroid_sources
+        box = int(2 * math.ceil(1.5 * sources['fwhm']) + 1)
+        try:
+            cx, cy = centroid_sources(science - sources['median'], sources['x'][index], sources['y'][index],
+                                      box_size=max(box, 7), centroid_func=centroid_2dg)
+            cx, cy = float(np.atleast_1d(cx)[0]), float(np.atleast_1d(cy)[0])
+            if not (np.isfinite(cx) and np.isfinite(cy)) or math.hypot(cx - sources['x'][index], cy - sources['y'][index]) > 1.5:
+                cx, cy = float(sources['x'][index]), float(sources['y'][index])
+        except Exception:
+            cx, cy = float(sources['x'][index]), float(sources['y'][index])
+        sources['refined'][index] = (cx, cy)
+    return sources['refined'][index]
+
+
+def local_calibration(science, wcs, x, y, fwhm, stars, saturation, sources=None):
+    """Local astrometric offset and photometric zero point from Gaia stars near the candidate.
+
+    Gaia stars (propagated to the observation epoch) are matched to the stars detected in the image
+    (DAOStarFinder centroids); a detection claimed by two Gaia stars of similar brightness is a blend
+    and is skipped. Zero points come from photutils aperture photometry with a local annulus."""
+    from photutils.aperture import ApertureStats, CircularAnnulus, CircularAperture, aperture_photometry
+
+    sources = sources if sources is not None else field_sources(science, fwhm)
     scale = pixel_scale_arcsec(wcs)
     offsets, zero_points = [], []
     aperture = max(2.0, 1.5 * fwhm)
-    for star in stars:
-        if star['g'] < 10 or (star.get('ruwe') or 1) > 1.4:
-            continue
-        sx, sy = wcs.world_to_pixel_values(star['ra'], star['dec'])
-        sx, sy = float(sx), float(sy)
-        if not (10 <= sx < science.shape[1] - 10 and 10 <= sy < science.shape[0] - 10):
-            continue
-        if math.hypot(sx - x, sy - y) < 2 * fwhm:
-            continue
-        fit = gaussian_fit(science, None, sx, sy, fwhm)
-        if not fit or not fit['converged'] or fit['flux'] <= 0:
-            continue
-        if saturation and fit['peak'] + np.median(science) > 0.8 * saturation:
-            continue
-        if abs(fit['fwhm'] - fwhm) > 0.6 * fwhm or math.hypot(fit['x'] - sx, fit['y'] - sy) > 3:
-            continue
-        offsets.append((fit['x'] - sx, fit['y'] - sy, sx - x, sy - y, star['g']))
-        flux, _ = aperture_flux(science, fit['x'], fit['y'], aperture)
-        if flux and flux > 0 and 12 <= star['g'] <= 19:
-            zero_points.append(star['g'] + 2.5 * math.log10(flux))
-        if len(offsets) >= 80:
-            break
+    usable = [star for star in stars if star['g'] >= 10 and (star.get('ruwe') or 1) <= 1.4]
+    if sources['tree'] is not None and usable:
+        sx, sy = wcs.world_to_pixel_values([star['ra'] for star in usable], [star['dec'] for star in usable])
+        sx, sy = np.atleast_1d(np.asarray(sx, dtype=float)), np.atleast_1d(np.asarray(sy, dtype=float))
+        distance, nearest = sources['tree'].query(np.column_stack([sx, sy]), distance_upper_bound=3.0)
+        claimed = {}
+        for index, source in enumerate(nearest):
+            if np.isfinite(distance[index]):
+                claimed.setdefault(int(source), []).append(index)
+        for index, star in enumerate(usable):
+            if not np.isfinite(distance[index]):
+                continue
+            px, py = sx[index], sy[index]
+            if not (10 <= px < science.shape[1] - 10 and 10 <= py < science.shape[0] - 10):
+                continue
+            if math.hypot(px - x, py - y) < 2 * fwhm:
+                continue
+            source = int(nearest[index])
+            rivals = [other for other in claimed[source] if other != index and abs(usable[other]['g'] - star['g']) < 2.5]
+            if rivals:
+                continue  # two Gaia stars in one detection: blended centroid
+            if saturation and sources['peak'][source] + sources['median'] > 0.8 * saturation:
+                continue
+            mx, my = refined_centroid(science, sources, source)
+            offsets.append((mx - px, my - py, px - x, py - y, star['g'], mx, my))
+            if len(offsets) >= 80:
+                break
+    if offsets:
+        bright = [entry for entry in offsets if 12 <= entry[4] <= 19]
+        if bright:
+            positions = np.array([(entry[5], entry[6]) for entry in bright])
+            circles = CircularAperture(positions, r=aperture)
+            annuli = CircularAnnulus(positions, r_in=1.8 * aperture, r_out=2.8 * aperture)
+            background = ApertureStats(science, annuli).median
+            fluxes = np.asarray(aperture_photometry(science, circles)['aperture_sum'], dtype=float) - background * circles.area
+            zero_points = [entry[4] + 2.5 * math.log10(flux) for entry, flux in zip(bright, fluxes) if np.isfinite(flux) and flux > 0]
+        offsets = [entry[:5] for entry in offsets]
     result = {'starsUsed': len(offsets), 'zeroPointStars': len(zero_points)}
     if len(offsets) >= 3:
         offsets = np.asarray(offsets)
@@ -388,8 +464,17 @@ def verify(work, report, science, science_header, difference, noise, wcs):
     saturation = number(science_header.get('SATURATE'))
     registration_rms = float((report.get('registration') or {}).get('rmsAfterPx') or 0)
 
+    progress(3, 'Detecting stars in the science image')
+    sources = field_sources(science, fwhm)
+    log(f"Detected {len(sources['x'])} stars in the science image (DAOStarFinder, FWHM {fwhm:.2f} px)")
+    progress(8, f'Verifying {min(len(candidates), MAX_VERIFIED)} candidates')
+
+    total = min(len(candidates), MAX_VERIFIED)
+    finished = []
+
     def one(index):
         candidate = candidates[index]
+        log(f"Candidate {index + 1}/{total}: verifying")
         x0 = float(candidate.get('centroidX', candidate['x']))
         y0 = float(candidate.get('centroidY', candidate['y']))
         fit = gaussian_fit(difference, noise, x0, y0, fwhm)
@@ -404,9 +489,13 @@ def verify(work, report, science, science_header, difference, noise, wcs):
             radius = min(900.0, max(120.0, 150 * scale))
             stars = gaia_stars(ra, dec, radius, epoch)
             entry['online'] = True
-            calibration = local_calibration(science, wcs, x, y, fwhm, stars, saturation)
+            calibration = local_calibration(science, wcs, x, y, fwhm, stars, saturation, sources)
+            log(f"Candidate {index + 1}: tied to {calibration.get('starsUsed', 0)} Gaia stars"
+                + (f", offset ({calibration['dxPx']:+.2f}, {calibration['dyPx']:+.2f}) px, scatter {calibration['rmsArcsec']}\"" if 'dxPx' in calibration else ' (too few: plate solution only)')
+                + (f", zero point {calibration['zeroPoint']} ± {calibration['zeroPointError']}" if 'zeroPoint' in calibration else ''))
         except Exception as error:
             entry['notes'].append(f'Gaia DR3 unavailable: {error}')
+            log(f"Candidate {index + 1}: Gaia DR3 unavailable ({error})")
         astrometric_error = scale * max(registration_rms, 0.1)
         if 'dxPx' in calibration:
             ra, dec = (float(value) for value in wcs.pixel_to_world_values(x - calibration['dxPx'], y - calibration['dyPx']))
@@ -425,8 +514,11 @@ def verify(work, report, science, science_header, difference, noise, wcs):
             entry['magnitude'] = {'value': round(magnitude, 2), 'error': round(magnitude_error, 2),
                                   'system': f"Gaia G-calibrated, {report.get('sourceFilter') or 'unknown'} filter (approximate)"}
         if stars:
-            nearest = min(stars, key=lambda star: separation_arcsec(ra, dec, star['ra'], star['dec']))
-            separation = separation_arcsec(ra, dec, nearest['ra'], nearest['dec'])
+            # One vectorised astropy separation for all Gaia stars (not one SkyCoord pair per star).
+            separations = SkyCoord(ra * u.deg, dec * u.deg).separation(
+                SkyCoord([star['ra'] for star in stars] * u.deg, [star['dec'] for star in stars] * u.deg)).arcsec
+            closest = int(np.argmin(separations))
+            nearest, separation = stars[closest], float(separations[closest])
             if separation <= 10:
                 entry['gaiaNearest'] = {'source': nearest['source'], 'g': nearest['g'], 'separationArcsec': round(separation, 2)}
         if entry['online']:
@@ -437,6 +529,7 @@ def verify(work, report, science, science_header, difference, noise, wcs):
                     entry['vsxNearest'] = {**best, 'separationArcsec': round(separation_arcsec(ra, dec, best['ra'], best['dec']), 2)}
             except Exception as error:
                 entry['notes'].append(f'AAVSO VSX unavailable: {error}')
+                log(f"Candidate {index + 1}: AAVSO VSX unavailable ({error})")
             try:
                 objects = simbad_objects(ra, dec, 90)
                 entry['simbad'] = objects[:8]
@@ -445,6 +538,7 @@ def verify(work, report, science, science_header, difference, noise, wcs):
                     entry['host'] = galaxies[0]
             except Exception as error:
                 entry['notes'].append(f'SIMBAD unavailable: {error}')
+                log(f"Candidate {index + 1}: SIMBAD unavailable ({error})")
         ngc_host = open_ngc_host(ra, dec)
         if ngc_host:
             entry['host'] = ngc_host
@@ -458,9 +552,12 @@ def verify(work, report, science, science_header, difference, noise, wcs):
             'secondEpoch': ((report.get('candidateChecks') or {}).get(str(index)) or {}).get('status'),
         }
         entry['links'] = links(ra, dec)
+        finished.append(index)
+        log(f"Candidate {index + 1}: {entry['verdict']} (position ± {entry['positionErrorArcsec']}\")")
+        progress(8 + 62 * len(finished) / max(1, total), f'Verified {len(finished)} of {total} candidates')
         return entry
 
-    indices = list(range(min(len(candidates), MAX_VERIFIED)))
+    indices = list(range(total))
     with ThreadPoolExecutor(max_workers=6) as pool:
         return list(pool.map(one, indices))
 
@@ -769,6 +866,7 @@ def wrap(text, width):
 
 def main(work, title):
     work = Path(work)
+    progress(1, 'Loading the analysis images')
     report = json.loads((work / 'report.json').read_text())
     science, header = load(work / 'science.fits')
     reference, _ = load(work / 'reference-aligned.fits')
@@ -782,7 +880,8 @@ def main(work, title):
     noise_level = float(np.median(finite_noise)) if finite_noise.size else float(np.nanstd(difference))
     entries = verify(work, report, science, header, difference, noise, wcs)
     files = []
-    for entry in entries:
+    for done, entry in enumerate(entries):
+        progress(70 + 20 * done / max(1, len(entries)), f'Drawing stamps and blink images ({done + 1}/{len(entries)})')
         index = entry['index']
         figure = candidate_figure(index, entry, (science, reference, difference), wcs, fwhm, scale, noise_level)
         name = f'candidate-{index + 1}.png'
@@ -793,12 +892,16 @@ def main(work, title):
                   'REFERENCE (PSF-matched)' if convolved is not reference else 'REFERENCE')
         entry['stamp'], entry['blink'] = name, blink
         files += [name, blink]
+    progress(92, 'Writing the PDF report')
+    log('Writing the PDF report')
     build_pdf(work / 'report.pdf', report, entries, header, title, (science, reference, difference), wcs, fwhm, scale, noise_level)
     files.append('report.pdf')
     result = {'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'online': any(entry['online'] for entry in entries), 'candidates': entries,
               'verifiedCount': len(entries), 'files': files}
     (work / 'verification.json').write_text(json.dumps(result, indent=1, default=float))
+    progress(100, 'Done')
+    log(f"Verification complete: {len(entries)} candidate(s)")
     print(json.dumps({'files': files, 'verified': len(entries)}))
 
 

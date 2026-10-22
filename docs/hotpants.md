@@ -91,3 +91,19 @@ image, and [its license](https://photutils.readthedocs.io/en/stable/development/
 and [source](https://github.com/astropy/photutils) are available upstream.
 Survey data may require provider attribution; see [SkyView credits](https://skyview.gsfc.nasa.gov/current/docs/credits.html)
 and [Pan-STARRS image cutout documentation](https://outerspace.stsci.edu/pages/viewpage.action?pageId=392364125).
+
+## Candidate verification
+
+"Verify candidates" runs `tools/scripts/hotpants_report.py` on a finished analysis.
+
+1. **Detect and match stars.** Stars are detected once in the science image with Photutils `DAOStarFinder` (Stetson 1987). Their centroids are refined with Photutils `centroid_2dg`. Near each candidate they are matched to Gaia DR3 stars (G < 20, RUWE ≤ 1.4), propagated to the observation epoch with their proper motions. Matching uses a KD-tree (SciPy) within 3 px. A detection claimed by two Gaia stars of similar brightness is a blend and is skipped.
+2. **Fit the local offset.** A local offset, plus a gradient when 12 or more stars are matched, is fitted with sigma clipping. The quoted ± is the 1σ uncertainty. It combines the candidate's own fit with the scatter measured on bright calibration stars.
+3. **Calibrate the magnitude.** Magnitudes use a Gaia G zero point from Photutils aperture photometry with a local annulus. They are approximate when the filter is not G.
+4. **Cross-match.** Each candidate is cross-matched with Gaia DR3, AAVSO VSX, SIMBAD and OpenNGC hosts. Only coordinates are sent to CDS.
+5. **Follow progress or stop.** The verification has no time limit. Its progress bar and a time-stamped log (every catalogue query with its duration and row count, every candidate's calibration and verdict) are shown live in the panel, and the log can be downloaded. "Stop verification" ends it at once, and it can be regenerated later.
+
+Checked against the earlier per-star Gaussian-fit method on real analyses:
+- The positions agree within 0.01–0.17″, which is inside the quoted errors.
+- The zero points agree within 0.07 mag, and the verdicts are unchanged.
+- The calibration scatter is lower: 0.09″ instead of 0.12″, and 0.17″ instead of 0.70″ in a frame where faint, noisy stars had been used.
+- A dense Milky Way field with 25 candidates now verifies in about 50 s instead of more than 20 minutes.

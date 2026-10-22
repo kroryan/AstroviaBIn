@@ -51,6 +51,7 @@ type Report = {
   registration?: { matchedStars?: number; rmsBeforePx?: number; rmsAfterPx?: number; maxCorrectionPx?: number; applied?: boolean; note?: string };
   autoSettings?: { fwhmSciencePx?: number | null; fwhmReferencePx?: number | null; detectionFwhmPx?: number; hotpantsArgs?: string[] };
   verificationStatus?: 'running' | 'complete' | 'failed' | 'interrupted'; verificationError?: string;
+  verificationProgress?: { percent: number; step: string; updatedAt?: string }; verificationLog?: string[];
   verification?: { generatedAt: string; online: boolean; verifiedCount: number; candidates: Verification[] };
 };
 
@@ -81,7 +82,8 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     queryKey: [base, 'analyses'],
     queryFn: () => fetch(`${base}/analyses`).then(jsonResponse<Report[]>),
     enabled: expanded,
-    refetchInterval: 4000,
+    // Faster while a verification runs, so its progress bar and console follow it live.
+    refetchInterval: query => (query.state.data?.some(item => item.verificationStatus === 'running') ? 1500 : 4000),
   });
   const availableFits = useQuery<AstroImage[]>({
     queryKey: ['/api/fits'],
@@ -130,6 +132,11 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
     mutationFn: () => fetch(`${base}/analyses/${report?.runId}/verification`, { method: 'POST' }).then(jsonResponse<{ status: string }>),
     onSuccess: () => client.invalidateQueries({ queryKey: [base, 'analyses'] }),
   });
+  const stopVerify = useMutation({
+    mutationFn: () => fetch(`${base}/analyses/${report?.runId}/verification/stop`, { method: 'POST' }).then(jsonResponse<{ stopped: boolean }>),
+    onSuccess: () => client.invalidateQueries({ queryKey: [base, 'analyses'] }),
+  });
+  const [showLog, setShowLog] = useState(false);
   const [blink, setBlink] = useState<Record<number, boolean>>({});
   const checkCandidate = useMutation({
     mutationFn: (index: number) => fetch(`${base}/analyses/${report?.runId}/candidates/${index}/check`, {
@@ -253,12 +260,38 @@ export function HotpantsAnalysis({ image }: { image: AstroImage }) {
           <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium mr-auto">Verification and PDF report</p>
             {report.files?.includes('report.pdf') && <a href={file('report.pdf')} download className="inline-flex"><Button type="button" size="sm">Download PDF report</Button></a>}
-            <Button type="button" size="sm" variant="outline" disabled={verify.isPending || report.verificationStatus === 'running'} onClick={() => verify.mutate()}>
-              {report.verificationStatus === 'running' ? 'Verifying…' : report.verification ? 'Regenerate' : 'Verify candidates'}
-            </Button>
+            {report.verificationStatus === 'running'
+              ? <Button type="button" size="sm" variant="destructive" disabled={stopVerify.isPending} onClick={() => stopVerify.mutate()}>Stop verification</Button>
+              : <Button type="button" size="sm" variant="outline" disabled={verify.isPending} onClick={() => verify.mutate()}>
+                  {report.verification ? 'Regenerate' : 'Verify candidates'}
+                </Button>}
           </div>
           <p className="text-xs text-muted-foreground">Positions are fitted on the difference image and tied to nearby Gaia DR3 stars (proper motions at the observation date); ± is the 1σ uncertainty including local systematics. Each candidate is cross-matched with Gaia DR3, AAVSO VSX, SIMBAD/OpenNGC host galaxies and known asteroids, and its magnitude is calibrated against Gaia. Only coordinates are sent to CDS; regenerate after a second-epoch check to include it in the PDF.</p>
-          {report.verificationStatus === 'running' && <p role="status" className="text-xs">Cross-matching catalogues and drawing stamps…</p>}
+          {report.verificationStatus === 'running' && (
+            <div role="status" className="space-y-1">
+              <div className="flex justify-between text-xs">
+                <span>{report.verificationProgress?.step ?? 'Starting…'}</span>
+                <span className="font-mono">{Math.round(report.verificationProgress?.percent ?? 0)}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.max(2, Math.min(100, report.verificationProgress?.percent ?? 0))}%` }} />
+              </div>
+            </div>
+          )}
+          {(report.verificationLog?.length ?? 0) > 0 && (
+            <div>
+              <button type="button" className="text-xs text-primary underline" onClick={() => setShowLog(value => !value)}>
+                {showLog ? 'Hide verification log' : `Show verification log (${report.verificationLog!.length} lines)`}
+              </button>
+              {showLog && (
+                <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-black/70 p-2 font-mono text-[11px] leading-snug text-green-300">
+                  {report.verificationLog!.join('\n')}
+                </pre>
+              )}
+              {report.files?.includes('verification.log') || report.verificationLog ? <a href={file('verification.log')} download className="ml-3 text-xs text-primary underline">Download full log</a> : null}
+            </div>
+          )}
+          {stopVerify.error && <p role="alert" className="text-xs text-destructive">{stopVerify.error.message}</p>}
           {report.verificationStatus === 'failed' && <p role="alert" className="text-xs text-destructive">Verification failed: {report.verificationError}</p>}
           {report.verificationStatus === 'interrupted' && <p role="alert" className="text-xs text-amber-500">Verification was interrupted by a restart; regenerate it.</p>}
           {verify.error && <p role="alert" className="text-xs text-destructive">{verify.error.message}</p>}

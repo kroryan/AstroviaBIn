@@ -3,7 +3,7 @@ import { ZodError } from 'zod';
 import {
   analysisFile, analysisRequestSchema, getHotpantsReport, listAnalysisInputs,
   listHotpantsReports, saveAnalysisInput, startHotpantsAnalysis, helperRequestSchema, runAnalysisHelper,
-  deleteHotpantsReport, candidateCheckSchema, checkHotpantsCandidate, startVerification,
+  deleteHotpantsReport, candidateCheckSchema, checkHotpantsCandidate, startVerification, stopVerification,
 } from '../services/hotpants';
 import { rejectDeclaredOversize, UploadRequestError } from '../services/upload-stream';
 
@@ -64,6 +64,14 @@ app.post('/:imageId/analyses/:runId/candidates/:candidateIndex/check', async c =
     const { followupImageId } = candidateCheckSchema.parse(await c.req.json());
     return c.json(await checkHotpantsCandidate(id, c.req.param('runId'), candidateIndex, followupImageId), 201);
   } catch (error) { return failure(c, error); }
+});
+
+app.post('/:imageId/analyses/:runId/verification/stop', async c => {
+  const id = Number(c.req.param('imageId'));
+  if (!Number.isInteger(id) || id < 1) return c.json({ message: 'Invalid image ID' }, 400);
+  return stopVerification(id, c.req.param('runId'))
+    ? c.json({ stopped: true })
+    : c.json({ message: 'No verification is running for this analysis' }, 409);
 });
 
 app.post('/:imageId/analyses/:runId/verification', async c => {

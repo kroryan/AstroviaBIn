@@ -43,8 +43,8 @@ const root = () => path.resolve(process.env.FITS_ANALYSIS_DIR || (process.env.NO
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILES = new Set(['science.fits', 'reference.fits', 'reference-aligned.fits', 'reference-mask.fits', 'difference.fits', 'difference-candidates.fits', 'difference-candidates.reg', 'noise.fits', 'convolved.fits', 'bad-pixels.fits', 'hotpants.log', 'kernel.fits', 'kernel-stamps.txt', 'noise-scaled.fits']);
 const GENERATED_FILE = /^(kernel|masked)-[0-9a-f-]{36}\.fits$/i;
-const VERIFICATION_FILE = /^(candidate-\d{1,3}\.png|candidate-\d{1,3}-blink\.gif|report\.pdf|verification\.json)$/;
-const CONTENT_TYPES: Record<string, string> = { '.png': 'image/png', '.gif': 'image/gif', '.pdf': 'application/pdf', '.json': 'application/json' };
+const VERIFICATION_FILE = /^(candidate-\d{1,3}\.png|candidate-\d{1,3}-blink\.gif|report\.pdf|verification\.json|verification\.log)$/;
+const CONTENT_TYPES: Record<string, string> = { '.png': 'image/png', '.gif': 'image/gif', '.pdf': 'application/pdf', '.json': 'application/json', '.log': 'text/plain; charset=utf-8' };
 const INPUT_FILE_FLAGS = new Set(['-tni', '-tmi', '-ini', '-imi', '-ki', '-rf', '-ssf', '-cmp']);
 const OUTPUT_FILE_FLAGS: Record<string, string> = {
   '-oni': 'noise.fits', '-ond': 'noise-scaled.fits', '-oci': 'convolved.fits',
@@ -345,6 +345,14 @@ export async function checkHotpantsCandidate(
  * Runs tools/scripts/hotpants_report.py on a completed analysis: Gaia-tied positions, cross-matches,
  * marked stamps, blink GIFs and a PDF report. Re-run after a follow-up check to include it.
  */
+const verificationProcesses = new Map<string, { child: ReturnType<typeof spawn>; stopped: boolean }>();
+
+/**
+ * Runs tools/scripts/hotpants_report.py on a completed analysis: Gaia-tied positions, cross-matches,
+ * marked stamps, blink GIFs and a PDF report. Re-run after a follow-up check to include it.
+ * There is no time limit: the script reports its progress and a time-stamped log (shown in the
+ * verification console), and the user can stop it.
+ */
 export async function buildVerification(imageId: number, runId: string): Promise<void> {
   const key = `${imageId}/${runId}`;
   if (reporting.has(key)) throw new Error('Verification is already being generated for this analysis');
@@ -352,35 +360,96 @@ export async function buildVerification(imageId: number, runId: string): Promise
   const current = await getHotpantsReport(imageId, runId);
   if (current.status !== 'complete') throw new Error('Only completed analyses can be verified');
   reporting.add(key);
+  const logLines: string[] = [];
+  let progress = { percent: 0, step: 'Starting' };
+  let dirty = true;
+  let finished = false;
+  let inflight: Promise<void> = Promise.resolve();
+  // Progress writes are serialised and stop once the final state is being written.
+  const flush = () => (inflight = inflight.then(async () => {
+    if (!dirty || finished) return;
+    dirty = false;
+    await writeFile(path.join(directory, 'verification.log'), `${logLines.join('\n')}\n`).catch(() => undefined);
+    const latest = await getHotpantsReport(imageId, runId).catch(() => null);
+    if (latest && reporting.has(key)) {
+      await writeJson(path.join(directory, 'report.json'), { ...latest, verificationStatus: 'running',
+        verificationProgress: { ...progress, updatedAt: new Date().toISOString() }, verificationLog: logLines.slice(-80) }).catch(() => undefined);
+    }
+  }));
+  const finish = async () => {
+    clearInterval(timer);
+    dirty = true;
+    await flush();
+    finished = true;
+  };
+  const timer = setInterval(() => { void flush(); }, 1000);
   try {
-    await writeJson(path.join(directory, 'report.json'), { ...current, verificationStatus: 'running', verificationError: undefined });
+    await writeJson(path.join(directory, 'report.json'), { ...current, verificationStatus: 'running', verificationError: undefined,
+      verificationProgress: { ...progress, updatedAt: new Date().toISOString() }, verificationLog: [] });
     const image = await storage.getAstroImage(imageId);
     const script = process.env.HOTPANTS_REPORT_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_report.py');
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(analysisPython(),
-        [script, directory, image?.title || `FITS #${imageId}`], { stdio: ['ignore', 'ignore', 'pipe'] });
-      let errors = '';
-      child.stderr.on('data', chunk => { errors = (errors + String(chunk)).slice(-6000); });
+      const child = spawn(analysisPython(), [script, directory, image?.title || `FITS #${imageId}`],
+        { stdio: ['ignore', 'ignore', 'pipe'], detached: process.platform !== 'win32' });
+      const handle = { child, stopped: false };
+      verificationProcesses.set(key, handle);
+      let pending = '';
+      child.stderr?.on('data', chunk => {
+        pending += String(chunk);
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines.map(item => item.trimEnd()).filter(Boolean)) {
+          if (line.startsWith('PROGRESS ')) {
+            try { progress = JSON.parse(line.slice(9)); } catch { /* ignore a malformed line */ }
+          } else {
+            logLines.push(line);
+            if (logLines.length > 2000) logLines.splice(0, logLines.length - 2000);
+          }
+          dirty = true;
+        }
+      });
       child.on('error', reject);
-      const timer = setTimeout(() => child.kill('SIGKILL'), 900_000);
-      child.on('close', code => {
-        clearTimeout(timer);
+      child.on('close', (code, signal) => {
+        verificationProcesses.delete(key);
+        if (pending.trim()) logLines.push(pending.trim());
         if (code === 0) resolve();
-        else reject(new Error(errors.trim().split('\n').slice(-3).join(' ') || `Verification exited ${code}`));
+        else if (handle.stopped) reject(new Error('Stopped by the user'));
+        else {
+          const lastErrors = logLines.filter(line => !line.startsWith('[')).slice(-3).join(' ');
+          reject(new Error(lastErrors || (signal ? `Verification process was killed (${signal})` : `Verification exited with code ${code}`)));
+        }
       });
     });
     const verification = JSON.parse(await readFile(path.join(directory, 'verification.json'), 'utf8'));
+    await finish();
     const latest = await getHotpantsReport(imageId, runId);
     const files = [...new Set([...(latest.files || []).filter((name: string) => !VERIFICATION_FILE.test(name)), ...verification.files])];
-    await writeJson(path.join(directory, 'report.json'), { ...latest, verification, files, verificationStatus: 'complete', verificationError: undefined });
+    await writeJson(path.join(directory, 'report.json'), { ...latest, verification, files, verificationStatus: 'complete', verificationError: undefined,
+      verificationProgress: { percent: 100, step: 'Done', updatedAt: new Date().toISOString() }, verificationLog: logLines.slice(-80) });
   } catch (error) {
+    await finish();
     const latest = await getHotpantsReport(imageId, runId).catch(() => current);
     await writeJson(path.join(directory, 'report.json'), { ...latest, verificationStatus: 'failed',
-      verificationError: error instanceof Error ? error.message : String(error) }).catch(() => undefined);
+      verificationError: error instanceof Error ? error.message : String(error), verificationLog: logLines.slice(-80) }).catch(() => undefined);
     throw error;
   } finally {
+    clearInterval(timer);
     reporting.delete(key);
   }
+}
+
+/** Stops a running verification (its whole process group); the report says it was stopped and can be re-run. */
+export function stopVerification(imageId: number, runId: string): boolean {
+  const handle = verificationProcesses.get(`${imageId}/${runId}`);
+  if (!handle?.child.pid) return false;
+  handle.stopped = true;
+  try {
+    if (process.platform !== 'win32') process.kill(-handle.child.pid, 'SIGKILL');
+    else handle.child.kill('SIGKILL');
+  } catch {
+    handle.child.kill('SIGKILL');
+  }
+  return true;
 }
 
 export async function startVerification(imageId: number, runId: string): Promise<{ status: string }> {
