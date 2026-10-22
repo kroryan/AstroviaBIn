@@ -976,17 +976,31 @@ ${ticks.join('\n')}
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 export async function cachedFitsPreview(filePath: string, settings: FitsProcessingSettings = {}, maximumDimension = 2048): Promise<Buffer> {
   const source = await stat(filePath);
   const key = createHash('sha256').update(JSON.stringify({ render: FITS_RENDER_VERSION, filePath, size: source.size, mtimeMs: source.mtimeMs, settings, maximumDimension })).digest('hex');
   const cachePath = path.join(fitsCacheDirectory(), `${key}.png`);
-  try { return await readFile(cachePath); } catch { /* generate it below */ }
+  try {
+    const cached = await readFile(cachePath);
+    // A power cut can leave an empty or truncated cache file: only a complete PNG is a hit.
+    if (cached.length > 8 && cached.subarray(0, 8).equals(PNG_SIGNATURE)) return cached;
+    await rm(cachePath, { force: true });
+  } catch { /* generate it below */ }
   const metadata = await readFitsMetadata(filePath);
   const buffer = isSpectrumFits(metadata)
     ? await renderSpectrumPreview(filePath, metadata, maximumDimension)
     : (await renderFitsPreview(filePath, settings, maximumDimension)).buffer;
   await mkdir(path.dirname(cachePath), { recursive: true });
-  await writeFile(cachePath, buffer);
+  // Written to a temporary file and renamed, so a reader never sees a half-written preview.
+  const temporaryPath = `${cachePath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, buffer);
+    await rename(temporaryPath, cachePath);
+  } catch {
+    await rm(temporaryPath, { force: true }).catch(() => {});
+  }
   return buffer;
 }
 

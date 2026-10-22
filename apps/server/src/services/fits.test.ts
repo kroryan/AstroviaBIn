@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import sharp from 'sharp';
-import { createProcessedFits, readFitsMetadata, renderFitsPreview } from './fits';
+import { cachedFitsPreview, createProcessedFits, readFitsMetadata, renderFitsPreview } from './fits';
 
 function card(key: string, value?: string): string {
   return (value === undefined ? key : `${key.padEnd(8, ' ')}= ${value}`).padEnd(80, ' ').slice(0, 80);
@@ -428,6 +428,27 @@ test('a mostly empty field keeps a dark sky (white point relative to the sky)', 
     const sorted = Array.from(data).sort((a, b) => a - b);
     assert.ok(sorted[sorted.length >> 1] < 110, `sky must not wash out, got ${sorted[sorted.length >> 1]}`);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('an empty or truncated cached preview (left by a power cut) is rendered again instead of served', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astroviabin-preview-cache-'));
+  const previous = process.env.FITS_CACHE_DIR;
+  process.env.FITS_CACHE_DIR = path.join(directory, 'cache');
+  try {
+    const source = path.join(directory, 'frame.fits');
+    await writeFile(source, testFitsMono(16, Array.from({ length: 256 }, (_, index) => (index * 37) % 1000)));
+    const first = await cachedFitsPreview(source, {}, 512);
+    const [name] = (await readdir(process.env.FITS_CACHE_DIR)).filter(file => file.endsWith('.png'));
+    for (const broken of [Buffer.alloc(0), first.subarray(0, 5)]) {
+      await writeFile(path.join(process.env.FITS_CACHE_DIR, name), broken);
+      const again = await cachedFitsPreview(source, {}, 512);
+      assert.ok((await sharp(again).metadata()).width! > 0, 'a valid image is returned');
+      assert.deepEqual(await readFile(path.join(process.env.FITS_CACHE_DIR, name)), again, 'the cache file is repaired');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.FITS_CACHE_DIR; else process.env.FITS_CACHE_DIR = previous;
     await rm(directory, { recursive: true, force: true });
   }
 });

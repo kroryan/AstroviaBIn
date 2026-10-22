@@ -167,7 +167,8 @@ app.get('/assets/:id/thumbnail', async (c) => {
     const cacheRoot = path.join(libraryStorageDirectory(), 'thumbnails');
     const thumbnailPath = path.join(cacheRoot, `${asset.sha256}.jpg`);
     try {
-      await stat(thumbnailPath);
+      // An empty file (left by a power cut) is not a thumbnail: make it again.
+      if ((await stat(thumbnailPath)).size === 0) throw new Error('empty cached thumbnail');
     } catch {
       await mkdir(cacheRoot, { recursive: true, mode: 0o700 });
       const temporaryPath = `${thumbnailPath}.tmp`;

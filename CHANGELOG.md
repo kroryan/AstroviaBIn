@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stacking is now done with Astropy CCDProc (`tools/scripts/ccdproc_stack.py`, pinned in `requirements-science.txt`): optional bias/dark/flat calibration with overscan, trim, dark scaling by exposure and bad-pixel masks (`ccdmask`), cosmic-ray cleaning (astroscrappy L.A.Cosmic or median), registration of every frame onto the reference through its WCS (stored plate solutions are used when the header has none), exposure/median normalization and weighting, and mean/median/sigma-clip (MAD) combination with optional extrema and min/max clipping. Originals are opened read-only; each frame's offset, skipped duplicates and all settings are reported and written to the FITS HISTORY.
 - Stacking unsigned 16-bit camera frames (BITPIX 16 with BZERO = 32768, e.g. the Geographos set) failed with "Cannot load a memory-mapped image"; frames are now read into memory with their integer scaling applied, and the float output carries no BZERO/BSCALE.
 
+### Fixed (Missing thumbnails after a power cut, 0.12.7)
+- Some FITS thumbnails did not load ("Failed to render FITS preview: Input Buffer is empty"): a power cut left empty preview files in the render cache, and they were served as if valid. A cached preview is now used only if it is a complete PNG, otherwise it is rendered again. Previews are written to a temporary file and renamed, and photo thumbnails left empty are regenerated as well.
+
 ### Fixed (HOTPANTS verification, 0.12.6)
 - "Verification exited null": in dense fields (a Milky Way frame with 25 candidates) the verification needed more than the fixed 15-minute limit and was killed without explanation. It now takes about 50 s.
   - Cause: the local Gaia calibration fitted a Gaussian to every Gaia star around every candidate (tens of thousands of fits), and the nearest Gaia star was found with one coordinate object per star.
