@@ -31,24 +31,47 @@ function appVersion(): string {
 export default function systemRoutes(wsManager?: WsManager) {
   const app = new Hono();
 
+  // License documents: the Docker image keeps them in /usr/share/doc, the desktop installers in
+  // resources/licenses (ASTROVIABIN_LICENSES_DIR), a development checkout in the repository.
+  const licensesDir = () => process.env.ASTROVIABIN_LICENSES_DIR || path.resolve(process.cwd(), 'licenses');
+  const firstReadable = async (candidates: string[]) => {
+    for (const candidate of candidates) {
+      try { return await readFile(candidate, 'utf8'); } catch { /* try the next location */ }
+    }
+    return null;
+  };
+  const plainText = { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' };
+
   app.get('/licenses/astroviabin', async c => {
-    try {
-      const source = process.env.NODE_ENV === 'production'
-        ? '/usr/share/doc/astroviabin/LICENSE' : path.resolve(process.cwd(), 'LICENSE');
-      return c.text(await readFile(source, 'utf8'), 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
-    } catch { return c.text('License file unavailable', 404); }
+    const text = await firstReadable(['/usr/share/doc/astroviabin/LICENSE', path.join(licensesDir(), 'AstroviaBin-LICENSE.txt'),
+      path.resolve(process.cwd(), 'LICENSE')]);
+    return text === null ? c.text('License file unavailable', 404) : c.text(text, 200, plainText);
   });
 
   app.get('/licenses/hotpants/:file', async c => {
     const file = c.req.param('file');
     if (!['LICENSE', 'COPYING'].includes(file)) return c.text('Not found', 404);
-    try {
-      const source = process.env.NODE_ENV === 'production'
-        ? path.join('/usr/share/doc/hotpants', file)
-        : path.resolve(process.cwd(), 'vendor/hotpants', file);
-      const contents = await readFile(source, 'utf8');
-      return c.text(contents, 200, { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' });
-    } catch { return c.text('License file unavailable', 404); }
+    const text = await firstReadable([path.join('/usr/share/doc/hotpants', file), path.join(licensesDir(), 'sources', 'hotpants', file),
+      path.resolve(process.cwd(), 'vendor/hotpants', file)]);
+    return text === null ? c.text('License file unavailable', 404) : c.text(text, 200, plainText);
+  });
+
+  // Every third-party notice (docs/LICENSES.md) and the generated list of bundled Python packages.
+  app.get('/licenses/third-party/:document', async c => {
+    const documents: Record<string, string[]> = {
+      notices: ['/usr/share/doc/astroviabin/THIRD-PARTY-NOTICES.md', path.join(licensesDir(), 'THIRD-PARTY-NOTICES.md'),
+        path.resolve(process.cwd(), 'docs/LICENSES.md')],
+      'python-packages': ['/usr/share/doc/astroviabin/python-packages.md', path.join(licensesDir(), 'python-packages.md'),
+        path.resolve(process.cwd(), 'docs/licenses/python-packages.md')],
+      'javascript-packages': ['/usr/share/doc/astroviabin/javascript-packages.md', path.join(licensesDir(), 'javascript-packages.md'),
+        path.resolve(process.cwd(), 'docs/licenses/javascript-packages.md')],
+      'javascript-licenses': ['/usr/share/doc/astroviabin/javascript-licenses.txt', path.join(licensesDir(), 'javascript-licenses.txt'),
+        path.resolve(process.cwd(), 'docs/licenses/javascript-licenses.txt')],
+    };
+    const candidates = documents[c.req.param('document')];
+    if (!candidates) return c.text('Not found', 404);
+    const text = await firstReadable(candidates);
+    return text === null ? c.text('Document unavailable on this installation', 404) : c.text(text, 200, plainText);
   });
 
   // Astrometry.net software and index-data notices as installed in the image (Debian copyright

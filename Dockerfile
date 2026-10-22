@@ -114,6 +114,16 @@ COPY --from=hotpants-builder /opt/hotpants/LICENSE /usr/share/doc/hotpants/LICEN
 # Accompany container-distributed HOTPANTS binaries with corresponding source.
 COPY vendor/hotpants/ /usr/share/doc/hotpants/source/
 COPY LICENSE /usr/share/doc/astroviabin/LICENSE
+# Third-party notices (docs/LICENSES.md), license texts missing from some wheels, the inventory of the
+# Python packages in this image and the source of the LGPL SEP library (pulled in by astroalign).
+COPY docs/LICENSES.md /usr/share/doc/astroviabin/THIRD-PARTY-NOTICES.md
+COPY licenses/third-party/ /usr/share/doc/astroviabin/third-party/
+COPY docs/licenses/javascript-packages.md docs/licenses/javascript-licenses.txt /usr/share/doc/astroviabin/
+COPY tools/scripts/third_party_inventory.py /tmp/third_party_inventory.py
+RUN /opt/astroviabin-python/bin/python /tmp/third_party_inventory.py /usr/share/doc/astroviabin/python-packages.md && \
+    mkdir -p /usr/share/doc/astroviabin/sources && \
+    /opt/astroviabin-python/bin/python -c "import importlib.metadata as m, urllib.request as u; v = m.version('sep'); u.urlretrieve(f'https://files.pythonhosted.org/packages/source/s/sep/sep-{v}.tar.gz', f'/usr/share/doc/astroviabin/sources/sep-{v}.tar.gz')" && \
+    rm /tmp/third_party_inventory.py
 
 # Remove package-manager tooling after production dependencies are installed
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
@@ -128,6 +138,7 @@ COPY tools/scripts/star_extract.py ./tools/scripts/star_extract.py
 COPY tools/scripts/ccdproc_stack.py ./tools/scripts/ccdproc_stack.py
 COPY tools/scripts/spectroscopy.py ./tools/scripts/spectroscopy.py
 COPY tools/scripts/wcs_transfer.py ./tools/scripts/wcs_transfer.py
+COPY tools/scripts/credits.py ./tools/scripts/credits.py
 COPY tools/scripts/install_ppxf.py ./tools/scripts/install_ppxf.py
 COPY tools/data/spectral-library.fits ./tools/data/spectral-library.fits
 COPY tools/scripts/download-astrometry-indexes.sh /usr/local/bin/download-astrometry-indexes

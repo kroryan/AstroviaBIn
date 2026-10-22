@@ -24,6 +24,7 @@ const resources = {
   python: [path.join(resourcesDir, 'python', isWindows ? 'python.exe' : path.join('bin', 'python3')), '/opt/AstroviaBin/python/bin/python']
     .find(candidate => fs.existsSync(candidate)) || '',
   ppxf: path.join(resourcesDir, 'optional-ppxf'),
+  licenses: path.join(resourcesDir, 'licenses'),
 };
 
 const argument = name => { const index = process.argv.indexOf(name); return index > 0 ? process.argv[index + 1] : undefined; };

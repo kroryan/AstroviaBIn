@@ -846,6 +846,17 @@ def build_pdf(path, report, entries, header, title, images, wcs, fwhm, scale, no
                 x_link += 0.025 + 0.0085 * len(name)
             pdf.savefig(figure)
             plt.close(figure)
+        # Acknowledgements required by the data and software actually used for this report.
+        from credits import credit_lines, survey_keys
+        used = ['hotpants', 'astropy', 'photutils']
+        used += survey_keys(reference.get('survey') or '') if reference.get('survey') else []
+        if any(entry.get('online') for entry in entries):
+            used += ['gaia', 'vizier', 'vsx', 'simbad']
+        if report.get('solarSystemCheck'):
+            used.append('skybot')
+        if any(str((entry.get('host') or {}).get('type', '')).startswith('OpenNGC') for entry in entries):
+            used.append('openngc')
+        text_page(pdf, credit_lines(used), 'Data credits and acknowledgements')
         info = pdf.infodict()
         info['Title'] = f'HOTPANTS report — {title}'
         info['Author'] = 'AstroviaBin'

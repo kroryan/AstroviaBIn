@@ -107,6 +107,16 @@ AstroviaBin's science must be serious and defensible. **Every scientific feature
 - Report uncertainties and limits; never present a preliminary result (uncalibrated wavelengths, low S/N, objects outside a template library) as confirmed.
 - Credit every library and dataset in Admin → About.
 
+## Licenses
+
+Every third-party program, package, dataset and online service is recorded in `docs/LICENSES.md` with its license and how AstroviaBin complies.
+
+- When adding a dependency or data source, update `docs/LICENSES.md` and Admin → About.
+- If its wheel or package has no license text, add the text to `licenses/third-party/`.
+- For copyleft components (GPL, LGPL), make sure the corresponding source ships with the binaries (`licenses/sources/` via `desktop/scripts/stage.mjs`, and the Dockerfile).
+- Add its required acknowledgement to `tools/scripts/credits.py` when reports use it.
+- Never bundle software whose license forbids redistribution (pPXF/capfit are downloaded at installation instead).
+
 ## Code Conventions
 
 - **Modules:** ES modules (`import`/`export`) throughout — no CommonJS

@@ -1453,6 +1453,41 @@ def write_report(work: Path, result: dict[str, Any], spectra: list[dict[str, Any
             plt.close(figure)
         if result.get("comparison"):
             comparison_pages(pdf, result["comparison"])
+        credits_page(pdf, result)
+
+
+def credits_page(pdf: Any, result: dict[str, Any]) -> None:
+    """Acknowledgements required by the data and software used for this report (tools/scripts/credits.py)."""
+    import textwrap
+    import matplotlib.pyplot as plt
+    from credits import credit_lines
+
+    stars = result.get("stars") or []
+    used = ["astropy", "specutils"]
+    if result.get("mode") == "slitless":
+        used += ["ccdproc", "photutils", "astroscrappy"]
+    if any(star.get("classification") for star in stars):
+        used += ["ppxf", "pickles"]
+    if any("SDSS" in str(star.get("catalogue") or "") for star in stars) or any("SDSS" in str(note) for note in result.get("notes") or []):
+        used.append("sdss")
+    if result.get("comparison"):
+        used += ["astroquery", "simbad", "gaia", "vizier", "sdss"]
+    figure = plt.figure(figsize=(8.27, 11.69))
+    figure.text(0.07, 0.955, "Data credits and acknowledgements", fontsize=15, weight="bold")
+    y = 0.92
+    for line in credit_lines(used):
+        bold = isinstance(line, tuple)
+        text = line[0] if bold else line
+        for piece in (textwrap.wrap(text, 105) or [""]):
+            if y < 0.05:
+                pdf.savefig(figure)
+                plt.close(figure)
+                figure = plt.figure(figsize=(8.27, 11.69))
+                y = 0.95
+            figure.text(0.07, y, piece, fontsize=9 if bold else 8, weight="bold" if bold else "normal")
+            y -= 0.02 if bold else 0.016
+    pdf.savefig(figure)
+    plt.close(figure)
 
 
 # ------------------------------------------------------------------------------------------------

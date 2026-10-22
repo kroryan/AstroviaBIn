@@ -39,6 +39,7 @@ function resources() {
       server: repo, node: 'node', sky: path.join(repo, 'data', 'sky'),
       python: process.env.ASTROVIABIN_ANALYSIS_PYTHON || 'python3', hotpants: '', icon: path.join(__dirname, '..', 'assets', 'icon.png'),
       ppxf: process.env.ASTROVIABIN_PPXF_DIR || path.join(repo, '.venv-science', 'lib', 'python3.13', 'site-packages'),
+      licenses: path.join(repo, 'licenses'),
       preflight: path.join(__dirname, 'preflight.cjs'),
     };
   }
@@ -52,6 +53,7 @@ function resources() {
     sky: path.join(base, 'sky'),
     python: pythonCandidates.find(candidate => fs.existsSync(candidate)) || pythonCandidates[0],
     ppxf: path.join(base, 'optional-ppxf'),
+    licenses: path.join(base, 'licenses'),
     hotpants: path.join(base, 'bin'),
     icon: path.join(base, 'icon.png'),
     preflight: path.join(base, 'server', 'preflight.cjs'),

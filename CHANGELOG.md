@@ -47,6 +47,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stacking is now done with Astropy CCDProc (`tools/scripts/ccdproc_stack.py`, pinned in `requirements-science.txt`): optional bias/dark/flat calibration with overscan, trim, dark scaling by exposure and bad-pixel masks (`ccdmask`), cosmic-ray cleaning (astroscrappy L.A.Cosmic or median), registration of every frame onto the reference through its WCS (stored plate solutions are used when the header has none), exposure/median normalization and weighting, and mean/median/sigma-clip (MAD) combination with optional extrema and min/max clipping. Originals are opened read-only; each frame's offset, skipped duplicates and all settings are reported and written to the FITS HISTORY.
 - Stacking unsigned 16-bit camera frames (BITPIX 16 with BZERO = 32768, e.g. the Geographos set) failed with "Cannot load a memory-mapped image"; frames are now read into memory with their integer scaling applied, and the float output carries no BZERO/BSCALE.
 
+### Added / Fixed (License compliance, 0.12.8)
+- `docs/LICENSES.md` lists every third-party program, Python and JavaScript package, dataset and online service, with its license, how AstroviaBin complies, what a redistributor must keep, and the acknowledgements and citations required when publishing results. Generated inventories of the exact bundled Python and JavaScript packages (`docs/licenses/`) are rebuilt with every installer.
+- The installers now carry `resources/licenses/`:
+  - the complete source of the copyleft components they distribute: HOTPANTS (GPL-2.0) with its build scripts, and SEP (LGPL-3.0+);
+  - the license texts some packages do not ship: astroalign, PIMS, SEP, drizzle-orm, embla-carousel, sharp-libvips/libvips, the GNU GPL/LGPL, OpenNGC's CC BY-SA 4.0, and every library linked into the bundled python-build-standalone runtime;
+  - a written offer for the libvips source.
+  The Docker image carries the same under `/usr/share/doc/astroviabin`.
+- HOTPANTS and spectroscopy PDF reports end with a "Data credits and acknowledgements" page listing exactly the data and software used (Gaia, CDS, AAVSO VSX, SkyBoT, the reference survey, SDSS, pPXF, Pickles and the libraries).
+- Admin → About links every notice. Corrected: the bundled python-build-standalone is MPL-2.0, not BSD. Noted: the map uses react-leaflet under the Hippocratic License 2.1. The AstroviaBin and HOTPANTS license links now work in the desktop installations as well as in Docker.
+
 ### Fixed (Missing thumbnails after a power cut, 0.12.7)
 - Some FITS thumbnails did not load ("Failed to render FITS preview: Input Buffer is empty"): a power cut left empty preview files in the render cache, and they were served as if valid. A cached preview is now used only if it is a complete PNG, otherwise it is rendered again. Previews are written to a temporary file and renamed, and photo thumbnails left empty are regenerated as well.
 

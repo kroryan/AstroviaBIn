@@ -181,6 +181,35 @@ if (platform === 'linux') {
   for (const wheel of readdirSync(wheels).filter(name => name.endsWith('.whl'))) run('unzip', ['-q', '-o', path.join(wheels, wheel), '-d', site]);
 }
 
+// 5b. Third-party licenses and sources (docs/LICENSES.md) ---------------------------------------
+// Every license text, the complete corresponding source of the copyleft components (HOTPANTS,
+// GPL-2.0; SEP, LGPL-3.0-or-later) and the inventory of the bundled Python packages ship in
+// resources/licenses, next to the programs they cover.
+{
+  const licenses = path.join(stage, 'licenses');
+  cpSync(path.join(repo, 'licenses', 'third-party'), path.join(licenses, 'third-party'), { recursive: true });
+  cpSync(path.join(repo, 'docs', 'LICENSES.md'), path.join(licenses, 'THIRD-PARTY-NOTICES.md'));
+  cpSync(path.join(repo, 'LICENSE'), path.join(licenses, 'AstroviaBin-LICENSE.txt'));
+  const sources = path.join(licenses, 'sources');
+  cpSync(path.join(repo, 'vendor', 'hotpants'), path.join(sources, 'hotpants'), { recursive: true });
+  for (const script of ['build-hotpants-linux.sh', 'build-hotpants-win.sh']) cpSync(path.join(here, script), path.join(sources, 'hotpants', script));
+  const site = platform === 'linux'
+    ? path.join(stage, 'python', 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, 'site-packages')
+    : path.join(stage, 'python', 'Lib', 'site-packages');
+  const sepInfo = readdirSync(site).find(name => /^sep-[\d.]+\.dist-info$/.test(name));
+  if (sepInfo) {
+    const version = sepInfo.slice(4, -'.dist-info'.length);
+    const tarball = download(`https://files.pythonhosted.org/packages/source/s/sep/sep-${version}.tar.gz`, path.join(cache, `sep-${version}.tar.gz`));
+    cpSync(tarball, path.join(sources, `sep-${version}.tar.gz`));
+  }
+  // JavaScript: the server's node_modules and the code compiled into the web client.
+  run('node', [path.join(repo, 'tools', 'scripts', 'js-licenses.mjs'), path.join(licenses, 'javascript-packages.md'),
+    path.join(licenses, 'javascript-licenses.txt')]);
+  const inventory = path.join(repo, 'tools', 'scripts', 'third_party_inventory.py');
+  if (platform === 'linux') run(path.join(stage, 'python', 'bin', 'python3'), [inventory, path.join(licenses, 'python-packages.md')]);
+  else run('python3', [inventory, path.join(licenses, 'python-packages.md'), site]);
+}
+
 // 6. Headless launcher (astroviabin-server / systemd unit) with the desktop settings logic -------
 cpSync(path.join(desktop, 'src', 'config.js'), path.join(server, 'desktop-config.cjs'));
 cpSync(path.join(desktop, 'src', 'launch-server.cjs'), path.join(server, 'launch-server.cjs'));

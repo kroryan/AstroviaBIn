@@ -292,6 +292,8 @@ function serverEnvironment(values, resources) {
     ASTROVIABIN_SKY_DATA_DIR: resources.sky,
   };
   if (resources.ppxf) env.ASTROVIABIN_PPXF_DIR = resources.ppxf;
+  // Third-party license texts and sources shipped with the installers (Admin → About links).
+  if (resources.licenses) env.ASTROVIABIN_LICENSES_DIR = resources.licenses;
   for (const group of schema(resources)) {
     for (const setting of group.settings) {
       if (setting.env && values[setting.id] !== '' && values[setting.id] !== undefined) env[setting.env] = String(values[setting.id]);

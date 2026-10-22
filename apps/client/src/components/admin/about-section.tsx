@@ -121,6 +121,22 @@ export function AboutSection() {
         </div>
       </div>
       <div>
+        <h3 className="font-semibold">All third-party licenses</h3>
+        <p className="text-muted-foreground">
+          The complete notices list every bundled program, Python and JavaScript package, dataset and online service, with its license and how AstroviaBin complies with it.
+          They also give the acknowledgements you must include when publishing results.
+          The installers carry every license text and the source of the copyleft components (HOTPANTS, GPL 2.0; SEP, LGPL 3.0+) in resources/licenses.
+          The thumbnails use libvips (LGPL) through sharp, and the map uses react-leaflet under the Hippocratic License 2.1, which requires using the software without violating human rights.
+          HOTPANTS and spectroscopy PDF reports end with the data credits and acknowledgements that apply to them.
+        </p>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+          <a className="text-primary underline" href="/api/licenses/third-party/notices" target="_blank" rel="noreferrer">Third-party notices</a>
+          <a className="text-primary underline" href="/api/licenses/third-party/python-packages" target="_blank" rel="noreferrer">Bundled Python packages</a>
+          <a className="text-primary underline" href="/api/licenses/third-party/javascript-packages" target="_blank" rel="noreferrer">JavaScript packages</a>
+          <a className="text-primary underline" href="/api/licenses/third-party/javascript-licenses" target="_blank" rel="noreferrer">JavaScript license texts</a>
+        </div>
+      </div>
+      <div>
         <h3 className="font-semibold">Spectroscopy: Specutils, Specreduce, Astroquery, pPXF, Pickles and SDSS</h3>
         <p className="text-muted-foreground">Stellar spectroscopy uses Specutils (continuum, line centroids, equivalent widths, FWHM) and Specreduce (trace, background and box extraction of slitless first orders and 2-D strips), both Astropy projects under the BSD 3-Clause license. Zero orders are found with Photutils and frames are calibrated with CCDProc. Spectral types come from template fitting with pPXF and capfit by Michele Cappellari (Cappellari 2023, MNRAS 526, 3273) against the Pickles (1998, PASP 110, 863) stellar library distributed by STScI. pPXF and capfit are free for non-commercial use only and may not be redistributed: AstroviaBin does not bundle them; its installers download the official, version-pinned and checksum-verified packages from PyPI during installation (this needs Internet access) into the application folder, and uninstalling AstroviaBin removes them. Downloading them does not change their license terms. The optional known-spectroscopy check queries SIMBAD (CDS), Gaia DR3 (ESA/DPAC) and SDSS through Astroquery (BSD 3-Clause), sending only coordinates; its caches stay inside AstroviaBin's data folder. Validation spectra come from the Sloan Digital Sky Survey (funding for SDSS has been provided by the Alfred P. Sloan Foundation, the participating institutions, NSF and the U.S. Department of Energy). A template fit is a low-resolution match (about ±2 subclasses) and not a definitive classification; slitless wavelengths without a reference lamp and spectra without a spectral WCS are reported as such.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
@@ -150,12 +166,12 @@ export function AboutSection() {
       </div>
       <div>
         <h3 className="font-semibold">Desktop app and installers</h3>
-        <p className="text-muted-foreground">The AstroviaBin desktop app (system tray and setup window) is built with Electron (MIT) and packaged with electron-builder (MIT). The installers bundle the Node.js runtime (MIT, with the third-party notices in its LICENSE), better-sqlite3 (MIT) with SQLite (public domain) and sharp/libvips (Apache 2.0 / LGPL 3.0). Both installers bundle CPython (PSF License) with NumPy, SciPy, Astropy, Matplotlib, CCDProc, Photutils, reproject, scikit-image, astroscrappy, Specutils, Specreduce and Astroquery (BSD-style licenses; pPXF and capfit are downloaded during installation, not bundled): the Linux package uses the python-build-standalone distribution by Astral (BSD 3-Clause, with the third-party licenses it lists) and Windows the official embeddable CPython. HOTPANTS is built against NASA HEASARC CFITSIO (a permissive NASA/GSFC license). The MSIX package is built with Microsoft's open-source MSIX Packaging SDK (MIT) and signed with osslsigncode (GPL 3.0); neither tool is shipped in the package.</p>
+        <p className="text-muted-foreground">The AstroviaBin desktop app (system tray and setup window) is built with Electron (MIT) and packaged with electron-builder (MIT). The installers bundle the Node.js runtime (MIT, with the third-party notices in its LICENSE), better-sqlite3 (MIT) with SQLite (public domain) and sharp/libvips (Apache 2.0 / LGPL 3.0). Both installers bundle CPython (PSF License) with NumPy, SciPy, Astropy, Matplotlib, CCDProc, Photutils, reproject, scikit-image, astroscrappy, Specutils, Specreduce and Astroquery (BSD-style licenses; pPXF and capfit are downloaded during installation, not bundled): the Linux package uses the python-build-standalone distribution by Astral (MPL 2.0, with statically linked OpenSSL, SQLite, libffi, xz, zlib, Tcl/Tk and others under their own licenses, all included in resources/licenses) and Windows the official embeddable CPython. HOTPANTS is built against NASA HEASARC CFITSIO (a permissive NASA/GSFC license). The MSIX package is built with Microsoft's open-source MSIX Packaging SDK (MIT) and signed with osslsigncode (GPL 3.0); neither tool is shipped in the package.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
           <a className="text-primary underline" href="https://github.com/electron/electron/blob/main/LICENSE" target="_blank" rel="noreferrer">Electron license</a>
           <a className="text-primary underline" href="https://github.com/nodejs/node/blob/main/LICENSE" target="_blank" rel="noreferrer">Node.js license</a>
           <a className="text-primary underline" href="https://docs.python.org/3/license.html" target="_blank" rel="noreferrer">Python license</a>
-          <a className="text-primary underline" href="https://github.com/astral-sh/python-build-standalone/blob/main/LICENSE" target="_blank" rel="noreferrer">python-build-standalone license</a>
+          <a className="text-primary underline" href="https://github.com/astral-sh/python-build-standalone/blob/main/LICENSE" target="_blank" rel="noreferrer">python-build-standalone license (MPL 2.0)</a>
           <a className="text-primary underline" href="https://heasarc.gsfc.nasa.gov/docs/software/fitsio/c/f_user/node9.html" target="_blank" rel="noreferrer">CFITSIO license</a>
           <a className="text-primary underline" href="https://github.com/microsoft/msix-packaging/blob/master/LICENSE" target="_blank" rel="noreferrer">MSIX Packaging SDK license</a>
         </div>
