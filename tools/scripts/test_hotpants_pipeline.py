@@ -417,3 +417,46 @@ class SkyBotQueryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StoredSolutionTests(unittest.TestCase):
+    """The plate solution AstroviaBin already verified is reused; solving again is only a fallback."""
+
+    stored = {'crval1': 38.7514, 'crval2': 61.5502, 'crpix1': 364.5, 'crpix2': 245.5, 'cd11': -0.00243, 'cd12': 1.0e-5,
+              'cd21': -1.1e-5, 'cd22': -0.00243, 'imageWidth': 728, 'imageHeight': 490,
+              'sip': {'a': {'order': 2, 'terms': {'2_0': 1.0e-7}}, 'b': {'order': 2, 'terms': {'0_2': -2.0e-7}}}}
+
+    def test_stored_solution_is_used_and_rescaled_to_the_binned_image(self):
+        import hotpants_pipeline as pipeline
+        from unittest import mock
+        from wcs_transfer import reference_wcs
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fits.writeto(root / 'original.fits', np.zeros((490, 728), dtype=np.float32))
+            fits.writeto(root / 'science.fits', np.zeros((245, 364), dtype=np.float32))  # block-integrated by 2
+            with mock.patch.object(pipeline.subprocess, 'run', side_effect=AssertionError('must not solve again')):
+                solution = pipeline.ensure_wcs(root / 'science.fits', root / 'original.fits', {'factor': 2}, root / 'solve', self.stored)
+            expected = binned_wcs(reference_wcs(self.stored).celestial, 2)
+            for x, y in ((0, 0), (100, 200), (363, 244)):
+                self.assertAlmostEqual(float(solution.pixel_to_world_values(x, y)[0]), float(expected.pixel_to_world_values(x, y)[0]), places=9)
+            self.assertTrue(WCS(fits.getheader(root / 'science.fits')).has_celestial, 'written into the prepared image')
+
+    def test_a_solution_for_other_dimensions_is_not_used_and_a_timed_out_attempt_moves_on(self):
+        import subprocess
+        import hotpants_pipeline as pipeline
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fits.writeto(root / 'original.fits', np.zeros((100, 100), dtype=np.float32))  # not the stored 728x490
+            fits.writeto(root / 'science.fits', np.zeros((100, 100), dtype=np.float32))
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                raise subprocess.TimeoutExpired(command, 150)
+            with mock.patch.object(pipeline.subprocess, 'run', side_effect=fake_run):
+                with self.assertRaises(RuntimeError) as failure:
+                    pipeline.ensure_wcs(root / 'science.fits', root / 'original.fits', {'ra': 10.0, 'dec': 20.0, 'pixelScale': 2.0},
+                                        root / 'solve', self.stored)
+            self.assertEqual(len(calls), 3, 'every attempt is tried even after a timeout')
+            self.assertIn('timed out', str(failure.exception))

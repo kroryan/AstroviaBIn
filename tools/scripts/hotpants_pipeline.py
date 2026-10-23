@@ -163,10 +163,27 @@ def reduced_image(source, output, max_dimension):
     return factor
 
 
-def ensure_wcs(image_path, original_path, hint, work):
+def ensure_wcs(image_path, original_path, hint, work, stored=None):
     with fits.open(image_path, mode='update') as hdus:
         if WCS(hdus[0].header).has_celestial:
             return WCS(hdus[0].header).celestial
+    # The solution AstroviaBin already verified for this exact file (Astrometry.net, kept in its
+    # database): reused instead of solving again, rescaled exactly to the block-integrated image.
+    if stored:
+        try:
+            from wcs_transfer import reference_wcs
+            original_shape = mono_data(Path(original_path))[0].shape
+            if (int(stored.get('imageWidth') or 0), int(stored.get('imageHeight') or 0)) == (original_shape[1], original_shape[0]):
+                solution = reference_wcs(stored).celestial
+                factor = int((hint or {}).get('factor') or 1)
+                if factor > 1:
+                    solution = binned_wcs(solution, factor)
+                with fits.open(image_path, mode='update') as hdus:
+                    hdus[0].header.update(solution.to_header(relax=True))
+                print(f'Using the stored plate solution of {Path(original_path).name}', file=sys.stderr, flush=True)
+                return solution
+        except Exception as error:  # fall back to solving
+            print(f'Stored plate solution unusable ({error}); solving again', file=sys.stderr, flush=True)
     work.mkdir(parents=True, exist_ok=True)
     config = work / 'backend.cfg'
     # Same index set as the main solver, including downloaded narrow-field indexes.
@@ -190,13 +207,21 @@ def ensure_wcs(image_path, original_path, hint, work):
         attempts.append(positional)
     attempts.append([])
     result = None
+    failures = []
     for positional_hint in attempts:
-        result = subprocess.run(base + positional_hint + [str(image_path)],
-                                capture_output=True, text=True, timeout=150, check=False)
+        try:
+            result = subprocess.run(base + positional_hint + [str(image_path)],
+                                    capture_output=True, text=True, timeout=150, check=False)
+        except subprocess.TimeoutExpired:
+            # One attempt running out of time does not end the analysis: try the next one.
+            failures.append(f"{' '.join(positional_hint) or 'blind'}: timed out after 150 s")
+            continue
         if result.returncode == 0 and wcs_path.exists():
             break
-    if result.returncode or not wcs_path.exists():
-        raise RuntimeError('Local Astrometry.net could not determine WCS: ' + (result.stderr or result.stdout)[-1200:])
+        failures.append(f"{' '.join(positional_hint) or 'blind'}: {(result.stderr or result.stdout)[-300:].strip()}")
+    if not wcs_path.exists():
+        raise RuntimeError('Local Astrometry.net could not determine the WCS of this image (no stored plate solution). '
+                           'Plate-solve it first from the image panel. Attempts: ' + ' | '.join(failures)[-1500:])
     solution = WCS(fits.getheader(wcs_path)).celestial
     with fits.open(image_path, mode='update') as hdus:
         hdus[0].header.update(solution.to_header(relax=True))
@@ -1143,7 +1168,7 @@ def main(config_path):
     write_state(work, 'preparing')
     factor = reduced_image(config['science'], science, int(config['maxDimension']))
     hint = dict(config.get('scienceHint') or {}, factor=factor)
-    science_wcs = ensure_wcs(science, config['science'], hint, work / 'science-solve')
+    science_wcs = ensure_wcs(science, config['science'], hint, work / 'science-solve', config.get('scienceWcs'))
     science_data, science_header = mono_data(science)
     write_state(work, 'reference')
     if config['referenceMode'] == 'survey':
@@ -1151,7 +1176,7 @@ def main(config_path):
     else:
         reference_factor = reduced_image(config['reference'], reference, int(config['maxDimension']))
         ref_hint = dict(config.get('referenceHint') or {}, factor=reference_factor)
-        ensure_wcs(reference, config['reference'], ref_hint, work / 'reference-solve')
+        ensure_wcs(reference, config['reference'], ref_hint, work / 'reference-solve', config.get('referenceWcs'))
         provenance = {'localImageId': config['referenceImageId']}
     write_state(work, 'aligning')
     coverage, mask, reference_flux_scale = align_reference(reference, science_wcs, science_header, science_data.shape, aligned)

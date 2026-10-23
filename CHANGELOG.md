@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stacking is now done with Astropy CCDProc (`tools/scripts/ccdproc_stack.py`, pinned in `requirements-science.txt`): optional bias/dark/flat calibration with overscan, trim, dark scaling by exposure and bad-pixel masks (`ccdmask`), cosmic-ray cleaning (astroscrappy L.A.Cosmic or median), registration of every frame onto the reference through its WCS (stored plate solutions are used when the header has none), exposure/median normalization and weighting, and mean/median/sigma-clip (MAD) combination with optional extrema and min/max clipping. Originals are opened read-only; each frame's offset, skipped duplicates and all settings are reported and written to the FITS HISTORY.
 - Stacking unsigned 16-bit camera frames (BITPIX 16 with BZERO = 32768, e.g. the Geographos set) failed with "Cannot load a memory-mapped image"; frames are now read into memory with their integer scaling applied, and the float output carries no BZERO/BSCALE.
 
+### Fixed (HOTPANTS plate solution, 0.12.10)
+- HOTPANTS analyses failed with "solve-field … timed out after 150 seconds" on images that AstroviaBin had already plate-solved. The pipeline ignored the stored solution and solved again from scratch, and the first timed-out attempt ended the whole analysis.
+  - It now reuses the plate solution AstroviaBin verified for that exact file (science and local reference), rescaled exactly to the block-integrated image with its SIP terms.
+  - It solves again only when there is none; a timed-out attempt moves on to the next, and the error says to plate-solve the image first.
+  - Checked on the image that failed (a 20 s Red TeleVue frame of IC 1805): the analysis completes in about 2 minutes, with full coverage of the DSS2 reference.
+
 ### Changed (Spectroscopy panel, 0.12.9)
 - The Spectroscopy panel is shown only for spectra: FITS tagged Spectrum, 1-D spectrum, Spectroscopy or Slitless spectrum on upload. An ordinary image has no dispersed light to analyse. A spectroscopic frame that was not recognised gets the panel when the tag "Spectroscopy" is added to it.
 

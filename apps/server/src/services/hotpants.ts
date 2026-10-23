@@ -178,6 +178,16 @@ function hint(image: { ra?: string | null; dec?: string | null; pixelScale?: num
   return { ra, dec, pixelScale: image.pixelScale || null };
 }
 
+/** The WCS of the latest successful plate solve of an image (as stored with the job), if any. */
+async function storedPlateSolution(imageId: number): Promise<Record<string, unknown> | null> {
+  const image = await storage.getAstroImage(imageId);
+  if (!image?.plateSolved) return null;
+  const jobs = (await storage.getPlateSolvingJobs()).filter(job => job.imageId === imageId && job.status === 'success');
+  const latest = jobs.sort((a, b) => b.id - a.id)[0];
+  const wcs = (latest?.result as { wcs?: Record<string, unknown> } | null)?.wcs;
+  return wcs && typeof wcs === 'object' ? wcs : null;
+}
+
 export async function startHotpantsAnalysis(imageId: number, request: AnalysisRequest) {
   const image = await storage.getAstroImage(imageId);
   const science = resolveFitsFile(image?.originalPath || null);
@@ -204,6 +214,9 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
   const config = {
     work: directory, science, scienceHint: hint(image), referenceMode: request.referenceMode,
     reference, referenceHint, referenceImageId: request.referenceImageId,
+    // Plate solutions AstroviaBin already verified: the pipeline reuses them instead of solving again.
+    scienceWcs: await storedPlateSolution(imageId),
+    referenceWcs: request.referenceMode === 'local' && request.referenceImageId ? await storedPlateSolution(request.referenceImageId) : null,
     survey: request.survey, maxDimension: request.maxDimension, thresholdSigma: request.thresholdSigma,
     sourceFwhm: request.sourceFwhm,
     maxCandidates: request.maxCandidates, hotpantsArgs: args, timeoutSeconds: 900,
