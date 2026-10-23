@@ -111,7 +111,7 @@ function schema(resources) {
         { id: 'indexDir', label: 'Astrometry.net index folder', type: 'dir', default: isWindows ? '' : '/usr/share/astrometry', env: 'ASTROMETRY_INDEX_DIR',
           help: 'Index files installed with Astrometry.net (wide fields, about 0.3° and larger).' },
         { id: 'extraIndexDir', label: 'Extra index folder (narrow fields)', type: 'dir', default: path.join(data, 'astrometry-index'), env: 'ASTROMETRY_EXTRA_INDEX_DIRS',
-          help: 'Optional extra index files (for example 2MASS 4203–4207 for fields under 20′). AstroviaBin can download them from Admin settings.' },
+          help: 'Optional extra index files (4200 series 4203–4207, for fields under about 30′). Download them into this folder with the commands in the README (Installation → narrow-field index files).' },
         { id: 'solveTimeoutMinutes', label: 'Time limit per image (minutes)', type: 'number', default: 15, min: 1, max: 240,
           help: 'Hard images (sparse or very wide fields) are given up after this time.' },
       ],

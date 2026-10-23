@@ -84,6 +84,77 @@ AstroviaBin is a fork of [Sidereal](https://github.com/sidereal-io/sidereal) (MI
 - **UnRAID Support**: Ready-to-use container templates
 - **Database Options**: Built-in SQLite (default), optional PostgreSQL support
 
+## Installation
+
+AstroviaBin can be installed three ways. Choose one.
+
+| | Linux desktop `.deb` | Windows `.exe` | Docker image |
+|---|---|---|---|
+| App, web server, database | included | included | included |
+| Python and scientific packages (Astropy, CCDProc, Photutils, Specutils, …) | included | included, with the Visual C++ runtime they need | included |
+| HOTPANTS | included | included | included |
+| pPXF and capfit (spectral classification) | downloaded automatically during installation | downloaded automatically during installation | downloaded automatically at first start |
+| Astrometry.net (plate solving) | **installed automatically by apt** from your distribution | **not available**, see below | included |
+| Wide-field index files (fields ≳ 30′) | **installed automatically by apt** (recommended package) | — | included |
+| Narrow-field index files (fields ≲ 30′, about 5 GB) | **optional, manual download**, see below | — | optional, one command |
+
+The installers are published in [GitHub Releases](https://github.com/kroryan/AstroviaBIn/releases). Installing needs an Internet connection, because pPXF and capfit cannot be redistributed (see [docs/LICENSES.md](docs/LICENSES.md)). Your database, photos and FITS files are never moved or deleted by installing, upgrading or uninstalling.
+
+### Linux (`.deb`, Debian/Ubuntu and derivatives, x86-64)
+
+```sh
+# Ubuntu: Astrometry.net is in the "universe" component
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install ./AstroviaBin-<version>-amd64.deb
+```
+
+Use `apt install ./file.deb`, not `dpkg -i`, so apt installs the dependencies it needs from your distribution:
+- `astrometry.net` and `libcfitsio10`;
+- the recommended wide-field index package `astrometry-data-2mass-08-19`.
+
+If you installed with `dpkg -i`, run `sudo apt -f install` afterwards.
+
+**If the pPXF download failed** (no Internet during installation), the package stays unconfigured. Reconnect and run:
+
+```sh
+sudo dpkg --configure -a
+```
+
+The result of every installation step is written to `/var/log/astroviabin-install.log`.
+
+**Narrow-field index files (optional).** Telescopes with fields smaller than about 30′ (long focal lengths, small sensors) need the 4200-series index files from Astrometry.net. Download them into AstroviaBin's extra index folder:
+- **Folder:** the setting *Extra index folder* in the setup window. The default is `~/.local/share/AstroviaBin/astrometry-index`.
+- **Which files:** 4207 covers 22–30′ fields, 4206 16–22′, 4205 11–16′, 4204 8–11′ and 4203 5.6–8′. Together they are about 5 GB.
+
+```sh
+target=~/.local/share/AstroviaBin/astrometry-index   # or the folder you configured
+mkdir -p "$target"
+curl -fsSL -o "$target/LICENSE-4200.txt" https://data.astrometry.net/4200/LICENSE
+for scale in 4207 4206 4205 4204 4203; do
+  case $scale in 4203|4204) last=47 ;; *) last=11 ;; esac
+  for i in $(seq -w 0 $last); do
+    f="index-$scale-$i.fits"; [ -s "$target/$f" ] && continue
+    curl -fsSL --retry 5 -o "$target/$f.part" "https://data.astrometry.net/4200/$f" && mv "$target/$f.part" "$target/$f"
+  done
+done
+```
+
+New index files are used by the next solve; no restart is needed. Other distributions (Fedora, Arch…) cannot use the `.deb`; use the Docker image.
+
+### Windows (`.exe`, Windows 10/11 x86-64)
+
+Run `AstroviaBin-Setup-<version>-x64.exe`. Everything is included except plate solving:
+- The analysis Python and HOTPANTS are bundled, with the Visual C++ runtime they need.
+- pPXF is downloaded during installation. If that fails, the installer offers to retry; otherwise run it again.
+- The installation log is `%LOCALAPPDATA%\AstroviaBin\logs\install.log`.
+
+**Plate solving on Windows.** Astrometry.net has no native Windows build, and the Windows installer does not include a solver. Without one, AstroviaBin works but images are not plate-solved. That leaves out annotations, grouping by field, HOTPANTS on unsolved images, and stars' coordinates in spectroscopy reports. For the full feature set on a Windows computer, use the Docker image under Docker Desktop (WSL 2 backend), following [Quick Start](#quick-start) below; it includes Astrometry.net and its index files. A `solve-field` installed by hand (WSL, ANSVR/Cygwin) is not tested with the Windows app.
+
+### Docker
+
+The image includes everything listed above except the optional narrow-field index files, which are downloaded with one command (see [Narrow fields of view](#narrow-fields-of-view)). Follow [Quick Start](#quick-start).
+
 ## Quick Start
 
 > **Prerequisites**: Docker Compose and sufficient disk space for your own media. The source-build image includes the local solver, index files, HOTPANTS, and Photutils. No Immich server or remote Astrometry.net API key is needed.
