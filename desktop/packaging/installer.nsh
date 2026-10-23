@@ -14,15 +14,39 @@
   !insertmacro AstroviaBinStopProcesses
 !macroend
 
+!define ASTROVIABIN_INSTALL_LOG "$LOCALAPPDATA\AstroviaBin\logs\install.log"
+
 !macro customInstall
+  ; Every step's output goes to the installer's "Show details" list and to
+  ; %LOCALAPPDATA%\AstroviaBin\logs\install.log.
+  CreateDirectory "$LOCALAPPDATA\AstroviaBin\logs"
+  FileOpen $9 "${ASTROVIABIN_INSTALL_LOG}" a
+  FileSeek $9 0 END
+  FileWrite $9 "$\r$\n===== AstroviaBin ${VERSION} installed in $INSTDIR =====$\r$\n"
+  FileClose $9
+
   ; The publisher's non-redistributable pPXF wheel is fetched by the end user's installer,
   ; checksum-verified and kept inside AstroviaBin's install folder.
+  DetailPrint "Downloading pPXF and capfit from PyPI (needed for spectroscopy)..."
   astroviabin_ppxf_retry:
-  ExecWait '"$INSTDIR\resources\python\python.exe" "$INSTDIR\resources\server\tools\scripts\install_ppxf.py" "$INSTDIR\resources\optional-ppxf"' $0
-  IntCmp $0 0 astroviabin_ppxf_done
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Could not download pPXF and capfit from PyPI. They are needed for spectroscopy and their license does not allow AstroviaBin to bundle them, so the installer downloads the official, checksum-verified packages.$\r$\n$\r$\nCheck your internet connection and press Retry. Cancel stops the installation (your database, photos and FITS are untouched)." /SD IDCANCEL IDRETRY astroviabin_ppxf_retry
+  nsExec::ExecToLog '"$INSTDIR\resources\python\python.exe" "$INSTDIR\resources\server\tools\scripts\install_ppxf.py" "$INSTDIR\resources\optional-ppxf"'
+  Pop $0
+  DetailPrint "pPXF installation finished with exit code $0"
+  StrCmp $0 "0" astroviabin_ppxf_done
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Could not download pPXF and capfit from PyPI (exit code $0). They are needed for spectroscopy and their license does not allow AstroviaBin to bundle them, so the installer downloads the official, checksum-verified packages.$\r$\n$\r$\nCheck your internet connection and press Retry. Cancel stops the installation (your database, photos and FITS are untouched)." /SD IDCANCEL IDRETRY astroviabin_ppxf_retry
     Abort
   astroviabin_ppxf_done:
+
+  ; The analysis Python (with its Visual C++ runtime) is bundled; import every package once now, so a
+  ; broken installation is reported here and not at the first analysis. This first import also lets the
+  ; antivirus scan the files once, which can take a few minutes.
+  DetailPrint "Checking the analysis tools (NumPy, SciPy, Astropy, CCDProc, Photutils, astroscrappy...). This can take a few minutes..."
+  nsExec::ExecToLog '"$INSTDIR\resources\python\python.exe" "$INSTDIR\resources\server\tools\scripts\check_analysis_env.py" --ppxf "$INSTDIR\resources\optional-ppxf" --log "${ASTROVIABIN_INSTALL_LOG}"'
+  Pop $0
+  DetailPrint "Analysis tools check finished with exit code $0"
+  StrCmp $0 "0" astroviabin_check_done
+    MessageBox MB_OK|MB_ICONEXCLAMATION "AstroviaBin is installed, but its analysis tools (stacking, star extraction, HOTPANTS, spectroscopy) did not pass the installation check (exit code $0).$\r$\n$\r$\nThe details are in:$\r$\n${ASTROVIABIN_INSTALL_LOG}$\r$\n$\r$\nPlease include that file when reporting the problem." /SD IDOK
+  astroviabin_check_done:
 !macroend
 
 !macro customUnInstall

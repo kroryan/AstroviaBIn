@@ -234,6 +234,11 @@ function scheduleCheck() {
 }
 
 async function runChecks() {
+  const pythonCard = document.querySelector('[data-setting="pythonPath"]');
+  if (pythonCard && values.pythonPath && !(checks.pythonPath && checks.pythonPath.ok)) {
+    pythonCard.querySelector('.check')?.remove();
+    pythonCard.append(el('div', { class: 'check warn', text: '… Checking the analysis packages (the first check after installing can take a few minutes).' }));
+  }
   checks = await api.check(values);
   // Keep focus and typing undisturbed: only redraw the check lines.
   for (const [id, result] of Object.entries(checks)) {

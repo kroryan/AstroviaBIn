@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stacking is now done with Astropy CCDProc (`tools/scripts/ccdproc_stack.py`, pinned in `requirements-science.txt`): optional bias/dark/flat calibration with overscan, trim, dark scaling by exposure and bad-pixel masks (`ccdmask`), cosmic-ray cleaning (astroscrappy L.A.Cosmic or median), registration of every frame onto the reference through its WCS (stored plate solutions are used when the header has none), exposure/median normalization and weighting, and mean/median/sigma-clip (MAD) combination with optional extrema and min/max clipping. Originals are opened read-only; each frame's offset, skipped duplicates and all settings are reported and written to the FITS HISTORY.
 - Stacking unsigned 16-bit camera frames (BITPIX 16 with BZERO = 32768, e.g. the Geographos set) failed with "Cannot load a memory-mapped image"; frames are now read into memory with their integer scaling applied, and the float output carries no BZERO/BSCALE.
 
+### Fixed (Windows analysis tools, 0.12.11)
+- On Windows the setup said "Missing analysis packages: Command failed: …python.exe -c import numpy, …" and stacking, star extraction and cosmic-ray cleaning could not run.
+  - astroscrappy needs the Visual C++ OpenMP runtime (`vcomp140.dll`) and scikit-image/Matplotlib the C++ library (`msvcp140.dll`). The embedded Python ships neither and a clean Windows does not have them, so `import astroscrappy` failed with "DLL load failed". Microsoft's redistributable runtime files (signed by Microsoft, pinned by checksum) are now installed next to `python.exe`.
+  - The embedded Python never writes bytecode, so every analysis recompiled Astropy, SciPy… and the first import took up to two minutes, more than the setup check allowed (30 s, which is why the message had no reason). The packages now ship precompiled, on Linux too (`/opt` is read-only for users).
+  - The build checks every DLL the Windows Python imports and fails when one is neither bundled nor part of Windows.
+
+### Added (diagnostics, 0.12.11)
+- `tools/scripts/check_analysis_env.py` imports each analysis package and reports its version and import time, or the full error and, on Windows, the exact missing DLLs.
+  - The setup window shows which package fails and why (with a "checking…" note while the first check runs, up to 10 minutes).
+  - Each server start writes the system, the analysis Python, HOTPANTS and pPXF paths and this check to the server log, and notifies when the analysis tools are broken. The details go to the new diagnostics log, `desktop.log`, which opens from the tray menu.
+  - The Windows installer shows each step in "Show details", checks the analysis tools after installing and writes `%LOCALAPPDATA%\AstroviaBin\logs\install.log`. The `.deb` does the same in `/var/log/astroviabin-install.log`.
+- Failed stacking, HOTPANTS and spectroscopy runs write the whole Python traceback to the server log.
+
 ### Fixed (HOTPANTS plate solution, 0.12.10)
 - HOTPANTS analyses failed with "solve-field … timed out after 150 seconds" on images that AstroviaBin had already plate-solved. The pipeline ignored the stored solution and solved again from scratch, and the first timed-out attempt ended the whole analysis.
   - It now reuses the plate solution AstroviaBin verified for that exact file (science and local reference), rescaled exactly to the block-integrated image with its SIP terms.

@@ -138,6 +138,8 @@ export async function stackFits(filePaths: string[], outputPath: string, setting
       let message: { ok?: boolean; result?: PythonResult; error?: string } | undefined;
       try { message = JSON.parse(stdout.trim().split('\n').at(-1) || '{}'); } catch { /* handled below */ }
       if (code === 0 && message?.ok && message.result) return resolve(message.result);
+      // The whole traceback goes to the server log; the user sees its last line.
+      console.error(`[stacking] ${python} ${script} exited with code ${code}:\n${stderr.slice(-20_000)}`);
       if (message?.error) return reject(new StackError(message.error));
       const lastLine = stderr.trim().split('\n').at(-1) || `CCDProc exited with code ${code}`;
       const missing = /No module named '?([\w.]+)/.exec(stderr);

@@ -27,10 +27,44 @@ const LINUX_PYTHON = {
   url: `https://github.com/astral-sh/python-build-standalone/releases/download/20260325/cpython-${PYTHON_VERSION}%2B20260325-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz`,
   sha256: 'ad178e36a84de3f845885d0ace5ca6f87fa9502d1f0cf53ba3dd42194277d42e',
 };
+// The embedded Windows Python ships only vcruntime140*.dll. astroscrappy needs the Visual C++ OpenMP
+// runtime (vcomp140.dll) and scikit-image/matplotlib the C++ library (msvcp140.dll), which a clean
+// Windows does not have: without them "import astroscrappy" fails with "DLL load failed". These are
+// Microsoft's redistributable files (Authenticode-signed by Microsoft), as packaged on PyPI, pinned.
+const MSVC_RUNTIME = {
+  url: 'https://files.pythonhosted.org/packages/fe/17/7a1eace5a7c6083bd99db861625c08bb37010dfbe90ed7a0194ae0281689/msvc_runtime-14.44.35112-cp313-cp313-win_amd64.whl',
+  sha256: 'd4f6cf106aaf235f2a90952f9ec7de49e9946323880d051abf9745a6d4bf60bf',
+  data: 'msvc_runtime-14.44.35112.data/data',
+  files: ['vcomp140.dll', 'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll', 'msvcp140_atomic_wait.dll', 'msvcp140_codecvt_ids.dll', 'concrt140.dll'],
+};
+// Staging the Windows package on Windows itself (Git Bash: curl, unzip, sha256sum) needs no Docker: the
+// embedded Python downloads its own wheels with this pinned pip. The sky catalogue and HOTPANTS then
+// come from .cache/sky and .cache/hotpants-win.
+const windowsHost = process.platform === 'win32';
+const PIP = {
+  url: 'https://files.pythonhosted.org/packages/b7/3f/945ef7ab14dc4f9d7f40288d2df998d1837ee0888ec3659c813487572faa/pip-25.2-py3-none-any.whl',
+  sha256: '6d67a2b4e7f14d8b31b8b52648866fa717f45a1eb70e83002f4331d07e953717',
+};
+const checkScript = path.join(repo, 'tools', 'scripts', 'check_analysis_env.py');
+// python: the command (and its arguments) that runs the target CPython version.
+const compileBytecode = ([command, ...prefix], directories) => {
+  const args = [...prefix, '-m', 'compileall', '-q', '-j', '0', '--invalidation-mode', 'unchecked-hash', ...directories];
+  console.log(`$ ${command} ${args.join(' ')}`);
+  // A few packages ship templates that are not valid Python; compileall reports them and goes on.
+  const result = spawnSync(command, args, { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) console.warn(`compileall exited ${result.status}: some files were not precompiled (they still work).`);
+};
+const verifySha256 = (file, expected) => {
+  // GNU sha256sum prefixes the line with "\" when the path has backslashes (Windows paths).
+  const digest = (/[0-9a-f]{64}/.exec(execFileSync('sha256sum', [file]).toString()) || [''])[0];
+  if (digest !== expected) throw new Error(`${file}: SHA-256 ${digest} does not match the pinned ${expected}`);
+};
 
 const run = (command, args, options = {}) => {
   console.log(`$ ${command} ${args.join(' ')}`);
-  execFileSync(command, args, { stdio: 'inherit', ...options });
+  // npm is a .cmd script on Windows, which only runs through the shell.
+  execFileSync(command, args, { stdio: 'inherit', shell: windowsHost && command === 'npm', ...options });
 };
 const download = (url, target) => {
   if (existsSync(target)) return target;
@@ -66,7 +100,10 @@ writeFileSync(path.join(server, 'package.json'), JSON.stringify({
 const npmEnv = platform === 'win'
   ? { ...process.env, npm_config_platform: 'win32', npm_config_arch: 'x64', npm_config_target: NODE_VERSION, npm_config_runtime: 'node' }
   : process.env;
-run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', ...(platform === 'win' ? ['--os=win32', '--cpu=x64'] : [])], { cwd: server, env: npmEnv });
+// better-sqlite3 and sharp use their prebuilt binaries; on a Windows host without a compiler npm would
+// still try "node-gyp rebuild" for better-sqlite3's binding.gyp, so install scripts are skipped there.
+run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', ...(platform === 'win' ? ['--os=win32', '--cpu=x64'] : []),
+  ...(windowsHost ? ['--ignore-scripts'] : [])], { cwd: server, env: npmEnv });
 if (platform === 'win') {
   // better-sqlite3 ships prebuilt binaries for every platform (prebuilds/<platform>-<arch>.node).
   if (!existsSync(path.join(server, 'node_modules', 'better-sqlite3', 'prebuilds', 'win32-x64.node'))) throw new Error('better-sqlite3 has no win32-x64 binary');
@@ -111,6 +148,7 @@ if (platform === 'linux') {
 // Built at Docker image build time (tools/scripts/build_sky_catalog.py); reuse the built bundle.
 const skyCache = path.join(cache, 'sky');
 if (!existsSync(path.join(skyCache, 'stars.json.gz'))) {
+  if (windowsHost) throw new Error(`${skyCache} is empty: copy the sky folder of an AstroviaBin image or package there (Docker is not used on Windows).`);
   const image = process.env.ASTROVIABIN_IMAGE || 'astroviabin:local';
   mkdirSync(cache, { recursive: true });
   const container = execFileSync('docker', ['create', image]).toString().trim();
@@ -133,15 +171,14 @@ if (existsSync(hotpantsCache)) cpSync(hotpantsCache, bin, { recursive: true });
 
 // 5. Python -----------------------------------------------------------------------------------
 // Downloads run as the current user so the staged files stay removable.
-const asUser = ['-u', `${process.getuid()}:${process.getgid()}`, '-e', 'HOME=/tmp'];
+const asUser = windowsHost ? [] : ['-u', `${process.getuid()}:${process.getgid()}`, '-e', 'HOME=/tmp'];
 if (platform === 'linux') {
   // Linux: a self-contained CPython (python-build-standalone, pinned) with every analysis package
   // installed at build time, so the .deb works the same on any distribution and Python version and
   // never needs pip or internet while installing.
   const python = path.join(stage, 'python');
   const archive = download(LINUX_PYTHON.url, path.join(cache, path.basename(decodeURIComponent(LINUX_PYTHON.url))));
-  const digest = execFileSync('sha256sum', [archive]).toString().split(' ')[0];
-  if (digest !== LINUX_PYTHON.sha256) throw new Error(`${archive}: SHA-256 ${digest} does not match the pinned ${LINUX_PYTHON.sha256}`);
+  verifySha256(archive, LINUX_PYTHON.sha256);
   mkdirSync(python, { recursive: true });
   run('tar', ['-xzf', archive, '-C', python, '--strip-components=1']);
   // Install inside a matching manylinux userland so binary wheels are chosen exactly as on users' systems.
@@ -160,6 +197,10 @@ if (platform === 'linux') {
   for (const unused of ['test', 'idlelib', 'turtledemo', 'ensurepip']) {
     rmSync(path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`, unused), { recursive: true, force: true });
   }
+  // /opt/AstroviaBin is read-only for users, so Python could never cache its bytecode there and would
+  // recompile Astropy, SciPy… on every analysis. Ship it precompiled (hash-based, so file times do not matter).
+  compileBytecode([path.join(python, 'bin', 'python3')], [path.join(python, 'lib', `python${PYTHON_VERSION.split('.').slice(0, 2).join('.')}`)]);
+  run(path.join(python, 'bin', 'python3'), [checkScript]);
   if (!existsSync(path.join(python, 'bin', 'python'))) execFileSync('ln', ['-s', 'python3', path.join(python, 'bin', 'python')]);
 } else {
   // Windows: embedded Python with every analysis package.
@@ -173,12 +214,33 @@ if (platform === 'linux') {
   const pins = execFileSync('sha256sum', { input: ANALYSIS_PACKAGES.join('\n') }).toString().slice(0, 12);
   const wheels = path.join(cache, `wheels-win-cp${short}-${pins}`);
   mkdirSync(wheels, { recursive: true });
-  run('docker', ['run', '--rm', ...asUser, '-v', `${wheels}:/out`, 'python:3.13-slim', 'pip', 'download', '--only-binary=:all:', '--platform', 'win_amd64',
-    '--python-version', PYTHON_VERSION.split('.').slice(0, 2).join('.'), '--implementation', 'cp', '-d', '/out',
-    ...ANALYSIS_PACKAGES]);
+  const pipDownload = ['download', '--only-binary=:all:', '--platform', 'win_amd64',
+    '--python-version', PYTHON_VERSION.split('.').slice(0, 2).join('.'), '--implementation', 'cp'];
+  if (windowsHost) {
+    // The embedded Python runs isolated (no script folder or PYTHONPATH on sys.path): import pip from its wheel.
+    const pip = download(PIP.url, path.join(cache, path.basename(PIP.url)));
+    verifySha256(pip, PIP.sha256);
+    run(path.join(python, 'python.exe'), ['-c', `import sys; sys.path.insert(0, sys.argv[1]); from pip._internal.cli.main import main; sys.exit(main(sys.argv[2:]))`,
+      pip, ...pipDownload, '--disable-pip-version-check', '-d', wheels, ...ANALYSIS_PACKAGES]);
+  } else {
+    run('docker', ['run', '--rm', ...asUser, '-v', `${wheels}:/out`, 'python:3.13-slim', 'pip', ...pipDownload, '-d', '/out', ...ANALYSIS_PACKAGES]);
+  }
   const site = path.join(python, 'Lib', 'site-packages');
   mkdirSync(site, { recursive: true });
   for (const wheel of readdirSync(wheels).filter(name => name.endsWith('.whl'))) run('unzip', ['-q', '-o', path.join(wheels, wheel), '-d', site]);
+  // Visual C++ runtime next to python.exe, where Windows looks first for every extension module's DLLs.
+  const msvc = download(MSVC_RUNTIME.url, path.join(cache, path.basename(MSVC_RUNTIME.url)));
+  verifySha256(msvc, MSVC_RUNTIME.sha256);
+  run('unzip', ['-q', '-o', '-j', msvc, ...MSVC_RUNTIME.files.map(file => `${MSVC_RUNTIME.data}/${file}`), '-d', python]);
+  // The embedded distribution never writes bytecode (its ._pth runs Python isolated), so without
+  // precompiled .pyc every analysis recompiled Astropy, SciPy… — the first import took minutes.
+  // .pyc files only depend on the CPython minor version; hash-based, so file times do not matter.
+  if (windowsHost) compileBytecode([path.join(python, 'python.exe')], [site]);
+  else compileBytecode(['docker', 'run', '--rm', ...asUser, '-v', `${site}:/site`, `python:${PYTHON_VERSION.split('.').slice(0, 2).join('.')}-slim`, 'python'], ['/site']);
+  // Every DLL an extension module imports must be bundled or part of Windows (this check would have
+  // caught the missing vcomp140.dll).
+  run(windowsHost ? path.join(python, 'python.exe') : 'python3', [checkScript, '--scan-windows-bundle', python]);
+  if (windowsHost) run(path.join(python, 'python.exe'), [checkScript]);
 }
 
 // 5b. Third-party licenses and sources (docs/LICENSES.md) ---------------------------------------
@@ -207,7 +269,7 @@ if (platform === 'linux') {
     path.join(licenses, 'javascript-licenses.txt')]);
   const inventory = path.join(repo, 'tools', 'scripts', 'third_party_inventory.py');
   if (platform === 'linux') run(path.join(stage, 'python', 'bin', 'python3'), [inventory, path.join(licenses, 'python-packages.md')]);
-  else run('python3', [inventory, path.join(licenses, 'python-packages.md'), site]);
+  else run(windowsHost ? path.join(stage, 'python', 'python.exe') : 'python3', [inventory, path.join(licenses, 'python-packages.md'), site]);
 }
 
 // 6. Headless launcher (astroviabin-server / systemd unit) with the desktop settings logic -------

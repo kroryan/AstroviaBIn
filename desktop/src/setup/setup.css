@@ -107,7 +107,7 @@ input[aria-invalid="true"] { border-color: var(--bad); }
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; font-weight: 700; }
 .toggle input { width: 18px; height: 18px; accent-color: var(--cyan); }
 
-.check { margin-top: 8px; font: 400 13px 'Share Tech Mono', monospace; }
+.check { margin-top: 8px; font: 400 13px 'Share Tech Mono', monospace; overflow-wrap: anywhere; }
 .check.ok { color: var(--ok); }
 .check.bad { color: var(--bad); }
 .check.warn { color: var(--warn); }

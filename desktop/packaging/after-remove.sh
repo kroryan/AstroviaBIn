@@ -37,4 +37,5 @@ getent passwd | awk -F: '($3 >= 1000 && $3 < 60000) || $3 == 0 { print $6 }' | w
   fi
   rmdir "$config" 2>/dev/null || true
 done
+if [ "${1:-remove}" = purge ]; then rm -f /var/log/astroviabin-install.log; fi
 exit 0

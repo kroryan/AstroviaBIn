@@ -225,7 +225,7 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
   running.set(activeKey, runId);
   const script = process.env.HOTPANTS_PIPELINE_SCRIPT || path.resolve(process.cwd(), 'tools/scripts/hotpants_pipeline.py');
   const child = spawn(analysisPython(),
-    [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'] });
+    [script, path.join(directory, 'config.json')], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   let output = '';
   let errors = '';
   child.stdout.on('data', chunk => { output = (output + String(chunk)).slice(-2_000_000); });
@@ -244,6 +244,7 @@ export async function startHotpantsAnalysis(imageId: number, request: AnalysisRe
         // Verification products (cross-matches, marked stamps, blink GIFs, PDF) follow in the background.
         buildVerification(imageId, runId).catch(error => console.warn(`HOTPANTS verification for ${runId} failed:`, error));
       } else {
+        console.error(`[hotpants] analysis ${runId} (${analysisPython()} ${script}) exited with code ${code}:\n${errors.slice(-20_000)}`);
         await writeJson(path.join(directory, 'report.json'), { ...report, status: 'failed', completedAt: new Date().toISOString(), error: errors.slice(-4000) || `Pipeline exited ${code}` });
       }
     } catch (error) {

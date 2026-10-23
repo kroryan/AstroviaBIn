@@ -222,7 +222,16 @@ async function startServer() {
   state.external = false;
   openLog();
   const env = { ...process.env, ...config.serverEnvironment(state.values, RES) };
-  log(`server: ${RES.server}\nnode: ${RES.node}\ndatabase: ${state.values.databaseFile}`);
+  log(`server: ${RES.server}\nnode: ${RES.node}\ndatabase: ${state.values.databaseFile}\n`
+    + `system: ${os.type()} ${os.release()} ${os.arch()}, ${Math.round(os.totalmem() / 2 ** 30)} GB RAM, electron ${process.versions.electron}\n`
+    + `analysis python: ${env.ASTROVIABIN_ANALYSIS_PYTHON || '(none)'}\nhotpants: ${RES.hotpants || '(none)'}\nppxf: ${RES.ppxf}${ppxfMarker() ? '' : ' (not installed)'}`);
+  // Stacking, star extraction and HOTPANTS need the analysis Python: say now, not at the first analysis, when it is broken.
+  if (env.ASTROVIABIN_ANALYSIS_PYTHON) {
+    checkAnalysisPython(env.ASTROVIABIN_ANALYSIS_PYTHON).then(result => {
+      log(`analysis python check: ${result.message}`);
+      if (!result.ok) notify('AstroviaBin analysis tools are not working', `${result.message.slice(0, 200)} Open Settings → Analysis tools.`);
+    });
+  }
   try {
     await runPreflight(env);
   } catch (error) {
@@ -517,6 +526,8 @@ function refreshTray() {
       folderItem('Logs', values.logsDir),
     ] },
     { label: 'Open server log', enabled: Boolean(values.logsDir), click: () => shell.openPath(logFile()) },
+    { label: 'Open diagnostics log (setup checks, analysis Python)', enabled: Boolean(values.logsDir) && fs.existsSync(path.join(values.logsDir || '', 'desktop.log')),
+      click: () => shell.openPath(path.join(values.logsDir, 'desktop.log')) },
     { label: 'Start AstroviaBin when I log in', type: 'checkbox', checked: Boolean(values.launchAtLogin), click: item => {
       state.values.launchAtLogin = item.checked;
       config.save(app, state.values, safeStorage);
@@ -573,10 +584,57 @@ function which(program) {
   });
 }
 
-function runCheck(command, args) {
-  return new Promise(resolve => {
-    execFile(command, args, { timeout: 30_000, windowsHide: true }, (error, stdout, stderr) => resolve({ ok: !error, output: (stdout || stderr || (error && error.message) || '').trim() }));
+/** Appends to desktop.log (setup checks and diagnostics), next to server.log. */
+function desktopLog(text, logsDir = state.values.logsDir) {
+  try {
+    const directory = logsDir || app.getPath('logs');
+    fs.mkdirSync(directory, { recursive: true });
+    fs.appendFileSync(path.join(directory, 'desktop.log'), `[${new Date().toISOString()}] ${text.endsWith('\n') ? text : `${text}\n`}`);
+  } catch { /* logging is best effort */ }
+}
+
+// One check per Python at a time, reused while it is unchanged: the setup window re-checks as the user types.
+const pythonChecks = new Map();
+
+/**
+ * Imports every analysis package with tools/scripts/check_analysis_env.py and returns
+ * { ok, message, report }: the failing packages, their errors and (Windows) missing DLLs.
+ * The first import after installing can take a few minutes while the antivirus scans the files.
+ */
+function checkAnalysisPython(python, logsDir) {
+  let stamp = '';
+  try { stamp = String(fs.statSync(python).mtimeMs); } catch { /* reported below */ }
+  const key = `${python}|${stamp}`;
+  if (pythonChecks.has(key)) return pythonChecks.get(key);
+  const script = path.join(RES.server, 'tools', 'scripts', 'check_analysis_env.py');
+  const pending = new Promise(resolve => {
+    execFile(python, [script, '--json'], { timeout: 10 * 60_000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      let report = null;
+      try { report = JSON.parse(String(stdout).trim().split('\n').pop()); } catch { /* not the script's output */ }
+      let result;
+      if (report) {
+        const failed = report.packages.filter(entry => !entry.ok);
+        result = failed.length
+          ? { ok: false, message: `Missing or broken analysis packages: ${failed.map(entry => `${entry.name} (${entry.error}${entry.missing_dlls && entry.missing_dlls.length ? `; missing ${[...new Set(entry.missing_dlls.map(dll => dll.split(' ')[0]))].join(', ')}` : ''})`).join('; ')}. Details in desktop.log.` }
+          : { ok: true, message: `Ready (Python ${report.python}, ${report.packages.map(entry => `${entry.name} ${entry.version}`).join(', ')}).` };
+      } else {
+        const reason = error && error.killed ? 'it did not finish within 10 minutes'
+          : error && error.code === 'ENOENT' ? 'the program does not exist'
+            : (String(stderr).trim() || (error && error.message) || 'no output').split('\n').slice(-3).join(' ');
+        result = { ok: false, message: `This Python could not be checked: ${reason}. Details in desktop.log.` };
+      }
+      const lines = report ? report.packages.map(entry => entry.ok
+        ? `  ok    ${entry.name} ${entry.version} (${entry.seconds} s)`
+        : `  FAIL  ${entry.name}: ${entry.error}\n${(entry.missing_dlls || []).map(dll => `        missing DLL: ${dll}\n`).join('')}${entry.traceback}`) : [];
+      desktopLog([`analysis Python check: ${python}`, report ? `python ${report.python} on ${report.platform}; sys.path ${JSON.stringify(report.path)}` : '',
+        ...lines, `stdout: ${report ? '(json)' : String(stdout).trim()}`, `stderr: ${String(stderr).trim()}`,
+        error ? `exit: ${error.code ?? ''} ${error.signal ?? ''} ${error.killed ? '(timed out)' : ''}` : 'exit: 0', `result: ${result.message}`].filter(Boolean).join('\n'), logsDir);
+      if (!result.ok) pythonChecks.delete(key);
+      resolve({ ...result, report });
+    });
   });
+  pythonChecks.set(key, pending);
+  return pending;
 }
 
 ipcMain.handle('state', () => ({
@@ -613,10 +671,8 @@ ipcMain.handle('check', async (_event, values) => {
       results.indexDir = files ? { ok: true, message: `${files} index files found.` } : { ok: false, message: 'No index-*.fits files here: wide-field solving will not work.' };
     }
   }
-  if (values.pythonPath) {
-    const python = await runCheck(values.pythonPath, ['-c', 'import numpy, scipy, astropy, ccdproc, photutils, astroscrappy, specutils, specreduce, astroquery, matplotlib; print("numpy", numpy.__version__, "astropy", astropy.__version__, "ccdproc", ccdproc.__version__)']);
-    results.pythonPath = python.ok ? { ok: true, message: `Ready (${python.output}).` } : { ok: false, message: `Missing analysis packages: ${python.output.split('\n').pop()}` };
-  }
+  // Started first: the first import after installing can take a while.
+  const pythonCheck = values.pythonPath ? checkAnalysisPython(values.pythonPath, values.logsDir) : null;
   if (values.hotpantsDir) {
     const binary = path.join(values.hotpantsDir, isWindows ? 'hotpants.exe' : 'hotpants');
     results.hotpantsDir = fs.existsSync(binary) ? { ok: true, message: 'HOTPANTS found.' } : { ok: false, message: 'hotpants was not found in this folder: transient search will be unavailable.' };
@@ -624,6 +680,10 @@ ipcMain.handle('check', async (_event, values) => {
   const port = Number(values.port);
   if (port && !(state.child && Number(state.values.port) === port)) {
     results.port = (await portInUse(port, values.host)) ? { ok: false, message: `Port ${port} is in use by another program.` } : { ok: true, message: 'Free.' };
+  }
+  if (pythonCheck) {
+    const { ok, message } = await pythonCheck;
+    results.pythonPath = { ok, message };
   }
   return results;
 });

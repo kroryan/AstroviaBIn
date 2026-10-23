@@ -48,6 +48,19 @@ MSG
   exit 1
 fi
 
+# Import every analysis package once, so a broken installation is reported now and not at the first
+# analysis. The report (versions, import times, full errors) goes to /var/log/astroviabin-install.log.
+INSTALL_LOG=/var/log/astroviabin-install.log
+echo "AstroviaBin: checking the analysis tools (NumPy, SciPy, Astropy, CCDProc, Photutils, astroscrappy...)"
+{ echo "===== $(date -u +%Y-%m-%dT%H:%M:%SZ) AstroviaBin installed in $INSTALL_DIR ($(uname -srm))"; } >> "$INSTALL_LOG" 2>/dev/null || INSTALL_LOG=/dev/null
+if "$INSTALL_DIR/python/bin/python3" "$INSTALL_DIR/resources/server/tools/scripts/check_analysis_env.py" \
+    --ppxf "$INSTALL_DIR/resources/optional-ppxf" --log "$INSTALL_LOG"; then
+  echo "AstroviaBin: analysis tools OK"
+else
+  # Not fatal: the library works without them; the setup window and the server log say the same.
+  echo "AstroviaBin: WARNING: the analysis tools did not pass the installation check; see $INSTALL_LOG" >&2
+fi
+
 # Upgrades: services that are running restart on the new version (try-restart leaves stopped ones alone;
 # every start makes a verified database backup first).
 getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 { print $1 ":" $3 }' | while IFS=: read -r name uid; do

@@ -48,10 +48,24 @@ caches. `sudo apt purge astroviabin` also removes each user's AstroviaBin settin
 the saved password) and the regenerable caches (thumbnails, zoom tiles, FITS previews).
 Databases, backups, photos, FITS, analyses and sidecars are never deleted.
 
+## Diagnostics
+
+Both installers import every analysis package once after installing (`check_analysis_env.py`)
+and write the result, with versions, import times and full errors, to
+`%LOCALAPPDATA%\AstroviaBin\logs\install.log` (Windows; each step is also listed under
+"Show details") or `/var/log/astroviabin-install.log` (Linux). The tray menu opens the server log
+and the diagnostics log (`desktop.log`: setup checks and the analysis Python, including any
+missing Windows DLL). To check a Python by hand:
+
+```sh
+/opt/AstroviaBin/resources/python/bin/python3 /opt/AstroviaBin/resources/server/tools/scripts/check_analysis_env.py
+```
+
 ## Windows `.exe` and `.msix`
 
 On Linux, `cd desktop && npm ci && npm run dist:win` stages the Windows server (Node, embedded
-Python with the CCDProc packages, HOTPANTS cross-compiled with MinGW), creates the NSIS installer
+Python with the CCDProc packages, precompiled, and Microsoft's redistributable Visual C++ runtime
+that astroscrappy and scikit-image need; HOTPANTS cross-compiled with MinGW), creates the NSIS installer
 (`.exe`) and then runs `scripts/build-msix.mjs`, which builds the `.msix` from `out/win-unpacked`
 with Microsoft's open-source MSIX Packaging SDK (`makemsix`, pinned and built in Docker from
 `packaging/makemsix.Dockerfile`), signs it with `osslsigncode` and validates it (the signature

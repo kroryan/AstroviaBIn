@@ -146,6 +146,7 @@ export async function startSpectroscopy(imageId: number, request: SpectroscopyRe
       if (code === 0 && message.ok) {
         await writeJson(path.join(directory, 'report.json'), { ...report, status: 'complete', completedAt: new Date().toISOString() });
       } else {
+        console.error(`[spectroscopy] analysis ${runId} (${analysisPython()}) exited with code ${code}:\n${errors.slice(-20_000)}`);
         const missing = /No module named '?([\w.]+)/.exec(errors);
         const reason = message.error || (missing ? `The analysis Python lacks the "${missing[1]}" package` : errors.trim().split('\n').at(-1)) || `Spectroscopy exited with code ${code}`;
         await writeJson(path.join(directory, 'report.json'), { ...report, status: 'failed', completedAt: new Date().toISOString(), error: reason });

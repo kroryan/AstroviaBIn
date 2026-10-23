@@ -59,6 +59,7 @@ The `.deb` and the Windows installer contain a private Python with these package
 | CFITSIO (NASA HEASARC) | Permissive NASA/GSFC license | Linked into HOTPANTS on Windows, with its license in `bin/CFITSIO-LICENSE.txt`. On Linux the system package `libcfitsio10` is used and not redistributed |
 | CPython 3.13.12 | PSF-2.0 (`python/lib/python3.13/LICENSE.txt`, or `python\LICENSE.txt` on Windows) | Runs the analysis scripts |
 | python-build-standalone 20260325 (Linux) | **MPL-2.0** for its build files; includes statically linked libraries | The Python runtime of the `.deb` |
+| Microsoft Visual C++ runtime 14.44.35112 (Windows: `vcomp140.dll`, `msvcp140*.dll`, `concrt140.dll`) | Microsoft Visual Studio 2022 "Distributable Code" (REDIST list), unmodified Microsoft-signed files (`licenses/third-party/msvc-runtime/`) | OpenMP and C++ runtime of astroscrappy, scikit-image and Matplotlib next to the embedded `python.exe`; taken from the pinned `msvc-runtime` wheel on PyPI |
 
 The libraries inside python-build-standalone are OpenSSL, SQLite, libffi, xz/liblzma, zlib, bzip2, libedit, ncurses, mpdecimal, expat, Tcl/Tk, libX11/libxcb, libuuid and Berkeley DB. Every one of their license texts is in `licenses/third-party/python-build-standalone/`.
 

@@ -14,7 +14,7 @@ if (!inventoryPath || !textsPath) {
   process.exit(2);
 }
 
-const tree = JSON.parse(execFileSync('npm', ['ls', '--omit=dev', '--all', '--json', '--long'], { cwd: repo, maxBuffer: 64 * 1024 * 1024 }).toString());
+const tree = JSON.parse(execFileSync('npm', ['ls', '--omit=dev', '--all', '--json', '--long'], { cwd: repo, maxBuffer: 64 * 1024 * 1024, shell: process.platform === 'win32' }).toString()); // npm is a .cmd on Windows
 const packages = new Map();
 const walk = node => {
   for (const [name, child] of Object.entries(node.dependencies || {})) {
